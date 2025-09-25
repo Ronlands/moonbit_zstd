@@ -1,0 +1,9 @@
+{
+  "name": "Ronlands/moonbit_zstd",
+  "version": "0.1.0",
+  "readme": "README.md",
+  "repository": "https://github.com/Ronlands/moonbit_zstd",
+  "license": "Apache-2.0",
+  "keywords": ["zstd", "compression", "decompression", "rfc8878"],
+  "description": "A pure Moonbit implementation of Zstandard (ZSTD) compression algorithm following RFC 8878"
+}
