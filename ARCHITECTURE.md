@@ -121,3 +121,4 @@ The modular architecture allows for:
 - Specialized block types
 - Performance optimizations
 - Streaming enhancements
+

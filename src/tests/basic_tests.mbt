@@ -1,13 +1,13 @@
 /// Basic tests for ZSTD implementation
 /// Tests compression and decompression functionality
 
-import moonbit_zstd::{compress, decompress, is_zstd_data, get_compression_ratio}
+// Using functions from the API module
 
 /// Test basic compression and decompression
 pub fn test_basic_compression() -> Bool {
   let original = "Hello, World!".to_bytes()
-  let compressed = compress(original)
-  let decompressed = decompress(compressed)
+  let compressed = @zstd.compress(original)
+  let decompressed = @zstd.decompress(compressed)
   
   // Check that decompressed data matches original
   original == decompressed
@@ -16,8 +16,8 @@ pub fn test_basic_compression() -> Bool {
 /// Test compression ratio
 pub fn test_compression_ratio() -> Bool {
   let original = "Hello, World!".to_bytes()
-  let compressed = compress(original)
-  let ratio = get_compression_ratio(original.length(), compressed.length())
+  let compressed = @zstd.compress(original)
+  let ratio = @zstd.get_compression_ratio(original.length(), compressed.length())
   
   // Compression ratio should be reasonable (not negative)
   ratio >= 0.0
@@ -26,17 +26,17 @@ pub fn test_compression_ratio() -> Bool {
 /// Test ZSTD data detection
 pub fn test_zstd_detection() -> Bool {
   let original = "Hello, World!".to_bytes()
-  let compressed = compress(original)
+  let compressed = @zstd.compress(original)
   
   // Compressed data should be detected as ZSTD
-  is_zstd_data(compressed)
+  @zstd.is_zstd_data(compressed)
 }
 
 /// Test with empty data
 pub fn test_empty_data() -> Bool {
-  let original = Bytes::new()
-  let compressed = compress(original)
-  let decompressed = decompress(compressed)
+  let original = b""
+  let compressed = @zstd.compress(original)
+  let decompressed = @zstd.decompress(compressed)
   
   original == decompressed
 }
@@ -44,21 +44,22 @@ pub fn test_empty_data() -> Bool {
 /// Test with repeated data (should compress well)
 pub fn test_repeated_data() -> Bool {
   let original = "AAAAA".to_bytes()
-  let compressed = compress(original)
-  let decompressed = decompress(compressed)
+  let compressed = @zstd.compress(original)
+  let decompressed = @zstd.decompress(compressed)
   
   original == decompressed
 }
 
 /// Test with large data
 pub fn test_large_data() -> Bool {
-  let mut original = Bytes::new()
+  let mut data_array : Array[Byte] = []
   for i = 0; i < 1000; i = i + 1 {
-    original = original.append((i % 256).to_byte())
+    data_array = data_array + [(i % 256).to_byte()]
   }
+  let original = Bytes::from_array(data_array)
   
-  let compressed = compress(original)
-  let decompressed = decompress(compressed)
+  let compressed = @zstd.compress(original)
+  let decompressed = @zstd.decompress(compressed)
   
   original == decompressed
 }
@@ -88,3 +89,4 @@ pub fn run_basic_tests() -> Bool {
   println("Basic tests: " + passed.to_string() + " passed, " + failed.to_string() + " failed")
   failed == 0
 }
+

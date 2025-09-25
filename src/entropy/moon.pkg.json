@@ -1,0 +1,8 @@
+{
+  "import": [
+    {
+      "path": "Ronlands/moonbit_zstd/core",
+      "alias": "core"
+    }
+  ]
+}

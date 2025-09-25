@@ -3,20 +3,15 @@
 
 /// Bit stream reader
 pub struct BitStream {
-  data : Bytes
+  data : Array[Int]
   pos : Int
   bit_pos : Int
-  bits : UInt64
-}
+  bits : Int
+} derive(Show)
 
 /// Create a new bit stream
-pub fn new_bitstream(data : Bytes) -> BitStream {
-  BitStream {
-    data: data
-    pos: 0
-    bit_pos: 0
-    bits: 0
-  }
+pub fn new_bitstream(data : Array[Int]) -> BitStream {
+  { data: data, pos: 0, bit_pos: 0, bits: 0 }
 }
 
 /// Read a single bit
@@ -24,26 +19,26 @@ pub fn read_bit(stream : BitStream) -> (BitStream, Int) {
   if stream.bit_pos == 0 {
     // Load next byte
     let new_bits = if stream.pos < stream.data.length() {
-      stream.data[stream.pos].to_int().to_uint64()
+      stream.data[stream.pos]
     } else {
-      0u64
+      0
     }
-    let new_stream = BitStream {
-      data: stream.data
-      pos: stream.pos + 1
-      bit_pos: 8
-      bits: new_bits
+    let new_stream = { 
+      data: stream.data, 
+      pos: stream.pos + 1, 
+      bit_pos: 8, 
+      bits: new_bits 
     }
-    (new_stream, (new_bits & 1u64).to_int())
+    (new_stream, new_bits & 1)
   } else {
-    let bit = (stream.bits >> (stream.bit_pos - 1)) & 1u64
-    let new_stream = BitStream {
-      data: stream.data
-      pos: stream.pos
-      bit_pos: stream.bit_pos - 1
-      bits: stream.bits
+    let bit = (stream.bits >> (stream.bit_pos - 1)) & 1
+    let new_stream = { 
+      data: stream.data, 
+      pos: stream.pos, 
+      bit_pos: stream.bit_pos - 1, 
+      bits: stream.bits 
     }
-    (new_stream, bit.to_int())
+    (new_stream, bit)
   }
 }
 
@@ -71,15 +66,15 @@ pub fn read_byte(stream : BitStream) -> (BitStream, Int) {
   if stream.bit_pos == 0 {
     // Aligned read
     let byte = if stream.pos < stream.data.length() {
-      stream.data[stream.pos].to_int()
+      stream.data[stream.pos]
     } else {
       0
     }
-    let new_stream = BitStream {
-      data: stream.data
-      pos: stream.pos + 1
-      bit_pos: 0
-      bits: 0
+    let new_stream = { 
+      data: stream.data, 
+      pos: stream.pos + 1, 
+      bit_pos: 0, 
+      bits: 0 
     }
     (new_stream, byte)
   } else {
@@ -89,22 +84,23 @@ pub fn read_byte(stream : BitStream) -> (BitStream, Int) {
   }
 }
 
-/// Read multiple bytes
-pub fn read_bytes(stream : BitStream, count : Int) -> (BitStream, Bytes) {
-  let mut result = Bytes::new()
-  let mut current_stream = stream
-  
-  for i = 0; i < count; i = i + 1 {
-    let (new_stream, byte) = read_byte(current_stream)
-    result = result.append(byte.to_byte())
-    current_stream = new_stream
-  }
-  (current_stream, result)
-}
-
 /// Check if we have reached the end of the stream
 pub fn is_eof(stream : BitStream) -> Bool {
   stream.pos >= stream.data.length()
+}
+
+/// Read multiple bytes from the stream
+pub fn read_bytes(stream : BitStream, num_bytes : Int) -> (BitStream, Bytes) {
+  let mut result : Array[Byte] = []
+  let mut current_stream = stream
+  
+  for i = 0; i < num_bytes; i = i + 1 {
+    let (new_stream, byte) = read_byte(current_stream)
+    result = result + [byte.to_byte()]
+    current_stream = new_stream
+  }
+  
+  (current_stream, Bytes::from_array(result))
 }
 
 /// Get current position in bytes

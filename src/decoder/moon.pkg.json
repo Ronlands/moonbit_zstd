@@ -1,0 +1,12 @@
+{
+  "import": [
+    {
+      "path": "Ronlands/moonbit_zstd/core",
+      "alias": "core"
+    },
+    {
+      "path": "Ronlands/moonbit_zstd/entropy",
+      "alias": "entropy"
+    }
+  ]
+}
