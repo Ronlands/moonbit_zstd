@@ -58,25 +58,25 @@ fn run_golden_decompression_tests() -> Array[TestResult] {
   let test_cases = [
     {
       name: "empty-block",
-      file_path: "test-data/golden-decompression/empty-block.zst",
+      file_path: "src/test-data/golden-decompression/empty-block.zst",
       description: "Empty data block - minimal valid ZSTD frame",
       should_succeed: true
     },
     {
       name: "rle-first-block", 
-      file_path: "test-data/golden-decompression/rle-first-block.zst",
+      file_path: "src/test-data/golden-decompression/rle-first-block.zst",
       description: "RLE block - run length encoding",
       should_succeed: true
     },
     {
       name: "zeroSeq_2B",
-      file_path: "test-data/golden-decompression/zeroSeq_2B.zst",
+      file_path: "src/test-data/golden-decompression/zeroSeq_2B.zst",
       description: "Zero sequence - 2 bytes of zero data",
       should_succeed: true
     },
     {
       name: "block-128k",
-      file_path: "test-data/golden-decompression/block-128k.zst", 
+      file_path: "src/test-data/golden-decompression/block-128k.zst", 
       description: "Large data block - 128KB data",
       should_succeed: true
     }
@@ -90,19 +90,19 @@ fn run_golden_error_tests() -> Array[TestResult] {
   let test_cases = [
     {
       name: "off0.bin",
-      file_path: "test-data/golden-decompression-errors/off0.bin.zst",
+      file_path: "src/test-data/golden-decompression-errors/off0.bin.zst",
       description: "Invalid offset - should detect error",
       should_succeed: false
     },
     {
       name: "truncated_huff_state",
-      file_path: "test-data/golden-decompression-errors/truncated_huff_state.zst",
+      file_path: "src/test-data/golden-decompression-errors/truncated_huff_state.zst",
       description: "Truncated Huffman state - should detect error",
       should_succeed: false
     },
     {
       name: "zeroSeq_extraneous",
-      file_path: "test-data/golden-decompression-errors/zeroSeq_extraneous.zst",
+      file_path: "src/test-data/golden-decompression-errors/zeroSeq_extraneous.zst",
       description: "Extraneous sequence data - should detect error",
       should_succeed: false
     }
@@ -273,61 +273,61 @@ fn run_new_data_tests() -> Array[TestResult] {
   let test_cases = [
     {
       name: "empty",
-      file_path: "test-data/empty.txt.zst",
+      file_path: "src/test-data/text/empty.txt.zst",
       description: "Empty text file - minimal content",
       should_succeed: true
     },
     {
       name: "single_char",
-      file_path: "test-data/single_char.txt.zst",
+      file_path: "src/test-data/text/single_char.txt.zst",
       description: "Single character file",
       should_succeed: true
     },
     {
       name: "short",
-      file_path: "test-data/short.zst",
+      file_path: "src/test-data/text/short.txt.zst",
       description: "Short content file",
       should_succeed: true
     },
     {
       name: "long",
-      file_path: "test-data/long.txt.zst",
+      file_path: "src/test-data/text/long.txt.zst",
       description: "Long text content",
       should_succeed: true
     },
     {
       name: "repeated",
-      file_path: "test-data/repeated.txt.zst",
+      file_path: "src/test-data/text/repeated.txt.zst",
       description: "Repeated character patterns",
       should_succeed: true
     },
     {
       name: "random",
-      file_path: "test-data/random.txt.zst",
+      file_path: "src/test-data/text/random.txt.zst",
       description: "Random data content",
       should_succeed: true
     },
     {
       name: "with_nulls",
-      file_path: "test-data/with_nulls.txt.zst",
+      file_path: "src/test-data/text/with_nulls.txt.zst",
       description: "Content with null bytes",
       should_succeed: true
     },
     {
       name: "special_chars",
-      file_path: "test-data/special_chars.txt.zst",
+      file_path: "src/test-data/text/special_chars.txt.zst",
       description: "Special characters content",
       should_succeed: true
     },
     {
       name: "numbers",
-      file_path: "test-data/numbers.txt.zst",
+      file_path: "src/test-data/text/numbers.txt.zst",
       description: "Numeric content",
       should_succeed: true
     },
     {
       name: "json",
-      file_path: "test-data/json.txt.zst",
+      file_path: "src/test-data/text/json.txt.zst",
       description: "JSON format content",
       should_succeed: true
     }

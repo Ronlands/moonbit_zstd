@@ -57,11 +57,28 @@ src/
 ├── cmd/                   # Command-line tools / 命令行工具
 │   ├── main.mbt          # Test program entry point / 测试程序入口
 │   └── moon.pkg.json     # Main program package configuration / 主程序包配置
-├── test-data/             # Official test data / 官方测试数据
-│   ├── golden-decompression/        # Standard decompression tests / 标准解压缩测试
-│   ├── golden-decompression-errors/ # Error detection tests / 错误检测测试
-│   ├── golden-compression/          # Compression tests / 压缩测试
-│   └── [user-added files]          # User-contributed test files / 用户新增测试文件
+├── test-data/             # Test data directory / 测试数据目录
+│   ├── golden-decompression/        # Official standard decompression tests / 官方标准解压缩测试
+│   │   ├── empty-block.zst         # Minimal valid ZSTD frame / 最小有效 ZSTD 帧
+│   │   ├── rle-first-block.zst     # RLE compressed data / RLE 压缩数据
+│   │   ├── zeroSeq_2B.zst          # Zero sequence data / 零序列数据
+│   │   └── block-128k.zst          # Large data block (128KB) / 大数据块 (128KB)
+│   ├── golden-decompression-errors/ # Official error detection tests / 官方错误检测测试
+│   │   ├── off0.bin.zst            # Invalid offset detection / 无效偏移检测
+│   │   ├── truncated_huff_state.zst # Truncated Huffman state / 截断 Huffman 状态
+│   │   └── zeroSeq_extraneous.zst  # Extraneous sequence data / 多余序列数据
+│   ├── golden-compression/          # Official compression tests / 官方压缩测试
+│   └── text/                       # User-contributed text test files / 用户新增文本测试文件
+│       ├── empty.txt.zst           # Empty text file / 空文本文件
+│       ├── single_char.txt.zst     # Single character file / 单字符文件
+│       ├── short.txt.zst           # Short content file / 短内容文件
+│       ├── long.txt.zst            # Long text content / 长文本内容
+│       ├── repeated.txt.zst        # Repeated character patterns / 重复字符模式
+│       ├── random.txt.zst          # Random data content / 随机数据内容
+│       ├── with_nulls.txt.zst      # Content with null bytes / 包含null字节
+│       ├── special_chars.txt.zst   # Special characters content / 特殊字符内容
+│       ├── numbers.txt.zst         # Numeric content / 数字内容
+│       └── json.txt.zst            # JSON format content / JSON格式内容
 └── tests/                 # Test modules / 测试模块
     ├── basic_tests.mbt    # Basic functionality tests / 基础功能测试
     └── compatibility_tests.mbt # Compatibility tests / 兼容性测试
@@ -191,27 +208,27 @@ Our test suite includes:
 我们的测试套件包含：
 
 #### ✅ **Golden Decompression Tests** (100% Pass Rate / 100% 通过)
-- `empty-block.zst` - Minimal valid ZSTD frame / 最小有效 ZSTD 帧
-- `rle-first-block.zst` - RLE compressed data / RLE 压缩数据
-- `zeroSeq_2B.zst` - Zero sequence data / 零序列数据
-- `block-128k.zst` - Large data block (128KB) / 大数据块 (128KB)
+- `src/test-data/golden-decompression/empty-block.zst` - Minimal valid ZSTD frame / 最小有效 ZSTD 帧
+- `src/test-data/golden-decompression/rle-first-block.zst` - RLE compressed data / RLE 压缩数据
+- `src/test-data/golden-decompression/zeroSeq_2B.zst` - Zero sequence data / 零序列数据
+- `src/test-data/golden-decompression/block-128k.zst` - Large data block (128KB) / 大数据块 (128KB)
 
 #### ✅ **New Test Data Files** (90% Pass Rate / 90% 通过)
-- `empty.txt.zst` - Empty text file / 空文本文件
-- `single_char.txt.zst` - Single character file / 单字符文件
-- `short.zst` - Short content file / 短内容文件
-- `long.txt.zst` - Long text content / 长文本内容
-- `repeated.txt.zst` - Repeated character patterns / 重复字符模式
-- `with_nulls.txt.zst` - Content with null bytes / 包含null字节
-- `special_chars.txt.zst` - Special characters content / 特殊字符内容
-- `numbers.txt.zst` - Numeric content / 数字内容
-- `json.txt.zst` - JSON format content / JSON格式内容
-- `random.txt.zst` - Random data content (detected as corrupted) / 随机数据内容 (检测为损坏)
+- `src/test-data/text/empty.txt.zst` - Empty text file / 空文本文件
+- `src/test-data/text/single_char.txt.zst` - Single character file / 单字符文件
+- `src/test-data/text/short.txt.zst` - Short content file / 短内容文件
+- `src/test-data/text/long.txt.zst` - Long text content / 长文本内容
+- `src/test-data/text/repeated.txt.zst` - Repeated character patterns / 重复字符模式
+- `src/test-data/text/with_nulls.txt.zst` - Content with null bytes / 包含null字节
+- `src/test-data/text/special_chars.txt.zst` - Special characters content / 特殊字符内容
+- `src/test-data/text/numbers.txt.zst` - Numeric content / 数字内容
+- `src/test-data/text/json.txt.zst` - JSON format content / JSON格式内容
+- `src/test-data/text/random.txt.zst` - Random data content (detected as corrupted) / 随机数据内容 (检测为损坏)
 
 #### ⚠️ **Error Detection Tests** (Partial Pass / 部分通过)
-- `off0.bin.zst` - Invalid offset detection / 无效偏移检测
-- `truncated_huff_state.zst` - Truncated Huffman state / 截断 Huffman 状态
-- `zeroSeq_extraneous.zst` - Extraneous sequence data / 多余序列数据
+- `src/test-data/golden-decompression-errors/off0.bin.zst` - Invalid offset detection / 无效偏移检测
+- `src/test-data/golden-decompression-errors/truncated_huff_state.zst` - Truncated Huffman state / 截断 Huffman 状态
+- `src/test-data/golden-decompression-errors/zeroSeq_extraneous.zst` - Extraneous sequence data / 多余序列数据
 
 ## 📖 API 参考
 
