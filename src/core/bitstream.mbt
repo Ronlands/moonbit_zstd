@@ -1,143 +1,60 @@
-/// Bit stream reader for ZSTD decompression
-/// Handles bit-level reading operations required for entropy decoding
+/// Basic bitstream operations for ZSTD
+/// Simplified implementation for basic functionality
 
-/// Bit stream reader
+/// BitStream structure
 pub struct BitStream {
-  data : Array[Int]
-  pos : Int
-  bit_pos : Int
-  bits : Int
-} derive(Show)
-
-/// Create a new bit stream from bytes
-pub fn new_bitstream(data : Bytes) -> BitStream {
-  let data_array = data.to_array().map(fn(b) { b.to_int() })
-  { data: data_array, pos: 0, bit_pos: 0, bits: 0 }
+  data: Bytes
+  position: Int
 }
 
-/// Read a single bit
-pub fn read_bit(stream : BitStream) -> (BitStream, Int) {
-  if stream.bit_pos == 0 {
-    // Load next byte
-    let new_bits = if stream.pos < stream.data.length() {
-      stream.data[stream.pos]
-    } else {
-      0
-    }
-    let new_stream = { 
-      data: stream.data, 
-      pos: stream.pos + 1, 
-      bit_pos: 8, 
-      bits: new_bits 
-    }
-    (new_stream, new_bits & 1)
+/// Create new bitstream
+pub fn new_bitstream(data: Bytes) -> BitStream {
+  { data: data, position: 0 }
+}
+
+/// Read bytes from stream
+pub fn read_bytes(stream: BitStream, count: Int) -> (BitStream, Bytes) {
+  let end_pos = stream.position + count
+  if end_pos > stream.data.length() {
+    // Return empty bytes if not enough data
+    (stream, b"")
   } else {
-    let bit = (stream.bits >> (stream.bit_pos - 1)) & 1
-    let new_stream = { 
-      data: stream.data, 
-      pos: stream.pos, 
-      bit_pos: stream.bit_pos - 1, 
-      bits: stream.bits 
+    let mut result_bytes: Array[Byte] = []
+    for i = stream.position; i < end_pos; i = i + 1 {
+      result_bytes = result_bytes + [stream.data[i]]
     }
-    (new_stream, bit)
+    let new_stream = { data: stream.data, position: end_pos }
+    (new_stream, Bytes::from_array(result_bytes))
   }
 }
 
-/// Read multiple bits (up to 32)
-pub fn read_bits(stream : BitStream, num_bits : Int) -> (BitStream, Int) {
-  if num_bits == 0 {
-    (stream, 0)
+/// Read single byte from stream
+pub fn read_byte(stream: BitStream) -> (BitStream, Byte) {
+  if stream.position >= stream.data.length() {
+    (stream, b'\x00')
   } else {
-    let mut result = 0
-    let mut current_stream = stream
-    let mut remaining = num_bits
-    
-    while remaining > 0 {
-      let (new_stream, bit) = read_bit(current_stream)
-      result = (result << 1) | bit
-      current_stream = new_stream
-      remaining = remaining - 1
-    }
-    (current_stream, result)
+    let byte_val = stream.data[stream.position]
+    let new_stream = { data: stream.data, position: stream.position + 1 }
+    (new_stream, byte_val)
   }
 }
 
-/// Read a byte from the stream
-pub fn read_byte(stream : BitStream) -> (BitStream, Int) {
-  if stream.bit_pos == 0 {
-    // Aligned read
-    let byte = if stream.pos < stream.data.length() {
-      stream.data[stream.pos]
-    } else {
-      0
-    }
-    let new_stream = { 
-      data: stream.data, 
-      pos: stream.pos + 1, 
-      bit_pos: 0, 
-      bits: 0 
-    }
-    (new_stream, byte)
-  } else {
-    // Unaligned read - read 8 bits
-    let (new_stream, bits) = read_bits(stream, 8)
-    (new_stream, bits)
-  }
-}
-
-/// Check if we have reached the end of the stream
-pub fn is_eof(stream : BitStream) -> Bool {
-  stream.pos >= stream.data.length()
-}
-
-/// Read multiple bytes from the stream
-pub fn read_bytes(stream : BitStream, num_bytes : Int) -> (BitStream, Bytes) {
-  let mut result : Array[Byte] = []
-  let mut current_stream = stream
-  
-  for i = 0; i < num_bytes; i = i + 1 {
-    let (new_stream, byte) = read_byte(current_stream)
-    result = result + [byte.to_byte()]
-    current_stream = new_stream
-  }
-  
-  (current_stream, Bytes::from_array(result))
-}
-
-/// Read little-endian integer of specified bytes
-pub fn read_le_int(stream : BitStream, num_bytes : Int) -> (BitStream, Int) {
+/// Read little-endian integer
+pub fn read_le_int(stream: BitStream, bytes: Int) -> (BitStream, Int) {
+  let (new_stream, data) = read_bytes(stream, bytes)
   let mut result = 0
-  let mut current_stream = stream
-  
-  for i = 0; i < num_bytes; i = i + 1 {
-    let (new_stream, byte) = read_byte(current_stream)
-    result = result | (byte << (i * 8))
-    current_stream = new_stream
+  for i = 0; i < data.length() && i < bytes; i = i + 1 {
+    result = result | (data[i].to_int() << (i * 8))
   }
-  
-  (current_stream, result)
+  (new_stream, result)
 }
 
-/// Peek at next byte without advancing the stream
-pub fn peek_byte(stream : BitStream) -> Int {
-  if stream.bit_pos == 0 && stream.pos < stream.data.length() {
-    stream.data[stream.pos]
+/// Skip bytes in stream
+pub fn skip_bytes(stream: BitStream, count: Int) -> BitStream {
+  let new_pos = stream.position + count
+  if new_pos > stream.data.length() {
+    { data: stream.data, position: stream.data.length() }
   } else {
-    0
+    { data: stream.data, position: new_pos }
   }
-}
-
-/// Skip bytes in the stream
-pub fn skip_bytes(stream : BitStream, num_bytes : Int) -> BitStream {
-  { 
-    data: stream.data, 
-    pos: stream.pos + num_bytes, 
-    bit_pos: 0, 
-    bits: 0 
-  }
-}
-
-/// Get current position in bytes
-pub fn get_position(stream : BitStream) -> Int {
-  stream.pos
 }

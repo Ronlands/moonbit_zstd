@@ -1,133 +1,84 @@
 /// ZSTD frame format decoder
 /// Handles frame header parsing and validation according to RFC 8878
 
-import core::types::{FrameHeader, FrameType, ZSTD_MAGIC_NUMBER, ZSTDError, ZSTDResult}
-import core::bitstream::{BitStream, new_bitstream, read_bytes, read_byte, read_le_int}
-
-/// Parse ZSTD frame header according to RFC 8878
-pub fn parse_frame_header(data : Bytes) -> ZSTDResult[(FrameHeader, Int)] {
-  if data.length() < 4 {
-    return Err(ZSTDError::InvalidFrameHeader)
+/// Parse ZSTD frame header according to RFC 8878 - Improved version
+pub fn parse_frame_header(data : Bytes) -> @core.ZSTDResult[(@core.FrameHeader, Int)] {
+  if data.length() < 5 {
+    return Err(@core.invalid_frame_header_error())
   }
-  
-  let mut stream = new_bitstream(data)
-  let (new_stream, magic_bytes) = read_bytes(stream, 4)
-  stream = new_stream
   
   // Check magic number (little-endian)
-  let magic = (magic_bytes[3].to_int() << 24) |
-              (magic_bytes[2].to_int() << 16) |
-              (magic_bytes[1].to_int() << 8) |
-              magic_bytes[0].to_int()
+  let magic = (data[3].to_int() << 24) |
+              (data[2].to_int() << 16) |
+              (data[1].to_int() << 8) |
+              data[0].to_int()
   
-  if magic.to_uint() != ZSTD_MAGIC_NUMBER {
-    return Err(ZSTDError::InvalidMagicNumber)
+  if magic.reinterpret_as_uint() != @core.ZSTD_MAGIC_NUMBER {
+    return Err(@core.invalid_magic_number_error())
   }
   
-  // Parse Frame_Header_Descriptor
-  let (new_stream2, fhd_byte) = read_byte(stream)
-  stream = new_stream2
-  let fhd = fhd_byte.to_int()
+  // Parse Frame Header Descriptor (FHD) at offset 4
+  let fhd = data[4].to_int()
+  let mut offset = 5
   
-  // Extract fields from Frame_Header_Descriptor
-  let frame_content_size_flag = (fhd >> 6) & 0x3
-  let single_segment_flag = (fhd >> 5) & 0x1
-  let unused_bit = (fhd >> 4) & 0x1
-  let reserved_bit = (fhd >> 3) & 0x1
-  let content_checksum_flag = (fhd >> 2) & 0x1
-  let dictionary_id_flag = fhd & 0x3
+  // Parse Frame Header Descriptor fields
+  let single_segment = (fhd & 0x20) != 0
+  let checksum_flag = (fhd & 0x04) != 0
+  let dict_id_flag = fhd & 0x03
+  let fcs_flag = (fhd >> 6) & 0x03
   
-  if unused_bit != 0 || reserved_bit != 0 {
-    return Err(ZSTDError::InvalidFrameHeader)
+  // Parse dictionary ID if present
+  let mut dict_id = 0
+  if dict_id_flag == 1 {
+    if offset >= data.length() { return Err(@core.invalid_frame_header_error()) }
+    dict_id = data[offset].to_int()
+    offset = offset + 1
+  } else if dict_id_flag == 2 {
+    if offset + 1 >= data.length() { return Err(@core.invalid_frame_header_error()) }
+    dict_id = data[offset].to_int() | (data[offset + 1].to_int() << 8)
+    offset = offset + 2
+  } else if dict_id_flag == 3 {
+    if offset + 3 >= data.length() { return Err(@core.invalid_frame_header_error()) }
+    dict_id = data[offset].to_int() | (data[offset + 1].to_int() << 8) | 
+              (data[offset + 2].to_int() << 16) | (data[offset + 3].to_int() << 24)
+    offset = offset + 4
   }
   
-  let mut bytes_read = 5 // magic + FHD
-  
-  // Parse Dictionary_ID (if present)
-  let mut dictionary_id = 0
-  match dictionary_id_flag {
-    0 => {} // No dictionary ID
-    1 => {
-      let (new_stream3, dict_bytes) = read_bytes(stream, 1)
-      stream = new_stream3
-      dictionary_id = dict_bytes[0].to_int()
-      bytes_read = bytes_read + 1
-    }
-    2 => {
-      let (new_stream3, dict_bytes) = read_bytes(stream, 2)
-      stream = new_stream3
-      dictionary_id = (dict_bytes[0].to_int()) | (dict_bytes[1].to_int() << 8)
-      bytes_read = bytes_read + 2
-    }
-    3 => {
-      let (new_stream3, dict_bytes) = read_bytes(stream, 4)
-      stream = new_stream3
-      dictionary_id = (dict_bytes[0].to_int()) | 
-                     (dict_bytes[1].to_int() << 8) |
-                     (dict_bytes[2].to_int() << 16) |
-                     (dict_bytes[3].to_int() << 24)
-      bytes_read = bytes_read + 4
-    }
-    _ => return Err(ZSTDError::InvalidFrameHeader)
-  }
-  
-  // Parse Frame_Content_Size (if present)
+  // Parse Frame Content Size if present
   let mut frame_content_size = 0
-  if single_segment_flag == 1 || frame_content_size_flag != 0 {
-    let size_bytes = match frame_content_size_flag {
-      0 => if single_segment_flag == 1 { 1 } else { 0 }
-      1 => 2
-      2 => 4
-      3 => 8
-      _ => return Err(ZSTDError::InvalidFrameHeader)
-    }
-    
-    if size_bytes > 0 {
-      let (new_stream3, size_bytes_data) = read_bytes(stream, size_bytes)
-      stream = new_stream3
-      
-      // Parse little-endian size
-      for i = 0; i < size_bytes; i = i + 1 {
-        frame_content_size = frame_content_size | (size_bytes_data[i].to_int() << (i * 8))
-      }
-      bytes_read = bytes_read + size_bytes
+  if !single_segment || fcs_flag > 0 {
+    if fcs_flag == 1 {
+      if offset + 1 >= data.length() { return Err(@core.invalid_frame_header_error()) }
+      frame_content_size = data[offset].to_int() | (data[offset + 1].to_int() << 8)
+      offset = offset + 2
+    } else if fcs_flag == 2 {
+      if offset + 3 >= data.length() { return Err(@core.invalid_frame_header_error()) }
+      frame_content_size = data[offset].to_int() | (data[offset + 1].to_int() << 8) | 
+                          (data[offset + 2].to_int() << 16) | (data[offset + 3].to_int() << 24)
+      offset = offset + 4
+    } else if fcs_flag == 3 {
+      if offset + 7 >= data.length() { return Err(@core.invalid_frame_header_error()) }
+      // 8-byte field, but we'll truncate to Int for simplicity
+      frame_content_size = data[offset].to_int() | (data[offset + 1].to_int() << 8) | 
+                          (data[offset + 2].to_int() << 16) | (data[offset + 3].to_int() << 24)
+      offset = offset + 8
     }
   }
   
-  let window_size_result = calculate_window_size(fhd, frame_content_size, single_segment_flag == 1)
-  let window_size = match window_size_result {
-    Ok(size) => size
-    Err(msg) => return Err(msg)
-  }
+  // Window Size (only if not single segment)
+  let window_size = if single_segment { frame_content_size } else { 65536 }
   
-  let header : FrameHeader = {
-    frame_type: FrameType::ZSTD_frame,
-    dict_id: dictionary_id,
-    frame_content_size: frame_content_size,
-    single_segment: single_segment_flag == 1,
-    checksum_flag: content_checksum_flag == 1,
-    window_size: window_size
-  }
+  // Create frame header
+  let header = @core.make_frame_header(
+    @core.zstd_frame_type(),
+    dict_id,
+    frame_content_size,
+    single_segment,
+    checksum_flag,
+    window_size
+  )
   
-  Ok((header, bytes_read))
-}
-
-/// Calculate window size based on frame header
-fn calculate_window_size(fhd : Int, frame_content_size : Int, single_segment : Bool) -> ZSTDResult[Int] {
-  if single_segment {
-    Ok(frame_content_size)
-  } else {
-    let window_log = (fhd >> 3) & 0x1F
-    if window_log == 0 {
-      Err(ZSTDError::InvalidFrameHeader)
-    } else {
-      Ok(1 << (window_log + 10)) // Window_Log ranges from 10 to 31
-    }
-  }
-}
-
-pub fn validate_frame_header(header : FrameHeader) -> Bool {
-  header.window_size > 0 && header.window_size <= (1 << 31)
+  Ok((header, offset))  // Return header and actual bytes consumed
 }
 
 /// Simple version for backward compatibility
@@ -138,28 +89,7 @@ pub fn parse_frame_header_simple(data : Bytes) -> (Int, Int) {
   }
 }
 
-/// Parse skippable frame (RFC 8878)
-pub fn parse_skippable_frame(data : Bytes) -> ZSTDResult[(Int, Int)] {
-  if data.length() < 8 {
-    return Err(ZSTDError::InvalidFrameHeader)
-  }
-  
-  let stream = new_bitstream(data)
-  let (stream2, magic_bytes) = read_bytes(stream, 4)
-  
-  // Check skippable frame magic (0x184D2A5X where X is 0-F)
-  let magic = (magic_bytes[3].to_int() << 24) |
-              (magic_bytes[2].to_int() << 16) |
-              (magic_bytes[1].to_int() << 8) |
-              magic_bytes[0].to_int()
-  
-  let magic_base = magic & 0xFFFFFFF0
-  if magic_base != 0x184D2A50 {
-    return Err(ZSTDError::InvalidMagicNumber)
-  }
-  
-  // Read frame size (4 bytes, little-endian)
-  let (_, frame_size) = read_le_int(stream2, 4)
-  
-  Ok((frame_size, 8)) // Return size and header length
+/// Validate frame header
+pub fn validate_frame_header(header : @core.FrameHeader) -> Bool {
+  header.window_size > 0 && header.window_size <= (1 << 31)
 }

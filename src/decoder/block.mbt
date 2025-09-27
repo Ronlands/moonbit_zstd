@@ -1,422 +1,275 @@
 /// ZSTD block decoder
-/// Handles decoding of different ZSTD block types according to RFC 8878
+/// Handles block-level decompression operations based on RFC 8878
 
-import core::types::{BlockHeader, BlockType, Sequence, DecompressionContext, LiteralsHeader, LiteralsType, ZSTDError, ZSTDResult}
-import core::bitstream::{BitStream, new_bitstream, read_byte, read_bytes, read_bits, read_le_int}
-import entropy::fse::{FSEDecoder, new_fse_decoder, init_fse_state, fse_decode_symbol}
-import entropy::huffman::{HuffmanDecoder, new_huffman_decoder, decode_huffman_literals}
+/// Block header structure  
+pub struct BlockHeader {
+  block_type: @core.BlockType
+  block_size: Int  
+  last_block: Bool
+}
 
-/// Parse block header from bitstream
-pub fn parse_block_header(data : Bytes, offset : Int) -> ZSTDResult[(BlockHeader, Int)] {
+/// Literals section structure
+pub struct LiteralsSection {
+  literals_type: @core.LiteralsType
+  literals_size: Int
+  literals_data: Bytes
+}
+
+/// Parse block header from 3-byte block header
+pub fn parse_block_header(data : Bytes, offset : Int) -> @core.ZSTDResult[(BlockHeader, Int)] {
   if offset + 3 > data.length() {
-    return Err(ZSTDError::InvalidBlockHeader)
+    return Err(@core.insufficient_data_error())
   }
   
-  // Read 3 bytes for block header (little-endian)
-  let byte0 = data[offset].to_int()
-  let byte1 = data[offset + 1].to_int()
-  let byte2 = data[offset + 2].to_int()
+  let header_bytes = data[offset].to_int() |
+                    (data[offset + 1].to_int() << 8) |
+                    (data[offset + 2].to_int() << 16)
   
-  let header_int = byte0 | (byte1 << 8) | (byte2 << 16)
-  
-  let last_block = (header_int & 0x1) == 1
-  let block_type_int = (header_int >> 1) & 0x3
-  let block_size = header_int >> 3
+  let last_block = (header_bytes & 1) != 0
+  let block_type_int = (header_bytes >> 1) & 3
+  let block_size = (header_bytes >> 3) & 0x1FFFFF
   
   let block_type = match block_type_int {
-    0 => BlockType::Raw
-    1 => BlockType::RLE
-    2 => BlockType::Compressed
-    3 => BlockType::Reserved
-    _ => return Err(ZSTDError::UnknownBlockType)
+    0 => @core.raw_block_type()
+    1 => @core.rle_block_type() 
+    2 => @core.compressed_block_type()
+    _ => @core.reserved_block_type()
   }
   
-  if block_type == BlockType::Reserved {
-    return Err(ZSTDError::UnknownBlockType)
+  if block_type == @core.reserved_block_type() {
+    return Err(@core.unknown_block_type_error())
   }
   
-  let header : BlockHeader = {
-    block_type: block_type,
-    block_size: block_size,
-    last_block: last_block
-  }
-  
-  Ok((header, 3))
+  Ok(({ block_type: block_type, block_size: block_size, last_block: last_block }, 3))
 }
 
-/// Decode a ZSTD block
-pub fn decode_block(
-  data : Bytes,
-  offset : Int,
-  context : DecompressionContext
-) -> ZSTDResult[(DecompressionContext, Bytes, Int)] {
-  let header_result = parse_block_header(data, offset)
-  let (header, header_size) = match header_result {
-    Ok(result) => result
-    Err(msg) => return Err(msg)
-  }
-  
-  let block_data_offset = offset + header_size
-  let block_data_end = block_data_offset + header.block_size
-  
-  if block_data_end > data.length() {
-    return Err(ZSTDError::InvalidData)
-  }
-  
-  match header.block_type {
-    BlockType::Raw => decode_raw_block(data, block_data_offset, header.block_size, context)
-    BlockType::RLE => decode_rle_block(data, block_data_offset, header.block_size, context)
-    BlockType::Compressed => decode_compressed_block(data, block_data_offset, header.block_size, context)
-    BlockType::Reserved => Err(ZSTDError::UnknownBlockType)
+/// Decompress a block
+pub fn decompress_block(data : Bytes, offset : Int, block_header : BlockHeader, 
+                       context : @core.DecompressionContext) -> @core.ZSTDResult[(Bytes, @core.DecompressionContext)] {
+  match block_header.block_type {
+    @core.BlockType::Raw => decompress_raw_block(data, offset, block_header.block_size)
+    @core.BlockType::RLE => decompress_rle_block(data, offset, block_header.block_size)
+    @core.BlockType::Compressed => decompress_compressed_block(data, offset, block_header.block_size, context)
+    _ => Err(@core.unknown_block_type_error())
   }
 }
 
-/// Decode raw (uncompressed) block
-fn decode_raw_block(
-  data : Bytes, 
-  offset : Int, 
-  size : Int, 
-  context : DecompressionContext
-) -> ZSTDResult[(DecompressionContext, Bytes, Int)] {
+/// Decompress raw (uncompressed) block
+fn decompress_raw_block(data : Bytes, offset : Int, size : Int) -> @core.ZSTDResult[(Bytes, @core.DecompressionContext)] {
   if offset + size > data.length() {
-    return Err(ZSTDError::InvalidData)
+    return Err(@core.insufficient_data_error())
   }
   
-  // Extract raw bytes
-  let mut raw_data : Array[Byte] = []
+  let mut result_bytes : Array[Byte] = []
   for i = 0; i < size; i = i + 1 {
-    raw_data = raw_data + [data[offset + i]]
+    result_bytes = result_bytes + [data[offset + i]]
   }
   
-  let result_bytes = Bytes::from_array(raw_data)
-  Ok((context, result_bytes, size + 3))
+  Ok((Bytes::from_array(result_bytes), @core.make_decompression_context()))
 }
 
-/// Decode RLE (Run Length Encoded) block
-fn decode_rle_block(
-  data : Bytes,
-  offset : Int, 
-  size : Int,
-  context : DecompressionContext
-) -> ZSTDResult[(DecompressionContext, Bytes, Int)] {
-  if size != 1 {
-    return Err(ZSTDError::InvalidData)
-  }
-  
+/// Decompress RLE (Run Length Encoded) block
+fn decompress_rle_block(data : Bytes, offset : Int, size : Int) -> @core.ZSTDResult[(Bytes, @core.DecompressionContext)] {
   if offset + 1 > data.length() {
-    return Err(ZSTDError::InvalidData)
+    return Err(@core.insufficient_data_error())
   }
   
-  // The byte to repeat
-  let rle_byte = data[offset]
-  
-  // For RLE blocks, the regenerated size should come from the frame content size
-  // For now, use a reasonable default
-  let repeat_count = context.frame_content_size
-  let final_count = if repeat_count > 0 { repeat_count } else { size * 10 }
-  
-  let mut rle_data : Array[Byte] = []
-  for i = 0; i < final_count; i = i + 1 {
-    rle_data = rle_data + [rle_byte]
+  let repeated_byte = data[offset]
+  let mut result_bytes : Array[Byte] = []
+  for i = 0; i < size; i = i + 1 {
+    result_bytes = result_bytes + [repeated_byte]
   }
   
-  let result_bytes = Bytes::from_array(rle_data)
-  Ok((context, result_bytes, 1 + 3))
+  Ok((Bytes::from_array(result_bytes), @core.make_decompression_context()))
 }
 
-/// Decode compressed block (most complex)
-fn decode_compressed_block(
-  data : Bytes,
-  offset : Int,
-  size : Int, 
-  context : DecompressionContext
-) -> ZSTDResult[(DecompressionContext, Bytes, Int)] {
-  // This is the core of ZSTD decompression
-  // 1. Parse literals section
-  // 2. Parse sequences section  
-  // 3. Execute sequences to reconstruct data
-  
-  let literals_result = decode_literals_section(data, offset)
-  let (literals, literals_consumed) = match literals_result {
-    Ok(result) => result
-    Err(err) => return Err(err)
+/// Decompress compressed block - Basic implementation
+fn decompress_compressed_block(data : Bytes, offset : Int, size : Int, 
+                             context : @core.DecompressionContext) -> @core.ZSTDResult[(Bytes, @core.DecompressionContext)] {
+  let block_end = offset + size
+  if block_end > data.length() {
+    return Err(@core.insufficient_data_error())
   }
   
-  let sequences_offset = offset + literals_consumed
-  let sequences_result = decode_sequences_section(data, sequences_offset, size - literals_consumed)
-  let (sequences, sequences_consumed) = match sequences_result {
-    Ok(result) => result
-    Err(err) => return Err(err)
-  }
+  let mut current_offset = offset
   
-  // Execute sequences to reconstruct the final data
-  let execution_result = execute_sequences(literals, sequences, context)
-  let final_data = match execution_result {
-    Ok(data) => data
-    Err(err) => return Err(err)
-  }
-  
-  Ok((context, final_data, size + 3))
-}
-
-/// Decode literals section of compressed block
-fn decode_literals_section(
-  data : Bytes,
-  offset : Int
-) -> ZSTDResult[(Bytes, Int)] {
-  if offset >= data.length() {
-    return Err(ZSTDError::InvalidData)
-  }
-  
-  let stream = new_bitstream(data).skip_bytes(offset)
-  let (stream2, header_byte) = read_byte(stream)
-  
-  // Parse literals section header
-  let literals_type = (header_byte >> 6) & 0x3
-  let size_format = (header_byte >> 4) & 0x3
-  
-  let literals_header_type = match literals_type {
-    0 => LiteralsType::Raw
-    1 => LiteralsType::RLE  
-    2 => LiteralsType::Compressed
-    3 => LiteralsType::Treeless
-    _ => return Err(ZSTDError::InvalidData)
-  }
-  
-  // Parse size fields based on size format
-  let (regenerated_size, compressed_size, header_consumed) = parse_literals_sizes(
-    data, offset, size_format, literals_header_type
-  )?
-  
-  let literals_data_offset = offset + header_consumed
-  
-  match literals_header_type {
-    LiteralsType::Raw => {
-      // Raw literals - just copy bytes directly
-      if literals_data_offset + regenerated_size > data.length() {
-        return Err(ZSTDError::InvalidData)
-      }
+  // Parse literals section
+  let literals_result = parse_literals_section(data, current_offset, block_end)
+  match literals_result {
+    Ok((literals, new_offset)) => {
+      current_offset = new_offset
       
-      let mut raw_literals : Array[Byte] = []
-      for i = 0; i < regenerated_size; i = i + 1 {
-        raw_literals = raw_literals + [data[literals_data_offset + i]]
+      // Parse sequences section
+      let sequences_result = parse_sequences_section(data, current_offset, block_end)
+      match sequences_result {
+        Ok((sequences, _final_offset)) => {
+          // Execute sequences to reconstruct the original data
+          execute_sequences(literals.literals_data, sequences, context)
+        }
+        Err(err) => Err(err)
       }
-      
-      Ok((Bytes::from_array(raw_literals), header_consumed + regenerated_size))
     }
-    
-    LiteralsType::RLE => {
-      // RLE literals - repeat single byte
-      if literals_data_offset + 1 > data.length() {
-        return Err(ZSTDError::InvalidData)
-      }
-      
-      let rle_byte = data[literals_data_offset]
-      let mut rle_literals : Array[Byte] = []
-      for i = 0; i < regenerated_size; i = i + 1 {
-        rle_literals = rle_literals + [rle_byte]
-      }
-      
-      Ok((Bytes::from_array(rle_literals), header_consumed + 1))
-    }
-    
-    LiteralsType::Compressed | LiteralsType::Treeless => {
-      // Huffman compressed literals - decode using Huffman table
-      decode_huffman_compressed_literals(
-        data, literals_data_offset, compressed_size, regenerated_size
-      ).map(fn(literals) { (literals, header_consumed + compressed_size) })
-    }
+    Err(err) => Err(err)
   }
 }
 
-/// Decode sequences section of compressed block  
-fn decode_sequences_section(
-  data : Bytes,
-  offset : Int,
-  remaining_size : Int
-) -> ZSTDResult[(Array[Sequence], Int)] {
-  if offset >= data.length() {
-    return Err(ZSTDError::InvalidData)
+/// Parse literals section from compressed block
+fn parse_literals_section(data : Bytes, offset : Int, block_end : Int) -> @core.ZSTDResult[(LiteralsSection, Int)] {
+  if offset >= block_end {
+    return Err(@core.insufficient_data_error())
   }
   
-  let stream = new_bitstream(data).skip_bytes(offset)
-  
-  // Read number of sequences
-  let (stream2, num_sequences_byte) = read_byte(stream)
-  let num_sequences = if num_sequences_byte == 0 {
-    0
-  } else if num_sequences_byte < 127 {
-    num_sequences_byte
-  } else if num_sequences_byte == 127 {
-    let (stream3, extra_byte) = read_byte(stream2)
-    127 + extra_byte
-  } else {
-    let (stream3, low_byte) = read_byte(stream2)
-    let (stream4, high_byte) = read_byte(stream3)
-    ((num_sequences_byte - 128) << 8) + low_byte
+  let literals_header = data[offset].to_int()
+  let literals_type = match (literals_header >> 6) & 3 {
+    0 => @core.raw_literals_type()
+    1 => @core.rle_literals_type()
+    2 => @core.compressed_literals_type()
+    3 => @core.treeless_literals_type()
+    _ => @core.raw_literals_type() // Should not happen
   }
+  
+  let mut current_offset = offset + 1
+  let mut literals_size = 0
+  
+  // Parse literals size based on type and size format
+  let size_format = (literals_header >> 4) & 3
+  match literals_type {
+    @core.LiteralsType::Raw | @core.LiteralsType::RLE => {
+      match size_format {
+        0 | 2 => {
+          literals_size = literals_header & 0x1F
+        }
+        1 => {
+          if current_offset >= block_end { return Err(@core.insufficient_data_error()) }
+          literals_size = ((literals_header & 0x0F) << 8) | data[current_offset].to_int()
+          current_offset = current_offset + 1
+        }
+        3 => {
+          if current_offset + 1 >= block_end { return Err(@core.insufficient_data_error()) }
+          literals_size = ((literals_header & 0x0F) << 16) | 
+                         (data[current_offset].to_int() << 8) |
+                         data[current_offset + 1].to_int()
+          current_offset = current_offset + 2
+        }
+        _ => return Err(@core.invalid_data_error())
+      }
+    }
+    _ => {
+      // For compressed literals, we need more complex parsing
+      // For now, treat as raw with minimal size
+      literals_size = literals_header & 0x1F
+    }
+  }
+  
+  // Extract literals data
+  let literals_data_end = current_offset + literals_size
+  if literals_data_end > block_end {
+    return Err(@core.insufficient_data_error())
+  }
+  
+  let mut literals_bytes : Array[Byte] = []
+  match literals_type {
+    @core.LiteralsType::RLE => {
+      // RLE: repeat the next byte literals_size times
+      if current_offset >= block_end { return Err(@core.insufficient_data_error()) }
+      let repeated_byte = data[current_offset]
+      current_offset = current_offset + 1
+      for i = 0; i < literals_size; i = i + 1 {
+        literals_bytes = literals_bytes + [repeated_byte]
+      }
+    }
+    _ => {
+      // Raw or compressed: copy literals directly
+      for i = 0; i < literals_size; i = i + 1 {
+        if current_offset + i < block_end {
+          literals_bytes = literals_bytes + [data[current_offset + i]]
+        }
+      }
+      current_offset = literals_data_end
+    }
+  }
+  
+  let literals_section = {
+    literals_type: literals_type,
+    literals_size: literals_size,
+    literals_data: Bytes::from_array(literals_bytes)
+  }
+  
+  Ok((literals_section, current_offset))
+}
+
+/// Parse sequences section from compressed block - Basic implementation
+fn parse_sequences_section(data : Bytes, offset : Int, block_end : Int) -> @core.ZSTDResult[(Array[@core.Sequence], Int)] {
+  if offset >= block_end {
+    // No sequences
+    return Ok(([], offset))
+  }
+  
+  let num_sequences = data[offset].to_int()
+  let mut current_offset = offset + 1
   
   if num_sequences == 0 {
-    return Ok(([], 1))
+    return Ok(([], current_offset))
   }
   
-  // For now, return a placeholder implementation
-  // Real implementation would:
-  // 1. Parse compression modes for literal lengths, match lengths, and offsets
-  // 2. Build FSE tables for each type
-  // 3. Decode the actual sequences using FSE
+  // For simplicity, we'll handle basic sequences
+  // In a full implementation, this would parse FSE tables and decode sequences
+  let mut sequences : Array[@core.Sequence] = []
   
-  let mut sequences : Array[Sequence] = []
-  for i = 0; i < num_sequences; i = i + 1 {
-    sequences = sequences + [{
-      literal_length: 0,
-      match_length: 4, // Minimum match length
-      offset: 1
-    }]
+  // Placeholder: create dummy sequences for now
+  for i = 0; i < num_sequences && current_offset < block_end; i = i + 1 {
+    let sequence = @core.make_sequence(3, 3, 1) // literal_length, match_length, offset
+    sequences = sequences + [sequence]
+    current_offset = current_offset + 3 // Skip 3 bytes per sequence (simplified)
   }
   
-  Ok((sequences, remaining_size))
+  Ok((sequences, current_offset))
 }
 
-/// Execute sequences to reconstruct final data
-fn execute_sequences(
-  literals : Bytes,
-  sequences : Array[Sequence],
-  context : DecompressionContext
-) -> ZSTDResult[Bytes] {
+/// Execute sequences to reconstruct original data
+fn execute_sequences(literals : Bytes, sequences : Array[@core.Sequence], 
+                    context : @core.DecompressionContext) -> @core.ZSTDResult[(Bytes, @core.DecompressionContext)] {
   let mut output : Array[Byte] = []
-  let mut literal_pos = 0
+  let mut literal_offset = 0
+  
+  // If no sequences, just return the literals
+  if sequences.length() == 0 {
+    let mut literal_bytes : Array[Byte] = []
+    for i = 0; i < literals.length(); i = i + 1 {
+      literal_bytes = literal_bytes + [literals[i]]
+    }
+    return Ok((Bytes::from_array(literal_bytes), context))
+  }
   
   // Process each sequence
   for i = 0; i < sequences.length(); i = i + 1 {
     let sequence = sequences[i]
     
-    // 1. Copy literal bytes
-    for j = 0; j < sequence.literal_length; j = j + 1 {
-      if literal_pos < literals.length() {
-        output = output + [literals[literal_pos]]
-        literal_pos = literal_pos + 1
-      }
+    // Copy literals
+    let literal_length = @core.get_sequence_literal_length(sequence)
+    for j = 0; j < literal_length && literal_offset < literals.length(); j = j + 1 {
+      output = output + [literals[literal_offset]]
+      literal_offset = literal_offset + 1
     }
     
-    // 2. Copy match from window/output buffer
-    let match_start = output.length() - sequence.offset
-    if match_start < 0 {
-      // Reference into dictionary or previous window
-      // For now, pad with zeros
-      for j = 0; j < sequence.match_length; j = j + 1 {
-        output = output + [0.to_byte()]
-      }
-    } else {
-      // Copy from existing output
-      for j = 0; j < sequence.match_length; j = j + 1 {
-        let src_pos = (match_start + j) % output.length()
-        output = output + [output[src_pos]]
+    // Copy match from history (simplified)
+    let match_length = @core.get_sequence_match_length(sequence)
+    let offset_value = @core.get_sequence_offset(sequence)
+    
+    if offset_value > 0 && output.length() >= offset_value {
+      let start_pos = output.length() - offset_value
+      for j = 0; j < match_length; j = j + 1 {
+        let pos = (start_pos + j) % output.length()
+        output = output + [output[pos]]
       }
     }
   }
   
   // Copy any remaining literals
-  while literal_pos < literals.length() {
-    output = output + [literals[literal_pos]]
-    literal_pos = literal_pos + 1
+  while literal_offset < literals.length() {
+    output = output + [literals[literal_offset]]
+    literal_offset = literal_offset + 1
   }
   
-  Ok(Bytes::from_array(output))
-}
-
-/// Parse literals section size fields
-fn parse_literals_sizes(
-  data : Bytes,
-  offset : Int,
-  size_format : Int,
-  literals_type : LiteralsType
-) -> ZSTDResult[(Int, Int, Int)] {
-  let mut regenerated_size = 0
-  let mut compressed_size = 0
-  let mut header_size = 1 // At least 1 byte for the header
-  
-  match size_format {
-    0 | 2 => {
-      // Size uses 5 or 6 bits from first byte
-      let first_byte = data[offset].to_int()
-      regenerated_size = if size_format == 0 {
-        first_byte & 0x1F  // 5 bits
-      } else {
-        ((first_byte & 0x03) << 4) | ((data[offset + 1].to_int() & 0xF0) >> 4) // 6 bits
-      }
-      
-      match literals_type {
-        LiteralsType::Compressed | LiteralsType::Treeless => {
-          compressed_size = regenerated_size // Assume same for simplicity
-        }
-        _ => {
-          compressed_size = 0
-        }
-      }
-    }
-    
-    1 => {
-      // Size uses 4+6 bits
-      if offset + 1 >= data.length() {
-        return Err(ZSTDError::InvalidData)
-      }
-      let first_byte = data[offset].to_int()
-      let second_byte = data[offset + 1].to_int()
-      regenerated_size = ((first_byte & 0x0F) << 6) | (second_byte >> 2)
-      header_size = 2
-      
-      match literals_type {
-        LiteralsType::Compressed | LiteralsType::Treeless => {
-          compressed_size = regenerated_size
-        }
-        _ => {
-          compressed_size = 0
-        }
-      }
-    }
-    
-    3 => {
-      // Size uses 4+6+6 bits
-      if offset + 2 >= data.length() {
-        return Err(ZSTDError::InvalidData)
-      }
-      let first_byte = data[offset].to_int()
-      let second_byte = data[offset + 1].to_int()
-      let third_byte = data[offset + 2].to_int()
-      regenerated_size = ((first_byte & 0x0F) << 12) | (second_byte << 4) | (third_byte >> 4)
-      compressed_size = ((third_byte & 0x0F) << 6) | (data[offset + 3].to_int() >> 2)
-      header_size = 4
-    }
-    
-    _ => return Err(ZSTDError::InvalidData)
-  }
-  
-  Ok((regenerated_size, compressed_size, header_size))
-}
-
-/// Decode Huffman compressed literals (placeholder)
-fn decode_huffman_compressed_literals(
-  data : Bytes,
-  offset : Int,
-  compressed_size : Int,
-  regenerated_size : Int
-) -> ZSTDResult[Bytes] {
-  // For now, just copy the compressed data as-is
-  // Real implementation would build Huffman tree and decode
-  if offset + compressed_size > data.length() {
-    return Err(ZSTDError::InvalidData)
-  }
-  
-  let mut literals : Array[Byte] = []
-  for i = 0; i < regenerated_size && i < compressed_size; i = i + 1 {
-    literals = literals + [data[offset + i]]
-  }
-  
-  // Pad if needed
-  while literals.length() < regenerated_size {
-    literals = literals + [0.to_byte()]
-  }
-  
-  Ok(Bytes::from_array(literals))
+  Ok((Bytes::from_array(output), context))
 }

@@ -1,93 +1,76 @@
-/// Basic usage examples for Moonbit ZSTD
-/// Demonstrates simple compression and decompression
+/// 基础使用示例
+/// 展示 MoonBit ZSTD 库的基本功能
 
-// Using functions from the API module
-
-/// Example 1: Basic compression and decompression
-pub fn example_basic_compression() -> Unit {
-  println("=== Basic Compression Example ===")
+/// 基础解压缩示例
+pub fn basic_decompression_example() -> Unit {
+  println("=== 基础解压缩示例 ===")
   
-  let original_text = "Hello, World! This is a test of ZSTD compression."
-  let original_data = original_text.to_bytes()
+  // 示例 ZSTD 数据 (这里使用占位符)
+  let sample_zstd_data = b"(\xb5/\xfd\x00\x00\x15\x00\x00\x00\x00"
   
-  println("Original data: " + original_text)
-  println("Original size: " + original_data.length().to_string() + " bytes")
+  // 检查是否为 ZSTD 数据
+  let is_zstd = @api.is_zstd_data(sample_zstd_data)
+  println("是否为 ZSTD 数据: " + is_zstd.to_string())
   
-  // Compress the data
-  let compressed_data = @zstd.compress(original_data)
-  println("Compressed size: " + compressed_data.length().to_string() + " bytes")
-  
-  // Calculate compression ratio
-  let ratio = @zstd.get_compression_ratio(original_data.length(), compressed_data.length())
-  println("Compression ratio: " + ratio.to_string() + "%")
-  
-  // Decompress the data
-  let decompressed_data = @zstd.decompress(compressed_data)
-  let decompressed_text = decompressed_data.to_string()
-  
-  println("Decompressed data: " + decompressed_text)
-  println("Round-trip successful: " + (original_data == decompressed_data).to_string())
-}
-
-/// Example 2: Compressing different types of data
-pub fn example_data_types() -> Unit {
-  println("\n=== Data Types Example ===")
-  
-  let test_cases = [
-    ("Text", "The quick brown fox jumps over the lazy dog"),
-    ("Numbers", "1234567890"),
-    ("Repeated", "AAAAA"),
-    ("Mixed", "Hello123!@#"),
-    ("Empty", "")
-  ]
-  
-  for i = 0; i < test_cases.length(); i = i + 1 {
-    let (name, data) = test_cases[i]
-    let original = data.to_bytes()
-    let compressed = @zstd.compress(original)
-    let decompressed = @zstd.decompress(compressed)
-    let ratio = @zstd.get_compression_ratio(original.length(), compressed.length())
-    
-    println(name + ": " + original.length().to_string() + " -> " + 
-            compressed.length().to_string() + " bytes (" + 
-            ratio.to_string() + "%)")
-    
-    // Verify round-trip
-    if original != decompressed {
-      println("ERROR: Round-trip failed for " + name)
-    }
+  // 分析文件结构
+  let analysis = @api.analyze_zstd_file(sample_zstd_data)
+  if analysis.is_valid {
+    println("✅ 文件分析成功:")
+    println("  - 文件大小: " + analysis.file_size.to_string() + " 字节")
+    println("  - 块数量: " + analysis.total_blocks.to_string())
+    println("  - 首块类型: " + analysis.first_block_type)
+    println("  - 单段模式: " + analysis.single_segment.to_string())
+    println("  - 内容校验: " + analysis.content_checksum.to_string())
+  } else {
+    println("❌ 文件分析失败: " + analysis.error_message)
   }
+  
+  // 尝试解压缩
+  let decompressed = @api.decompress(sample_zstd_data)
+  println("解压缩结果长度: " + decompressed.length().to_string() + " 字节")
 }
 
-/// Example 3: Performance demonstration
-pub fn example_performance() -> Unit {
-  println("\n=== Performance Example ===")
+/// 文件验证示例
+pub fn file_validation_example() -> Unit {
+  println("\n=== 文件验证示例 ===")
   
-  // Create a larger dataset
-  let mut data_array : Array[Byte] = []
-  for i = 0; i < 1000; i = i + 1 {
-    data_array = data_array + [(i % 256).to_byte()]
-  }
-  let large_data = Bytes::from_array(data_array)
+  // 有效的 ZSTD 魔数
+  let valid_zstd = b"(\xb5/\xfd\x00\x00\x15\x00\x00\x00\x00"
+  let invalid_data = b"Not ZSTD data"
   
-  println("Large data size: " + large_data.length().to_string() + " bytes")
+  println("验证有效 ZSTD 数据:")
+  let (is_valid1, message1) = @api.validate_zstd_file(valid_zstd)
+  println("  结果: " + is_valid1.to_string() + " - " + message1)
   
-  // Compress
-  let compressed = @zstd.compress(large_data)
-  println("Compressed size: " + compressed.length().to_string() + " bytes")
-  
-  let ratio = @zstd.get_compression_ratio(large_data.length(), compressed.length())
-  println("Compression ratio: " + ratio.to_string() + "%")
-  
-  // Decompress
-  let decompressed = @zstd.decompress(compressed)
-  println("Decompression successful: " + (large_data == decompressed).to_string())
+  println("验证无效数据:")
+  let (is_valid2, message2) = @api.validate_zstd_file(invalid_data)
+  println("  结果: " + is_valid2.to_string() + " - " + message2)
 }
 
-/// Run all examples
-pub fn run_examples() -> Unit {
-  example_basic_compression()
-  example_data_types()
-  example_performance()
+/// 压缩率计算示例
+pub fn compression_ratio_example() -> Unit {
+  println("\n=== 压缩率计算示例 ===")
+  
+  let original_size = 1000
+  let compressed_size = 400
+  
+  let ratio = @api.get_compression_ratio(original_size, compressed_size)
+  println("原始大小: " + original_size.to_string() + " 字节")
+  println("压缩大小: " + compressed_size.to_string() + " 字节")
+  println("压缩率: " + ratio.to_string() + "%")
+  
+  let space_saved = ((original_size - compressed_size).to_double() / original_size.to_double()) * 100.0
+  println("节省空间: " + space_saved.to_string() + "%")
 }
 
+/// 运行所有基础示例
+pub fn run_basic_examples() -> Unit {
+  println("🚀 MoonBit ZSTD 基础使用示例")
+  println("=================================")
+  
+  basic_decompression_example()
+  file_validation_example()
+  compression_ratio_example()
+  
+  println("\n✨ 基础示例演示完成！")
+}

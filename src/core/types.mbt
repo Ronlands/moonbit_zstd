@@ -1,168 +1,152 @@
-/// Core types and constants for ZSTD implementation
-/// Following RFC 8878 specification
+/// Core types for ZSTD implementation
+/// Basic type definitions used across all modules
 
-/// ZSTD magic number (4 bytes) - RFC 8878
-pub const ZSTD_MAGIC_NUMBER : UInt = 0xFD2FB528U
+/// ZSTD error types
+pub enum ZSTDError {
+  InvalidData
+  InvalidMagicNumber
+  InvalidFrameHeader
+  UnknownBlockType
+  InsufficientData
+  CompressionError
+  DecompressionError
+} derive(Eq)
 
-/// Maximum window size (1MB) - RFC 8878 limit  
-pub const ZSTD_WINDOWLOG_MAX : Int = 23
-pub const ZSTD_WINDOWSIZE_MAX : Int = 1 << 23  // 8MB
+/// Error constructors
+pub fn invalid_data_error() -> ZSTDError { InvalidData }
+pub fn invalid_magic_number_error() -> ZSTDError { InvalidMagicNumber }
+pub fn invalid_frame_header_error() -> ZSTDError { InvalidFrameHeader }
+pub fn unknown_block_type_error() -> ZSTDError { UnknownBlockType }
+pub fn insufficient_data_error() -> ZSTDError { InsufficientData }
+pub fn compression_error() -> ZSTDError { CompressionError }
+pub fn decompression_error() -> ZSTDError { DecompressionError }
 
-/// Maximum block size (128KB)
-pub const ZSTD_BLOCKSIZE_MAX : Int = 131072
+/// ZSTD result type
+pub typealias Result[T, ZSTDError] as ZSTDResult[T]
 
-/// Minimum match length
-pub const ZSTD_MINMATCH_LENGTH : Int = 3
-
-/// Maximum match distance
-pub const ZSTD_MAX_DISTANCE : Int = 1 << 17
-
-/// FSE constants
-pub const FSE_MAX_TABLELOG : Int = 12
-pub const FSE_DEFAULT_TABLELOG : Int = 6
-
-/// Huffman constants
-pub const HUFFMAN_MAX_TABLELOG : Int = 11
-
-/// Literal length codes
-pub const LITERAL_LENGTH_CODE_COUNT : Int = 36
-
-/// Match length codes  
-pub const MATCH_LENGTH_CODE_COUNT : Int = 53
-
-/// Offset codes
-pub const OFFSET_CODE_COUNT : Int = 32
-
-/// Frame header types
+/// Frame type enumeration
 pub enum FrameType {
   ZSTD_frame
-  SkippableFrame
-} derive(Show)
+  Skippable_frame
+}
 
-/// Block types
-pub enum BlockType {
-  Raw
-  RLE  
-  Compressed
-  Reserved
-} derive(Show)
+/// Implement Default for FrameType - Default to ZSTD_frame
+impl Default for FrameType with default() { ZSTD_frame }
 
-/// Sequence types for FSE
-pub enum SequenceType {
-  LiteralLength
-  MatchLength
-  Offset
-} derive(Show)
+/// FrameType constructors
+pub fn zstd_frame_type() -> FrameType { ZSTD_frame }
+pub fn skippable_frame_type() -> FrameType { Skippable_frame }
 
-/// ZSTD frame header
+/// Frame header structure
 pub struct FrameHeader {
-  frame_type : FrameType
-  window_size : Int
-  dict_id : Int
-  frame_content_size : Int
-  single_segment : Bool
-  checksum_flag : Bool
-} derive(Show)
+  frame_type: FrameType
+  dict_id: Int
+  frame_content_size: Int
+  single_segment: Bool
+  checksum_flag: Bool
+  window_size: Int
+} derive(Default)
 
-/// ZSTD block header
-pub struct BlockHeader {
-  block_type : BlockType
-  block_size : Int
-  last_block : Bool
-} derive(Show)
-
-/// Sequence command
-pub struct Sequence {
-  literal_length : Int
-  match_length : Int
-  offset : Int
-} derive(Show)
-
-/// FSE table entry
-pub struct FSETableEntry {
-  symbol : Int
-  baseline : Int
-  nb_bits : Int
-} derive(Show)
-
-/// Huffman table entry
-pub struct HuffmanTableEntry {
-  symbol : Int
-  code : Int
-  bits : Int
-} derive(Show)
-
-/// Compression parameters
-pub struct CompressionParams {
-  level : Int
-  window_log : Int
-  hash_log : Int
-  chain_log : Int
-  search_log : Int
-  min_match : Int
-  target_length : Int
-  strategy : Int
-} derive(Show)
+/// Create new frame header
+pub fn make_frame_header(
+  frame_type: FrameType,
+  dict_id: Int,
+  frame_content_size: Int,
+  single_segment: Bool,
+  checksum_flag: Bool,
+  window_size: Int
+) -> FrameHeader {
+  { frame_type, dict_id, frame_content_size, single_segment, checksum_flag, window_size }
+}
 
 /// Decompression context
 pub struct DecompressionContext {
-  window_buffer : Bytes
-  dictionary : Bytes
-  window_size : Int
-  window_pos : Int
-  frame_content_size : Int
-} derive(Show)
+  window_buffer: Bytes
+  dictionary: Bytes
+  window_size: Int
+  window_pos: Int
+  frame_content_size: Int
+} derive(Default)
 
-/// Compression context
-pub struct CompressionContext {
-  params : CompressionParams
-  hash_table : Array[Int]
-  chain_table : Array[Int]
-  sequence_buffer : Array[Sequence]
-  literals_buffer : Bytes
-} derive(Show)
+/// Create new decompression context with parameters
+pub fn make_decompression_context_with_params(
+  window_buffer: Bytes,
+  dictionary: Bytes,
+  window_size: Int,
+  window_pos: Int,
+  frame_content_size: Int
+) -> DecompressionContext {
+  { window_buffer, dictionary, window_size, window_pos, frame_content_size }
+}
 
-/// Literals section header types
+/// Create new decompression context with defaults
+pub fn make_decompression_context() -> DecompressionContext {
+  {
+    window_buffer: b"",
+    dictionary: b"",
+    window_size: 65536,
+    window_pos: 0,
+    frame_content_size: 0
+  }
+}
+
+/// Block type enumeration
+pub enum BlockType {
+  Raw
+  RLE
+  Compressed
+  Reserved
+} derive(Eq)
+
+/// BlockType constructors
+pub fn raw_block_type() -> BlockType { Raw }
+pub fn rle_block_type() -> BlockType { RLE }
+pub fn compressed_block_type() -> BlockType { Compressed }
+pub fn reserved_block_type() -> BlockType { Reserved }
+
+/// Literals type enumeration
 pub enum LiteralsType {
   Raw
-  RLE  
+  RLE
   Compressed
   Treeless
-} derive(Show)
+} derive(Eq)
 
-/// Literals section header
-pub struct LiteralsHeader {
-  literals_type : LiteralsType
-  size_format : Int
-  regenerated_size : Int
-  compressed_size : Int
-} derive(Show)
+/// LiteralsType constructors
+pub fn raw_literals_type() -> LiteralsType { Raw }
+pub fn rle_literals_type() -> LiteralsType { RLE }
+pub fn compressed_literals_type() -> LiteralsType { Compressed }
+pub fn treeless_literals_type() -> LiteralsType { Treeless }
 
-/// FSE state for sequence decoding
-pub struct FSEState {
-  state : Int
-  table_log : Int
-  table : Array[FSETableEntry]
-} derive(Show)
+/// Sequence structure
+pub struct Sequence {
+  literal_length: Int
+  match_length: Int
+  offset: Int
+} derive(Default)
 
-/// Huffman decoder state
-pub struct HuffmanState {
-  state : Int
-  table : Array[HuffmanTableEntry]
-  table_log : Int
-} derive(Show)
+/// Create new sequence
+pub fn make_sequence(literal_length: Int, match_length: Int, offset: Int) -> Sequence {
+  { literal_length, match_length, offset }
+}
 
-/// Error types for ZSTD operations
-pub enum ZSTDError {
-  InvalidMagicNumber
-  InvalidFrameHeader
-  InvalidBlockHeader
-  InvalidData
-  BufferTooSmall
-  UnknownBlockType
-  CorruptedData
-  UnsupportedVersion
-} derive(Show)
+/// Accessor functions for Sequence
+pub fn get_sequence_literal_length(seq: Sequence) -> Int { seq.literal_length }
+pub fn get_sequence_offset(seq: Sequence) -> Int { seq.offset }
+pub fn get_sequence_match_length(seq: Sequence) -> Int { seq.match_length }
 
-// ZSTD Result type is Result[T, ZSTDError] - using built-in Result type
+/// ZSTD magic number constant
+pub const ZSTD_MAGIC_NUMBER : UInt = 0xFD2FB528U
 
+/// Convert error to string
+pub fn error_to_string(error: ZSTDError) -> String {
+  match error {
+    ZSTDError::InvalidData => "Invalid data"
+    ZSTDError::InvalidMagicNumber => "Invalid magic number"
+    ZSTDError::InvalidFrameHeader => "Invalid frame header"
+    ZSTDError::UnknownBlockType => "Unknown block type"
+    ZSTDError::InsufficientData => "Insufficient data"
+    ZSTDError::CompressionError => "Compression error"
+    ZSTDError::DecompressionError => "Decompression error"
+  }
+}
