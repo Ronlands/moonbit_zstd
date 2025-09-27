@@ -1,13 +1,13 @@
 /// ZSTD frame format decoder
 /// Handles frame header parsing and validation according to RFC 8878
 
-/// ZSTD Magic Number (RFC 8878)
-let zstd_magic : Int = 0xFD2FB528
+import core::types::{FrameHeader, FrameType, ZSTD_MAGIC_NUMBER, ZSTDError, ZSTDResult}
+import core::bitstream::{BitStream, new_bitstream, read_bytes, read_byte, read_le_int}
 
 /// Parse ZSTD frame header according to RFC 8878
-pub fn parse_frame_header(data : Bytes) -> Result[(core::types::FrameHeader, Int), String] {
+pub fn parse_frame_header(data : Bytes) -> ZSTDResult[(FrameHeader, Int)] {
   if data.length() < 4 {
-    return Err("Frame too short for magic number")
+    return Err(ZSTDError::InvalidFrameHeader)
   }
   
   let mut stream = new_bitstream(data)
@@ -20,8 +20,8 @@ pub fn parse_frame_header(data : Bytes) -> Result[(core::types::FrameHeader, Int
               (magic_bytes[1].to_int() << 8) |
               magic_bytes[0].to_int()
   
-  if magic != zstd_magic {
-    return Err("Invalid ZSTD magic number")
+  if magic.to_uint() != ZSTD_MAGIC_NUMBER {
+    return Err(ZSTDError::InvalidMagicNumber)
   }
   
   // Parse Frame_Header_Descriptor
@@ -38,7 +38,7 @@ pub fn parse_frame_header(data : Bytes) -> Result[(core::types::FrameHeader, Int
   let dictionary_id_flag = fhd & 0x3
   
   if unused_bit != 0 || reserved_bit != 0 {
-    return Err("Invalid frame header descriptor")
+    return Err(ZSTDError::InvalidFrameHeader)
   }
   
   let mut bytes_read = 5 // magic + FHD
@@ -68,7 +68,7 @@ pub fn parse_frame_header(data : Bytes) -> Result[(core::types::FrameHeader, Int
                      (dict_bytes[3].to_int() << 24)
       bytes_read = bytes_read + 4
     }
-    _ => return Err("Invalid dictionary ID flag")
+    _ => return Err(ZSTDError::InvalidFrameHeader)
   }
   
   // Parse Frame_Content_Size (if present)
@@ -79,7 +79,7 @@ pub fn parse_frame_header(data : Bytes) -> Result[(core::types::FrameHeader, Int
       1 => 2
       2 => 4
       3 => 8
-      _ => return Err("Invalid frame content size flag")
+      _ => return Err(ZSTDError::InvalidFrameHeader)
     }
     
     if size_bytes > 0 {
@@ -113,13 +113,13 @@ pub fn parse_frame_header(data : Bytes) -> Result[(core::types::FrameHeader, Int
 }
 
 /// Calculate window size based on frame header
-fn calculate_window_size(fhd : Int, frame_content_size : Int, single_segment : Bool) -> Result[Int, String] {
+fn calculate_window_size(fhd : Int, frame_content_size : Int, single_segment : Bool) -> ZSTDResult[Int] {
   if single_segment {
     Ok(frame_content_size)
   } else {
     let window_log = (fhd >> 3) & 0x1F
     if window_log == 0 {
-      Err("Invalid window log")
+      Err(ZSTDError::InvalidFrameHeader)
     } else {
       Ok(1 << (window_log + 10)) // Window_Log ranges from 10 to 31
     }
@@ -136,4 +136,30 @@ pub fn parse_frame_header_simple(data : Bytes) -> (Int, Int) {
     Ok((header, bytes_read)) => (header.frame_content_size, bytes_read)
     Err(_) => (0, 4)
   }
+}
+
+/// Parse skippable frame (RFC 8878)
+pub fn parse_skippable_frame(data : Bytes) -> ZSTDResult[(Int, Int)] {
+  if data.length() < 8 {
+    return Err(ZSTDError::InvalidFrameHeader)
+  }
+  
+  let stream = new_bitstream(data)
+  let (stream2, magic_bytes) = read_bytes(stream, 4)
+  
+  // Check skippable frame magic (0x184D2A5X where X is 0-F)
+  let magic = (magic_bytes[3].to_int() << 24) |
+              (magic_bytes[2].to_int() << 16) |
+              (magic_bytes[1].to_int() << 8) |
+              magic_bytes[0].to_int()
+  
+  let magic_base = magic & 0xFFFFFFF0
+  if magic_base != 0x184D2A50 {
+    return Err(ZSTDError::InvalidMagicNumber)
+  }
+  
+  // Read frame size (4 bytes, little-endian)
+  let (_, frame_size) = read_le_int(stream2, 4)
+  
+  Ok((frame_size, 8)) // Return size and header length
 }

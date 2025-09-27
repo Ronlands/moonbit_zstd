@@ -9,9 +9,10 @@ pub struct BitStream {
   bits : Int
 } derive(Show)
 
-/// Create a new bit stream
-pub fn new_bitstream(data : Array[Int]) -> BitStream {
-  { data: data, pos: 0, bit_pos: 0, bits: 0 }
+/// Create a new bit stream from bytes
+pub fn new_bitstream(data : Bytes) -> BitStream {
+  let data_array = data.to_array().map(fn(b) { b.to_int() })
+  { data: data_array, pos: 0, bit_pos: 0, bits: 0 }
 }
 
 /// Read a single bit
@@ -101,6 +102,39 @@ pub fn read_bytes(stream : BitStream, num_bytes : Int) -> (BitStream, Bytes) {
   }
   
   (current_stream, Bytes::from_array(result))
+}
+
+/// Read little-endian integer of specified bytes
+pub fn read_le_int(stream : BitStream, num_bytes : Int) -> (BitStream, Int) {
+  let mut result = 0
+  let mut current_stream = stream
+  
+  for i = 0; i < num_bytes; i = i + 1 {
+    let (new_stream, byte) = read_byte(current_stream)
+    result = result | (byte << (i * 8))
+    current_stream = new_stream
+  }
+  
+  (current_stream, result)
+}
+
+/// Peek at next byte without advancing the stream
+pub fn peek_byte(stream : BitStream) -> Int {
+  if stream.bit_pos == 0 && stream.pos < stream.data.length() {
+    stream.data[stream.pos]
+  } else {
+    0
+  }
+}
+
+/// Skip bytes in the stream
+pub fn skip_bytes(stream : BitStream, num_bytes : Int) -> BitStream {
+  { 
+    data: stream.data, 
+    pos: stream.pos + num_bytes, 
+    bit_pos: 0, 
+    bits: 0 
+  }
 }
 
 /// Get current position in bytes

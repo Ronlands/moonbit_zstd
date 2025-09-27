@@ -1,17 +1,6 @@
 {
   "is-main": true,
   "import": [
-    {
-      "path": "Ronlands/moonbit_zstd/api",
-      "alias": "zstd"
-    },
-    {
-      "path": "Ronlands/moonbit_zstd/examples",
-      "alias": "examples"
-    },
-    {
-      "path": "Ronlands/moonbit_zstd/tests",
-      "alias": "tests"
-    }
+    "moonbitlang/x/fs"
   ]
 }

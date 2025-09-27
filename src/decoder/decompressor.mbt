@@ -1,7 +1,7 @@
 /// ZSTD decompressor implementation
 /// Main entry point for ZSTD decompression according to RFC 8878
 
-import core::types::{DecompressionContext, FrameHeader}
+import core::types::{DecompressionContext, FrameHeader, ZSTDError, ZSTDResult}
 import decoder::frame::{parse_frame_header}
 import decoder::block::{decode_block}
 
@@ -14,7 +14,9 @@ pub fn new_decompressor() -> Decompressor {
   let context : DecompressionContext = {
     window_buffer: b"",
     dictionary: b"",
-    window_size: 1 << 16 // Default 64KB window
+    window_size: 1 << 16, // Default 64KB window
+    window_pos: 0,
+    frame_content_size: 0
   }
   
   {
@@ -24,12 +26,12 @@ pub fn new_decompressor() -> Decompressor {
 }
 
 /// Main decompression function
-pub fn decompress(data : Bytes) -> Result[Bytes, String] {
+pub fn decompress(data : Bytes) -> ZSTDResult[Bytes] {
   let decompressor = new_decompressor()
   let result = decompress_with_context(decompressor, data)
   match result {
     Ok((_, decompressed)) => Ok(decompressed)
-    Err(msg) => Err(msg)
+    Err(err) => Err(err)
   }
 }
 
@@ -37,22 +39,28 @@ pub fn decompress(data : Bytes) -> Result[Bytes, String] {
 pub fn decompress_with_context(
   decompressor : Decompressor, 
   data : Bytes
-) -> Result[(Decompressor, Bytes), String] {
+) -> ZSTDResult[(Decompressor, Bytes)] {
   
   if data.length() < 4 {
-    return Err("Data too short for ZSTD frame")
+    return Err(ZSTDError::InvalidData)
   }
   
   // Parse frame header
   let frame_result = parse_frame_header(data)
   let (frame_header, header_size) = match frame_result {
     Ok(result) => result
-    Err(msg) => return Err("Frame header error: " + msg)
+    Err(err) => return Err(err)
   }
   
   let mut offset = header_size
   let mut output_data : Array[Byte] = []
-  let mut current_context = decompressor.context
+  let mut current_context = { 
+    window_buffer: decompressor.context.window_buffer,
+    dictionary: decompressor.context.dictionary,
+    window_size: frame_header.window_size,
+    window_pos: 0,
+    frame_content_size: frame_header.frame_content_size
+  }
   
   // Decode blocks until we find the last block
   let mut last_block = false
@@ -60,7 +68,7 @@ pub fn decompress_with_context(
     let block_result = decode_block(data, offset, current_context)
     let (new_context, block_data, bytes_consumed) = match block_result {
       Ok(result) => result
-      Err(msg) => return Err("Block decoding error: " + msg)
+      Err(err) => return Err(err)
     }
     
     // Append block data to output
