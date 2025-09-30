@@ -3,7 +3,7 @@
   "import": [
     "moonbitlang/x/fs",
     {
-      "path": "Ronlands/moonbit_zstd/api",
+      "path": "Ronlands/moonbit_zstd/api", 
       "alias": "zstd"
     }
   ]

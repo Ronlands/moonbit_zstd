@@ -1,8 +1,0 @@
-{
-  "import": [
-    {
-      "path": "Ronlands/moonbit_zstd/api",
-      "alias": "api"
-    }
-  ]
-}

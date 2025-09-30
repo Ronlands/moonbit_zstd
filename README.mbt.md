@@ -198,7 +198,7 @@ moon test
 ### Test Results / 测试结果
 - **Golden Decompression Tests**: 4/4 passed (100%)
 - **New Test Data Files**: 9/10 passed (90%)
-- **Error Detection Tests**: 0/3 passed (0% - expected failures)
+- **Error Detection Tests**: 0/3 passed (0% - structure validation only, deep validation pending)
 - **Golden Compression Tests**: 1/1 passed (100%)
 
 ### Test Coverage / 测试覆盖
@@ -225,10 +225,14 @@ Our test suite includes:
 - `src/test-data/text/json.txt.zst` - JSON format content / JSON格式内容
 - `src/test-data/text/random.txt.zst` - Random data content (detected as corrupted) / 随机数据内容 (检测为损坏)
 
-#### ⚠️ **Error Detection Tests** (Partial Pass / 部分通过)
-- `src/test-data/golden-decompression-errors/off0.bin.zst` - Invalid offset detection / 无效偏移检测
-- `src/test-data/golden-decompression-errors/truncated_huff_state.zst` - Truncated Huffman state / 截断 Huffman 状态
-- `src/test-data/golden-decompression-errors/zeroSeq_extraneous.zst` - Extraneous sequence data / 多余序列数据
+#### ⚠️ **Error Detection Tests** (Structure Validation Only / 仅结构验证)
+- `src/test-data/golden-decompression-errors/off0.bin.zst` - Invalid offset detection (requires sequence execution validation) / 无效偏移检测 (需要序列执行验证)
+- `src/test-data/golden-decompression-errors/truncated_huff_state.zst` - Truncated Huffman state (requires FSE/Huffman validation) / 截断 Huffman 状态 (需要 FSE/Huffman 验证)
+- `src/test-data/golden-decompression-errors/zeroSeq_extraneous.zst` - Extraneous sequence data (requires sequence section validation) / 多余序列数据 (需要序列部分验证)
+
+**Note**: These error tests require deep decompression validation, not just structural parsing. Current implementation focuses on structural validation and will be enhanced with full decompression validation in future versions.
+
+**注意**: 这些错误测试需要深度解压缩验证，而不仅仅是结构解析。当前实现专注于结构验证，将在未来版本中增强完整的解压缩验证。
 
 ## 📖 API 参考
 
