@@ -51,30 +51,91 @@ pub fn compress_with_level(data: Bytes, _level: CompressionLevel) -> Bytes {
   // 帧头描述符 (单段模式，无内容校验，无字典)
   compressed = compressed + [0x20]
   
-  // 简化的块头生成 - 原始块类型
-  let block_size = data.length()
+  // 智能选择压缩方式
+  let compression_result = choose_compression_method(data)
   
-  // 根据数据大小使用预定义的块头
-  if block_size <= 8 {
-    // 8字节: (8 << 3) | 1 = 65 = 0x41
-    compressed = compressed + [0x41, 0x00, 0x00]
-  } else if block_size <= 14 {
-    // 14字节: (14 << 3) | 1 = 113 = 0x71
-    compressed = compressed + [0x71, 0x00, 0x00]
-  } else if block_size <= 100 {
-    // 100字节: (100 << 3) | 1 = 801 = 0x321
-    compressed = compressed + [0x21, 0x03, 0x00]
-  } else {
-    // 大数据: 使用通用原始块头
-    compressed = compressed + [0x01, 0x04, 0x00]
-  }
-  
-  // 原始数据
-  for i = 0; i < data.length(); i = i + 1 {
-    compressed = compressed + [data[i]]
+  match compression_result {
+    ("rle", rle_byte, rle_count) => {
+      // RLE压缩 - 块类型为1，最后块标志为1
+      let block_header = ((rle_count << 3) | (1 << 1) | 1)  // 块大小 + RLE块类型(1) + 最后块标志(1)
+      compressed = compressed + [
+        (block_header & 0xFF).to_byte(),
+        ((block_header >> 8) & 0xFF).to_byte(),
+        ((block_header >> 16) & 0xFF).to_byte()
+      ]
+      compressed = compressed + [rle_byte]
+    }
+    ("raw", _, _) => {
+      // 原始块压缩
+      let block_size = data.length()
+      let block_header = ((block_size << 3) | 0x01)  // 原始块类型 + 最后块标志
+      
+      compressed = compressed + [
+        (block_header & 0xFF).to_byte(),
+        ((block_header >> 8) & 0xFF).to_byte(),
+        ((block_header >> 16) & 0xFF).to_byte()
+      ]
+      
+      // 添加原始数据
+      for i = 0; i < data.length(); i = i + 1 {
+        compressed = compressed + [data[i]]
+      }
+    }
+    _ => {
+      // 回退到原始块
+      let block_size = data.length()
+      let block_header = ((block_size << 3) | 0x01)
+      
+      compressed = compressed + [
+        (block_header & 0xFF).to_byte(),
+        ((block_header >> 8) & 0xFF).to_byte(),
+        ((block_header >> 16) & 0xFF).to_byte()
+      ]
+      
+      for i = 0; i < data.length(); i = i + 1 {
+        compressed = compressed + [data[i]]
+      }
+    }
   }
   
   Bytes::from_array(compressed)
+}
+
+/// 选择最佳压缩方法
+fn choose_compression_method(data: Bytes) -> (String, Byte, Int) {
+  if data.length() == 0 {
+    return ("raw", 0, 0)
+  }
+  
+  // 检查是否适合RLE压缩
+  if is_suitable_for_rle(data) {
+    let first_byte = data[0]
+    return ("rle", first_byte, data.length())
+  }
+  
+  // 默认使用原始块
+  ("raw", 0, data.length())
+}
+
+/// 检查数据是否适合RLE压缩
+fn is_suitable_for_rle(data: Bytes) -> Bool {
+  if data.length() < 4 {
+    return false
+  }
+  
+  let first_byte = data[0]
+  let mut same_count = 1
+  
+  for i = 1; i < data.length(); i = i + 1 {
+    if data[i] == first_byte {
+      same_count = same_count + 1
+    } else {
+      break
+    }
+  }
+  
+  // 如果超过75%的数据是相同字节，使用RLE
+  same_count.to_double() / data.length().to_double() > 0.75
 }
 
 /// 基本解压缩函数
@@ -208,9 +269,10 @@ fn analyze_file_detailed(data: Bytes) -> ZSTDFileAnalysis {
   let dict_id_flag = (frame_desc & 0x03)
   let content_size_flag = (frame_desc & 0x0C) >> 2
   
-  // 检查保留位 - 修正保留位掩码
-  // 根据 RFC 8878，帧描述符的保留位只有第7位(0x80)
-  let reserved_bits = (frame_desc & 0x80)  // 只检查第7位保留位
+  // 检查保留位 - 根据 RFC 8878 规范修正
+  // 帧描述符格式: [FCS_Field(2) | Single_Segment_flag(1) | Unused_bit(1) | Reserved_bit(1) | Content_Checksum_flag(1) | DID_Field(2)]
+  // 第3位(0x08)是保留位，必须为0；第4位(0x10)是未使用位，可以忽略
+  let reserved_bits = (frame_desc & 0x08)  // 只检查第3位保留位
   if reserved_bits != 0 {
     return ZSTDFileAnalysis::{
       is_valid: false,

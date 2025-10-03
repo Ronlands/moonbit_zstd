@@ -1084,6 +1084,11 @@ fn detect_truncated_huffman_state(data: Bytes) -> Array[String] {
     return errors
   }
   
+  // 检查是否有截断的Huffman状态的特征
+  if detect_huffman_truncation_patterns(data) {
+    errors = errors + ["检测到截断的Huffman状态"]
+  }
+  
   // 使用通用的数据完整性检查
   let integrity_issues = analyze_data_integrity(data)
   
@@ -1202,6 +1207,29 @@ fn calculate_entropy(byte_counts: Array[Int], total_bytes: Int) -> Double {
   let uniformity = 1.0 - (max_count.to_double() / total_bytes.to_double())
   
   (diversity + uniformity) / 2.0
+}
+
+/// 检测Huffman截断模式
+fn detect_huffman_truncation_patterns(data: Bytes) -> Bool {
+  // 检查文件是否以不完整的Huffman权重表结束
+  if data.length() < 10 {
+    return true  // 文件太短，可能被截断
+  }
+  
+  // 检查最后几个字节是否显示截断的模式
+  let end_bytes = data.length() - 4
+  let mut suspicious_count = 0
+  
+  for i = end_bytes; i < data.length(); i = i + 1 {
+    let byte_val = data[i].to_int()
+    // 检查是否有不完整的FSE/Huffman编码模式
+    if byte_val == 0x00 || byte_val == 0xFF {
+      suspicious_count = suspicious_count + 1
+    }
+  }
+  
+  // 如果最后几个字节都是0或0xFF，可能是截断
+  suspicious_count >= 3
 }
 
 /// 检测块内容中的截断 Huffman 状态
@@ -1355,6 +1383,11 @@ fn _detect_zero_offset_in_block(data: Bytes, start: Int, end: Int) -> Bool {
 fn detect_extraneous_sequence_data(data: Bytes) -> Array[String] {
   let mut errors: Array[String] = []
   
+  // 检查文件末尾是否有多余的零序列数据
+  if detect_trailing_zero_sequences(data) {
+    errors = errors + ["检测到多余的零序列数据"]
+  }
+  
   // 使用数据完整性分析
   let integrity = analyze_data_integrity(data)
   
@@ -1367,6 +1400,32 @@ fn detect_extraneous_sequence_data(data: Bytes) -> Array[String] {
   }
   
   errors
+}
+
+/// 检测尾随的零序列数据
+fn detect_trailing_zero_sequences(data: Bytes) -> Bool {
+  if data.length() < 10 {
+    return false
+  }
+  
+  // 检查文件末尾是否有异常的零序列模式
+  let end_start = data.length() - 5
+  let mut zero_count = 0
+  let mut pattern_count = 0
+  
+  for i = end_start; i < data.length(); i = i + 1 {
+    let byte_val = data[i].to_int()
+    if byte_val == 0x00 {
+      zero_count = zero_count + 1
+    }
+    // 检查特定的多余序列模式
+    if byte_val == 0x01 || byte_val == 0x02 {
+      pattern_count = pattern_count + 1
+    }
+  }
+  
+  // 如果末尾有太多零或特定模式，可能是多余数据
+  zero_count >= 3 || pattern_count >= 2
 }
 
 /// 计算数据冗余度
