@@ -1,0 +1,33 @@
+{
+  "import": [
+    {
+      "path": "Ronlands/moonbit_zstd/core",
+      "alias": "zstd_core"
+    },
+    {
+      "path": "Ronlands/moonbit_zstd/decoder",
+      "alias": "decoder"
+    },
+    {
+      "path": "Ronlands/moonbit_zstd/encoder",
+      "alias": "encoder"
+    }
+  ],
+  "link": {
+    "wasm": {
+      "exports": [
+        "create_raw_dictionary",
+        "parse_zstd_dictionary",
+        "decompress_with_dictionary",
+        "compress_with_dictionary",
+        "build_dictionary",
+        "save_zstd_dictionary",
+        "validate_dictionary",
+        "calculate_dictionary_benefit",
+        "get_dictionary_stats",
+        "merge_dictionaries"
+      ]
+    }
+  }
+}
+

@@ -5,7 +5,6 @@
 
 /// 错误严重程度
 pub enum ErrorSeverity {
-  Warning    // 警告，可以继续处理
   Error      // 错误，需要停止当前操作
   Fatal      // 致命错误，需要终止整个解压缩过程
 }
@@ -54,7 +53,6 @@ pub fn zstd_error_to_string(error: ZSTDError) -> String {
 /// 获取错误严重程度字符串
 pub fn severity_to_string(severity: ErrorSeverity) -> String {
   match severity {
-    Warning => "警告"
     Error => "错误"
     Fatal => "致命错误"
   }
@@ -222,7 +220,6 @@ pub fn validate_history_reference(offset: Int, available_history: Int) -> Result
 pub enum RecoveryStrategy {
   Skip        // 跳过错误继续处理
   Retry       // 重试操作
-  UseDefault  // 使用默认值
   Abort       // 终止处理
 }
 
@@ -243,6 +240,11 @@ pub fn determine_recovery_strategy(error: ZSTDError) -> RecoveryStrategy {
     
     // 未知块类型，跳过处理
     UnknownBlockType => Skip
+    
+    // 带消息的错误，根据具体情况处理
+    Message(_) => Abort
+    ParseError(_) => Abort
+    ValidationError(_) => Skip
   }
 }
 
@@ -251,14 +253,12 @@ pub fn apply_recovery_strategy(strategy: RecoveryStrategy, context: String) -> S
   match strategy {
     Skip => "跳过错误，继续处理: " + context
     Retry => "重试操作: " + context
-    UseDefault => "使用默认值: " + context
     Abort => "终止处理: " + context
   }
 }
 
 /// 错误统计信息
 pub struct ErrorStats {
-  mut warning_count: Int
   mut error_count: Int
   mut fatal_count: Int
   mut total_count: Int
@@ -267,7 +267,6 @@ pub struct ErrorStats {
 /// 创建错误统计
 pub fn create_error_stats() -> ErrorStats {
   {
-    warning_count: 0,
     error_count: 0,
     fatal_count: 0,
     total_count: 0
@@ -278,7 +277,6 @@ pub fn create_error_stats() -> ErrorStats {
 pub fn update_error_stats(stats: ErrorStats, severity: ErrorSeverity) -> Unit {
   stats.total_count = stats.total_count + 1
   match severity {
-    Warning => stats.warning_count = stats.warning_count + 1
     Error => stats.error_count = stats.error_count + 1
     Fatal => stats.fatal_count = stats.fatal_count + 1
   }
@@ -287,7 +285,6 @@ pub fn update_error_stats(stats: ErrorStats, severity: ErrorSeverity) -> Unit {
 /// 获取错误统计报告
 pub fn get_error_stats_report(stats: ErrorStats) -> String {
   "错误统计: 总计 " + stats.total_count.to_string() + 
-  " (警告: " + stats.warning_count.to_string() +
-  ", 错误: " + stats.error_count.to_string() +
+  " (错误: " + stats.error_count.to_string() +
   ", 致命: " + stats.fatal_count.to_string() + ")"
 }

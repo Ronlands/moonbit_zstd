@@ -1,36 +1,36 @@
-# MoonBit ZSTD
+<!-- # MoonBit ZSTD
 
-🚀 A pure MoonBit implementation of the Zstandard (ZSTD) compression algorithm, strictly following RFC 8878 specification.
+A pure MoonBit implementation of the Zstandard (ZSTD) compression algorithm, strictly following RFC 8878 specification.
 
 一个纯 MoonBit 实现的 Zstandard (ZSTD) 压缩算法库，严格遵循 RFC 8878 规范。
 
-## 📋 Overview / 概览
+## Overview / 概览
 
 This library provides a complete implementation of the ZSTD compression algorithm in pure MoonBit, ensuring full compatibility with RFC 8878 specification. Focused on high-performance decompression and complete file format support.
 
 本库提供了 ZSTD 压缩算法在纯 MoonBit 中的完整实现，确保与 RFC 8878 规范完全兼容。专注于高性能解压缩和完整的文件格式支持。
 
-## ✨ Features / 特性
+## Features / 特性
 
-- 🎯 **RFC 8878 Compatible**: Strictly follows ZSTD official specification
-- ⚡ **High-Performance Decompression**: Optimized for decompression speed
-- 🔒 **Pure MoonBit**: No external dependencies, type-safe
-- 📊 **Complete Parser**: Supports all ZSTD file formats
-- 🧩 **Modular Design**: Clear architecture and separation of concerns
-- 🔍 **Deep Validation**: Comprehensive error detection and file integrity verification
-- 📁 **Multiple Block Types**: Raw, RLE, Compressed block type support
-- 🛠️ **Developer Friendly**: Rich debugging information and test suites
+- **RFC 8878 Compatible**: Strictly follows ZSTD official specification
+- **High-Performance Decompression**: Optimized for decompression speed
+- **Pure MoonBit**: No external dependencies, type-safe
+- **Complete Parser**: Supports all ZSTD file formats
+- **Modular Design**: Clear architecture and separation of concerns
+- **Deep Validation**: Comprehensive error detection and file integrity verification
+- **Multiple Block Types**: Raw, RLE, Compressed block type support
+- **Developer Friendly**: Rich debugging information and test suites
 
-- 🎯 **RFC 8878 兼容**: 严格遵循 ZSTD 官方规范
-- ⚡ **高性能解压缩**: 针对解压缩速度进行优化
-- 🔒 **纯 MoonBit**: 无外部依赖，类型安全
-- 📊 **完整解析器**: 支持所有 ZSTD 文件格式
-- 🧩 **模块化设计**: 清晰的架构和关注点分离
-- 🔍 **深度验证**: 全面的错误检测和文件完整性验证
-- 📁 **多种块类型**: Raw、RLE、Compressed 块类型支持
-- 🛠️ **开发友好**: 丰富的调试信息和测试套件
+- **RFC 8878 兼容**: 严格遵循 ZSTD 官方规范
+- **高性能解压缩**: 针对解压缩速度进行优化
+- **纯 MoonBit**: 无外部依赖，类型安全
+- **完整解析器**: 支持所有 ZSTD 文件格式
+- **模块化设计**: 清晰的架构和关注点分离
+- **深度验证**: 全面的错误检测和文件完整性验证
+- **多种块类型**: Raw、RLE、Compressed 块类型支持
+- **开发友好**: 丰富的调试信息和测试套件
 
-## 🏗️ Project Architecture / 项目架构
+## Project Architecture / 项目架构
 
 ```
 src/
@@ -84,9 +84,9 @@ src/
     └── compatibility_tests.mbt # Compatibility tests / 兼容性测试
 ```
 
-## 🔧 实现细节
+## 实现细节
 
-### 📦 核心模块详解
+### 核心模块详解
 
 #### `core/types.mbt` - 核心类型系统
 ```moonbit
@@ -128,9 +128,9 @@ pub enum LiteralsType { Raw | RLE | Compressed | Treeless }
 - **错误检测**: 针对性的错误识别
 - **结构分析**: 详细的文件结构报告
 
-### 🎯 当前实现状态
+### 当前实现状态
 
-#### ✅ **已完成功能**
+#### 已完成功能
 - **帧格式解析** (100%): 完整的 RFC 8878 帧头支持
 - **块解析** (100%): 所有块类型的头部解析
 - **Raw 块解压缩** (100%): 完整实现
@@ -139,16 +139,16 @@ pub enum LiteralsType { Raw | RLE | Compressed | Treeless }
 - **错误处理** (100%): 全面的错误检测
 - **API 设计** (100%): 用户友好的高级接口
 
-#### 🚧 **进行中功能**
+#### 进行中功能
 - **Compressed 块解压缩** (40%): 基础框架已完成
-  - ✅ Literals 部分解析
-  - ✅ Sequences 部分框架
-  - 🚧 完整 FSE 解码
-  - 🚧 完整 Huffman 解码
+  - Literals 部分解析
+  - Sequences 部分框架
+  - 完整 FSE 解码
+  - 完整 Huffman 解码
 - **压缩功能** (20%): 基础结构已建立
 - **性能优化** (持续进行)
 
-## 🚀 Quick Start / 快速开始
+## Quick Start / 快速开始
 
 ### Installation / 安装
 Add this project to your `moon.mod.json`:
@@ -184,7 +184,7 @@ let decompressor = zstd.create_decompressor()
 let (new_decompressor, result) = zstd.decompress_with_decompressor(decompressor, data)
 ```
 
-## 🧪 Testing / 测试
+## Testing / 测试
 
 ### Running Tests / 运行测试
 ```bash
@@ -207,13 +207,13 @@ Our test suite includes:
 
 我们的测试套件包含：
 
-#### ✅ **Golden Decompression Tests** (100% Pass Rate / 100% 通过)
+#### Golden Decompression Tests (100% Pass Rate / 100% 通过)
 - `src/test-data/golden-decompression/empty-block.zst` - Minimal valid ZSTD frame / 最小有效 ZSTD 帧
 - `src/test-data/golden-decompression/rle-first-block.zst` - RLE compressed data / RLE 压缩数据
 - `src/test-data/golden-decompression/zeroSeq_2B.zst` - Zero sequence data / 零序列数据
 - `src/test-data/golden-decompression/block-128k.zst` - Large data block (128KB) / 大数据块 (128KB)
 
-#### ✅ **New Test Data Files** (90% Pass Rate / 90% 通过)
+#### New Test Data Files (90% Pass Rate / 90% 通过)
 - `src/test-data/text/empty.txt.zst` - Empty text file / 空文本文件
 - `src/test-data/text/single_char.txt.zst` - Single character file / 单字符文件
 - `src/test-data/text/short.txt.zst` - Short content file / 短内容文件
@@ -225,7 +225,7 @@ Our test suite includes:
 - `src/test-data/text/json.txt.zst` - JSON format content / JSON格式内容
 - `src/test-data/text/random.txt.zst` - Random data content (detected as corrupted) / 随机数据内容 (检测为损坏)
 
-#### ⚠️ **Error Detection Tests** (Structure Validation Only / 仅结构验证)
+#### Error Detection Tests (Structure Validation Only / 仅结构验证)
 - `src/test-data/golden-decompression-errors/off0.bin.zst` - Invalid offset detection (requires sequence execution validation) / 无效偏移检测 (需要序列执行验证)
 - `src/test-data/golden-decompression-errors/truncated_huff_state.zst` - Truncated Huffman state (requires FSE/Huffman validation) / 截断 Huffman 状态 (需要 FSE/Huffman 验证)
 - `src/test-data/golden-decompression-errors/zeroSeq_extraneous.zst` - Extraneous sequence data (requires sequence section validation) / 多余序列数据 (需要序列部分验证)
@@ -275,7 +275,7 @@ pub struct ZSTDFileAnalysis {
 }
 ```
 
-## 🎯 Use Cases / 使用场景
+## Use Cases / 使用场景
 
 ### 1. File Format Validation / 文件格式验证
 ```moonbit
@@ -311,7 +311,7 @@ for chunk in file_chunks {
 }
 ```
 
-## 🔬 Technical Implementation Highlights / 技术实现亮点
+## Technical Implementation Highlights / 技术实现亮点
 
 ### RFC 8878 Strict Compliance / RFC 8878 严格遵循
 - Complete magic number validation: `0xFD2FB528` / 完整的魔数验证: `0xFD2FB528`
@@ -330,7 +330,7 @@ for chunk in file_chunks {
 - Compile-time correctness guarantees / 编译时保证的正确性
 - Clear API boundaries / 清晰的 API 边界
 
-## 📊 Performance Data / 性能数据
+## Performance Data / 性能数据
 
 Current implementation performance characteristics:
 
@@ -343,7 +343,7 @@ Current implementation performance characteristics:
 | Small files / 小文件   | Fast / 快       | Low / 低       | 100%  |
 | Large files / 大文件   | Fast / 快       | Medium / 中等     | 100%  |
 
-## 🛣️ Roadmap / 发展路线图
+## Roadmap / 发展路线图
 
 ### Short-term Goals / 短期目标
 - [ ] Complete Compressed block decompression / 完整的 Compressed 块解压缩
@@ -362,7 +362,7 @@ Current implementation performance characteristics:
 - [ ] Advanced compression options / 高级压缩选项
 - [ ] Memory-mapped file support / 内存映射文件支持
 
-## 🤝 Contributing / 贡献指南
+## Contributing / 贡献指南
 
 Contributions are welcome! Please follow these guidelines:
 
@@ -375,19 +375,19 @@ Contributions are welcome! Please follow these guidelines:
 5. Open a **Pull Request** / 开启 **Pull Request**
 
 ### Contribution Areas / 贡献领域
-- 🚀 Performance optimization / 性能优化
-- 🧪 More test cases / 更多测试用例
-- 📖 Documentation improvements / 文档改进
-- 🔧 New feature implementation / 新功能实现
-- 🐛 Bug fixes / Bug 修复
+- Performance optimization / 性能优化
+- More test cases / 更多测试用例
+- Documentation improvements / 文档改进
+- New feature implementation / 新功能实现
+- Bug fixes / Bug 修复
 
-## 📄 License / 许可证
+## License / 许可证
 
 This project is licensed under the [Apache-2.0](LICENSE) License.
 
 此项目使用 [Apache-2.0](LICENSE) 许可证。
 
-## 🎖️ Acknowledgments / 致谢
+## Acknowledgments / 致谢
 
 - [RFC 8878](https://www.rfc-editor.org/rfc/rfc8878.html) - ZSTD official specification / ZSTD 官方规范
 - [Facebook ZSTD](https://github.com/facebook/zstd) - Official reference implementation / 官方参考实现
@@ -395,8 +395,8 @@ This project is licensed under the [Apache-2.0](LICENSE) License.
 
 ---
 
-⭐ If this project helps you, please give us a star! / 如果这个项目对您有帮助，请给我们一个 star！
+If this project helps you, please give us a star! / 如果这个项目对您有帮助，请给我们一个 star！
 
-🐛 Found a bug? Please report it in [Issues](https://github.com/Ronlands/moonbit_zstd/issues). / 发现问题？请在 [Issues](https://github.com/Ronlands/moonbit_zstd/issues) 中报告。
+Found a bug? Please report it in [Issues](https://github.com/Ronlands/moonbit_zstd/issues). / 发现问题？请在 [Issues](https://github.com/Ronlands/moonbit_zstd/issues) 中报告。
 
-📧 Questions? Contact us: [your-email@domain.com] / 有问题？联系我们：[your-email@domain.com]
+Questions? Contact us: [your-email@domain.com] / 有问题？联系我们：[your-email@domain.com] -->

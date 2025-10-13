@@ -1,50 +1,10 @@
 /// ZSTD 字典和窗口缓冲区管理模块
 /// 实现字典加载、窗口缓冲区管理和历史数据访问
 
-/// 字典类型
-pub enum DictionaryType {
-  None          // 无字典
-  Raw           // 原始字典
-  Formatted     // 格式化字典
-}
-
-/// 字典信息
-pub struct Dictionary {
-  dict_type: DictionaryType
-  dict_id: UInt             // 字典ID
-  data: Bytes               // 字典数据
-  size: Int                 // 字典大小
-}
-
-/// 窗口缓冲区
-/// 用于存储最近解压缩的数据，支持回溯引用
-pub struct WindowBuffer {
-  buffer: Array[Byte]   // 环形缓冲区
-  capacity: Int         // 缓冲区容量
-  mut position: Int         // 当前写入位置
-  mut size: Int             // 当前有效数据大小
-  dictionary: Dictionary    // 关联的字典
-}
-
-/// 创建空字典
-pub fn create_empty_dictionary() -> Dictionary {
-  {
-    dict_type: None,
-    dict_id: 0,
-    data: Bytes::from_array([]),
-    size: 0
-  }
-}
-
-/// 从数据创建原始字典
-pub fn create_raw_dictionary(data: Bytes) -> Dictionary {
-  {
-    dict_type: Raw,
-    dict_id: 0,
-    data: data,
-    size: data.length()
-  }
-}
+// Use types from core module
+pub typealias @zstd_core.Dictionary as Dictionary
+pub typealias @zstd_core.DictionaryType as DictionaryType  
+pub typealias @zstd_core.WindowBuffer as WindowBuffer
 
 /// 解析格式化字典
 /// 格式化字典包含魔数、字典ID和压缩数据
@@ -70,41 +30,31 @@ pub fn parse_formatted_dictionary(data: Bytes) -> Result[Dictionary, String] {
                 (data[7].to_uint() << 24)
   
   // 提取字典内容（跳过8字节头部）
-  let dict_content_size = data.length() - 8
+  let _dict_content_size = data.length() - 8
   let dict_content: Array[Byte] = []
   for i = 8; i < data.length(); i = i + 1 {
     dict_content.push(data[i])
   }
   
-  Ok({
-    dict_type: Formatted,
-    dict_id: dict_id,
-    data: Bytes::from_array(dict_content),
-    size: dict_content_size
-  })
-}
-
-/// 创建窗口缓冲区
-pub fn create_window_buffer(capacity: Int, dictionary: Dictionary) -> WindowBuffer {
-  let actual_capacity = capacity.max(1024)  // 最小1KB
-  
-  {
-    buffer: Array::make(actual_capacity, 0),
-    capacity: actual_capacity,
-    position: 0,
-    size: 0,
-    dictionary: dictionary
-  }
+  Ok(@zstd_core.create_formatted_dictionary(
+    Bytes::from_array(dict_content),
+    dict_id
+  ))
 }
 
 /// 向窗口缓冲区写入数据
 pub fn write_to_window(window: WindowBuffer, data: Bytes) -> Unit {
+  let buffer = @zstd_core.get_window_buffer(window)
+  let capacity = @zstd_core.get_window_capacity(window)
+  let size = @zstd_core.get_window_size(window)
+  
   for i = 0; i < data.length(); i = i + 1 {
-    window.buffer[window.position] = data[i]
-    window.position = (window.position + 1) % window.capacity
+    let position = @zstd_core.get_window_position(window)
+    buffer[position] = data[i]
+    @zstd_core.increment_window_position(window, capacity)
     
-    if window.size < window.capacity {
-      window.size = window.size + 1
+    if size < capacity {
+      @zstd_core.increment_window_size(window)
     }
   }
 }
@@ -172,17 +122,22 @@ pub fn copy_match(window: WindowBuffer, offset: Int, length: Int) -> Result[Byte
   let copied_data: Array[Byte] = []
   
   // 逐字节复制，支持重叠复制
+  let buffer = @zstd_core.get_window_buffer(window)
+  let capacity = @zstd_core.get_window_capacity(window)
+  let size = @zstd_core.get_window_size(window)
+  
   for i = 0; i < length; i = i + 1 {
     let byte_result = get_historical_byte(window, offset)
     match byte_result {
       Ok(byte_val) => {
         copied_data.push(byte_val)
         // 将复制的字节也写入窗口缓冲区
-        window.buffer[window.position] = byte_val
-        window.position = (window.position + 1) % window.capacity
+        let position = @zstd_core.get_window_position(window)
+        buffer[position] = byte_val
+        @zstd_core.increment_window_position(window, capacity)
         
-        if window.size < window.capacity {
-          window.size = window.size + 1
+        if size < capacity {
+          @zstd_core.increment_window_size(window)
         }
       }
       Err(e) => return Err(e)
@@ -194,19 +149,26 @@ pub fn copy_match(window: WindowBuffer, offset: Int, length: Int) -> Result[Byte
 
 /// 获取窗口缓冲区的当前状态信息
 pub fn get_window_info(window: WindowBuffer) -> String {
-  "WindowBuffer: capacity=" + window.capacity.to_string() + 
-  ", size=" + window.size.to_string() + 
-  ", position=" + window.position.to_string() +
-  ", dict_size=" + window.dictionary.size.to_string()
+  let capacity = @zstd_core.get_window_capacity(window)
+  let size = @zstd_core.get_window_size(window)
+  let position = @zstd_core.get_window_position(window)
+  let dictionary = @zstd_core.get_window_dictionary(window)
+  
+  "WindowBuffer: capacity=" + capacity.to_string() + 
+  ", size=" + size.to_string() + 
+  ", position=" + position.to_string() +
+  ", dict_size=" + dictionary.size.to_string()
 }
 
 /// 重置窗口缓冲区
 pub fn reset_window(window: WindowBuffer) -> Unit {
-  window.position = 0
-  window.size = 0
+  @zstd_core.set_window_position(window, 0)
+  @zstd_core.set_window_size(window, 0)
   // 清空缓冲区
-  for i = 0; i < window.capacity; i = i + 1 {
-    window.buffer[i] = 0
+  let buffer = @zstd_core.get_window_buffer(window)
+  let capacity = @zstd_core.get_window_capacity(window)
+  for i = 0; i < capacity; i = i + 1 {
+    buffer[i] = 0
   }
 }
 
@@ -241,23 +203,28 @@ pub fn calculate_window_size(window_descriptor: Byte) -> Int {
 /// 预加载字典到窗口缓冲区
 /// 在开始解压缩之前，将字典内容预加载到窗口缓冲区
 pub fn preload_dictionary(window: WindowBuffer) -> Unit {
-  if window.dictionary.size > 0 {
+  let dictionary = @zstd_core.get_window_dictionary(window)
+  if dictionary.size > 0 {
     // 将字典数据复制到窗口缓冲区的末尾
-    let dict_data = window.dictionary.data
-    let copy_size = dict_data.length().min(window.capacity)
+    let dict_data = dictionary.data
+    let capacity = @zstd_core.get_window_capacity(window)
+    let copy_size = dict_data.length().min(capacity)
     
+    let buffer = @zstd_core.get_window_buffer(window)
     // 从字典末尾开始复制（最近的数据）
     let start_pos = dict_data.length() - copy_size
     for i = 0; i < copy_size; i = i + 1 {
-      window.buffer[i] = dict_data[start_pos + i]
+      buffer[i] = dict_data[start_pos + i]
     }
     
-    window.size = copy_size
-    window.position = copy_size % window.capacity
+    @zstd_core.set_window_size(window, copy_size)
+    @zstd_core.set_window_position(window, copy_size % capacity)
   }
 }
 
 /// 获取可用的历史数据总量
 pub fn get_available_history_size(window: WindowBuffer) -> Int {
-  window.size + window.dictionary.size
+  let size = @zstd_core.get_window_size(window)
+  let dictionary = @zstd_core.get_window_dictionary(window)
+  size + dictionary.size
 }

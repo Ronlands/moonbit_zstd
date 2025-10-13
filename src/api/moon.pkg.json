@@ -1,9 +1,18 @@
 {
   "import": [
-    {
-      "path": "Ronlands/moonbit_zstd/decoder",
-      "alias": "decoder"
+  ],
+  "link": {
+    "wasm": {
+      "exports": [
+        "compress",
+        "compress_with_level",
+        "decompress",
+        "analyze_file",
+        "analyze_data_integrity",
+        "is_zstd_format",
+        "estimate_compressed_size"
+      ]
     }
-  ]
+  }
 }
 

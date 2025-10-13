@@ -2,8 +2,17 @@
   "import": [
     {
       "path": "Ronlands/moonbit_zstd/core",
-      "alias": "core"
+      "alias": "zstd_core"
     }
   ],
-  "test-import": []
+  "test-import": [],
+  "link": {
+    "wasm": {
+      "exports": [
+        "new_compressor",
+        "compress",
+        "compress_with_context"
+      ]
+    }
+  }
 }

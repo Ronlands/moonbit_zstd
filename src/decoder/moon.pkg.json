@@ -2,7 +2,26 @@
   "import": [
     {
       "path": "Ronlands/moonbit_zstd/core",
-      "alias": "core"
+      "alias": "zstd_core"
+    },
+    {
+      "path": "Ronlands/moonbit_zstd/entropy",
+      "alias": "zstd_entropy"
     }
-  ]
+  ],
+  "link": {
+    "wasm": {
+      "exports": [
+        "decompress",
+        "new_decompressor",
+        "create_decompressor",
+        "decompress_with_decompressor",
+        "reset_decompressor",
+        "parse_frame_header",
+        "parse_frame_header_simple",
+        "validate_frame_header",
+        "decompress_block"
+      ]
+    }
+  }
 }

@@ -1,3 +1,23 @@
 {
-  "import": []
+  "name": "zstd_core",
+  "import": [],
+  "link": {
+    "wasm": {
+      "exports": [
+        "new_bitstream",
+        "read_bytes",
+        "read_byte",
+        "read_le_int",
+        "skip_bytes",
+        "error_to_string",
+        "zstd_error_to_string",
+        "validate_magic_number",
+        "validate_frame_descriptor",
+        "validate_block_header",
+        "validate_data_integrity",
+        "validate_window_size",
+        "format_error"
+      ]
+    }
+  }
 }
