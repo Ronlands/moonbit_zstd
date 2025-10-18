@@ -133,7 +133,7 @@ pub fn decompress(data: Bytes) -> Bytes {
   }
   
   let magic = (data[3].to_int() << 24) | (data[2].to_int() << 16) | (data[1].to_int() << 8) | data[0].to_int()
-  if magic != 0xFD2FB528 {
+  if magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT {
     return Bytes::from_array([])
   }
   
@@ -243,7 +243,7 @@ fn analyze_file_detailed(data: Bytes) -> ZSTDFileAnalysis {
   
   let magic = (data[3].to_int() << 24) | (data[2].to_int() << 16) | (data[1].to_int() << 8) | data[0].to_int()
   
-  if magic != 0xFD2FB528 {
+  if magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT {
     return ZSTDFileAnalysis::{
       is_valid: false,
       error_message: "无效的 ZSTD 魔数",
@@ -358,7 +358,7 @@ fn analyze_file_detailed(data: Bytes) -> ZSTDFileAnalysis {
   let block_type = (block_header >> 1) & 0x03
   let block_size = block_header >> 3
   
-  if block_size > 131072 {
+  if block_size > @zstd_core.ZSTD_MAX_BLOCK_SIZE {
     return ZSTDFileAnalysis::{
       is_valid: false,
       error_message: "块大小超过最大限制",
@@ -374,7 +374,7 @@ fn analyze_file_detailed(data: Bytes) -> ZSTDFileAnalysis {
     }
   }
   
-  if block_size == 131072 {
+  if block_size == @zstd_core.ZSTD_MAX_BLOCK_SIZE {
     if data.length() < offset + 3 + block_size {
       return ZSTDFileAnalysis::{
         is_valid: false,
@@ -453,7 +453,7 @@ fn detect_error_patterns(data: Bytes, block_offset: Int) -> String {
     return ""
   }
   
-  if block_size == 131072 {
+  if block_size == @zstd_core.ZSTD_MAX_BLOCK_SIZE {
     return ""
   }
   
@@ -562,7 +562,7 @@ pub fn is_zstd_format(data: Bytes) -> Bool {
   }
   
   let magic = (data[3].to_int() << 24) | (data[2].to_int() << 16) | (data[1].to_int() << 8) | data[0].to_int()
-  magic == 0xFD2FB528
+  magic == @zstd_core.ZSTD_MAGIC_NUMBER_INT
 }
 
 /// 估算压缩后的大小
@@ -576,7 +576,6 @@ pub fn estimate_compressed_size(data: Bytes, level: CompressionLevel) -> Int {
     CompressionLevel::Best => (data.length() * 40 / 100) + overhead
   }
 }
-
 /// 运行所有基础测试
 pub fn run_all_basic_tests() -> Bool {
   let tests = [
@@ -628,7 +627,7 @@ pub fn run_all_compatibility_tests() -> Bool {
 
 /// 测试基础压缩和解压缩
 fn test_basic_compression() -> Bool {
-  let test_data = "Hello, MoonBit ZSTD!".to_bytes()
+  let test_data = @encoding/utf8.encode("Hello, MoonBit ZSTD!")
   
   // Test compression
   let compressed = compress(test_data)
@@ -654,7 +653,7 @@ fn test_basic_compression() -> Bool {
 
 /// 测试ZSTD格式检测
 fn test_format_detection() -> Bool {
-  let test_data = "Hello, World!".to_bytes()
+  let test_data = @encoding/utf8.encode("Hello, World!")
   let compressed = compress(test_data)
   
   // Should detect as valid ZSTD format
@@ -663,7 +662,7 @@ fn test_format_detection() -> Bool {
 
 /// 测试文件分析
 fn test_file_analysis() -> Bool {
-  let test_data = "Test data for analysis".to_bytes()
+  let test_data = @encoding/utf8.encode("Test data for analysis")
   let compressed = compress(test_data)
   let analysis = analyze_file(compressed)
   
@@ -673,7 +672,7 @@ fn test_file_analysis() -> Bool {
 
 /// 测试不同压缩级别
 fn test_compression_levels() -> Bool {
-  let test_data = "Test data for different compression levels".to_bytes()
+  let test_data = @encoding/utf8.encode("Test data for different compression levels")
   
   // Test all compression levels
   let fast_compressed = compress_with_level(test_data, CompressionLevel::Fast)
@@ -700,7 +699,7 @@ fn test_empty_data() -> Bool {
 
 /// 测试数据完整性分析
 fn test_data_integrity() -> Bool {
-  let test_data = "Data integrity test".to_bytes()
+  let test_data = @encoding/utf8.encode("Data integrity test")
   let integrity = analyze_data_integrity(test_data)
   
   // Should return valid analysis
@@ -709,7 +708,7 @@ fn test_data_integrity() -> Bool {
 
 /// 测试魔数兼容性
 fn test_magic_number_compliance() -> Bool {
-  let test_data = "Magic number test".to_bytes()
+  let test_data = @encoding/utf8.encode("Magic number test")
   let compressed = compress(test_data)
   
   if compressed.length() < 4 {
@@ -722,17 +721,17 @@ fn test_magic_number_compliance() -> Bool {
               (compressed[1].to_int() << 8) |
               compressed[0].to_int()
   
-  magic == 0xFD2FB528
+  magic == @zstd_core.ZSTD_MAGIC_NUMBER_INT
 }
 
 /// 测试帧头格式兼容性
 fn test_frame_header_compliance() -> Bool {
-  let test_data = "Frame header test".to_bytes()
+  let test_data = @encoding/utf8.encode("Frame header test")
   let compressed = compress(test_data)
   let analysis = analyze_file(compressed)
   
   // Should have valid frame header
-  analysis.is_valid && analysis.magic_number == 0xFD2FB528U
+  analysis.is_valid && analysis.magic_number == @zstd_core.ZSTD_MAGIC_NUMBER
 }
 
 /// 测试错误处理
@@ -776,3 +775,4 @@ fn test_rle_optimization() -> Bool {
   // Should compress and decompress repeated data correctly
   decompressed.length() == test_data.length()
 }
+

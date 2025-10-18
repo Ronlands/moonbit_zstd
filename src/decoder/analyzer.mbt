@@ -48,12 +48,12 @@ pub fn analyze_file(data: Bytes) -> ZSTDFileAnalysis {
               data[0].to_int()
   
   // 检查是否为可跳过帧 (0x184D2A50 到 0x184D2A5F)
-  if (magic & 0xFFFFFFF0) == 0x184D2A50 {
+  if (magic & @zstd_core.ZSTD_SKIPPABLE_MAGIC_MASK) == @zstd_core.ZSTD_SKIPPABLE_MAGIC_MIN {
     return analyze_skippable_frame(data, magic)
   }
   
   // 验证魔数是否为 ZSTD 标准值
-  if magic != 0xFD2FB528 {
+  if magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT {
     return create_invalid_analysis("无效的 ZSTD 魔数: 0x" + magic.to_string(), data.length())
   }
   
@@ -447,7 +447,7 @@ pub fn is_zstd_file(data: Bytes) -> Bool {
                 (data[2].to_int() << 16) |
                 (data[1].to_int() << 8) |
                 data[0].to_int()
-    magic == 0xFD2FB528
+    magic == @zstd_core.ZSTD_MAGIC_NUMBER_INT
   }
 }
 
@@ -1000,7 +1000,7 @@ fn has_valid_frame_header(data: Bytes) -> Bool {
               (data[1].to_int() << 8) |
               data[0].to_int()
   
-  if magic != 0xFD2FB528 {
+  if magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT {
     return false
   }
   
@@ -1038,7 +1038,7 @@ fn has_reasonable_block_header(data: Bytes, offset: Int, block_size: Int) -> Boo
   match block_type {
     0 => { // 原始块
       // 原始块应该有合理的大小
-      block_size >= 0 && block_size <= 131072
+      block_size >= 0 && block_size <= @zstd_core.ZSTD_MAX_BLOCK_SIZE
     }
     1 => { // RLE块
       // RLE块可以有大的声明大小
@@ -1046,7 +1046,7 @@ fn has_reasonable_block_header(data: Bytes, offset: Int, block_size: Int) -> Boo
     }
     2 => { // 压缩块
       // 压缩块应该有合理的大小
-      block_size >= 0 && block_size <= 131072
+      block_size >= 0 && block_size <= @zstd_core.ZSTD_MAX_BLOCK_SIZE
     }
     _ => false
   }
@@ -1238,7 +1238,7 @@ fn detect_block_size_corruption(data: Bytes) -> Array[String] {
         let max_block_size = if frame_header.window_size > 0 { 
           frame_header.window_size 
         } else { 
-          131072
+          @zstd_core.ZSTD_MAX_BLOCK_SIZE
         }
         
         // 检查块大小是否超过最大限制
@@ -1952,7 +1952,7 @@ fn detect_magicless_format_errors(data: Bytes) -> Array[String] {
                       (data[2].to_int() << 16) | (data[3].to_int() << 24)
   
   // 检查遗留魔数范围
-  if first_4_bytes >= 0x184D2A50 && first_4_bytes <= 0x184D2A5F {
+  if first_4_bytes >= @zstd_core.ZSTD_SKIPPABLE_MAGIC_MIN && first_4_bytes <= @zstd_core.ZSTD_SKIPPABLE_MAGIC_MAX {
     // 这看起来像可跳过帧魔数，但在无魔数格式中可能被错误处理
     errors = errors + ["检测到可能的无魔数格式错误: 以可跳过魔数开头"]
   }

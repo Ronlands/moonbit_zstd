@@ -251,8 +251,33 @@ pub fn make_sequences_section_info(
   { num_sequences, ll_mode, ml_mode, of_mode }
 }
 
-/// ZSTD magic number constant
+// ============================================================================
+// ZSTD Format Constants
+// ============================================================================
+
+/// ZSTD magic number constant (RFC 8878)
 pub const ZSTD_MAGIC_NUMBER : UInt = 0xFD2FB528U
+
+/// ZSTD magic number as Int for comparison
+pub const ZSTD_MAGIC_NUMBER_INT : Int = 0xFD2FB528
+
+/// Skippable frame magic number range start
+pub const ZSTD_SKIPPABLE_MAGIC_MIN : Int = 0x184D2A50
+
+/// Skippable frame magic number range end  
+pub const ZSTD_SKIPPABLE_MAGIC_MAX : Int = 0x184D2A5F
+
+/// Skippable frame magic number mask
+pub const ZSTD_SKIPPABLE_MAGIC_MASK : Int = 0xFFFFFFF0
+
+/// Maximum block size (128 KB)
+pub const ZSTD_MAX_BLOCK_SIZE : Int = 131072
+
+/// Block header size (3 bytes)
+pub const ZSTD_BLOCK_HEADER_SIZE : Int = 3
+
+/// Frame magic number size (4 bytes)
+pub const ZSTD_MAGIC_NUMBER_SIZE : Int = 4
 
 /// Convert error to string
 pub fn error_to_string(error: ZSTDError) -> String {

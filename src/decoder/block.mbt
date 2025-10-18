@@ -478,7 +478,7 @@ fn decompress_compressed_block(data: Bytes, offset: Int, size: Int) -> Result[By
     return Err("Invalid compressed block: zero size")
   }
   
-  if size > 131072 {  // ZSTD 最大块大小 128KB
+  if size > @zstd_core.ZSTD_MAX_BLOCK_SIZE {  // ZSTD 最大块大小 128KB
     return Err("Invalid compressed block: size exceeds maximum (128KB)")
   }
   
@@ -853,7 +853,7 @@ fn copy_from_window(window: @zstd_core.WindowBuffer, offset: Int, length: Int) -
     return Err("Invalid match length: length must be positive")
   }
   
-  if length > 131072 {  // ZSTD 最大块大小
+  if length > @zstd_core.ZSTD_MAX_BLOCK_SIZE {  // ZSTD 最大块大小
     return Err("Invalid match length: length exceeds maximum block size")
   }
   

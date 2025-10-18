@@ -1,6 +1,10 @@
 {
   "import": [
     {
+      "path": "Ronlands/moonbit_zstd/core",
+      "alias": "zstd_core"
+    },
+    {
       "path": "Ronlands/moonbit_zstd/decoder",
       "alias": "zstd_decoder"
     }
