@@ -1271,15 +1271,21 @@ fn detect_block_size_corruption(data: Bytes) -> Array[String] {
         
         current_offset = current_offset + 3 + block_size
         
-        if is_last_block {
-          break
-        }
+      if is_last_block {
+        break
       }
-      
-  // 检查文件末尾是否有未消耗的数据（更严格）
+    }
+    
+  // 检查文件末尾是否有未消耗的数据
+  // 注意：如果 Content_Checksum=true，末尾会有 4 字节校验和
   let remaining_bytes = data.length() - current_offset
-  if remaining_bytes > 0 {
-    errors = errors + ["文件末尾有未消耗的数据: " + remaining_bytes.to_string() + " 字节"]
+  let expected_checksum_size = if frame_header.content_checksum { 4 } else { 0 }
+  
+  if remaining_bytes > expected_checksum_size {
+    let unexpected_bytes = remaining_bytes - expected_checksum_size
+    errors = errors + ["文件末尾有未消耗的数据: " + unexpected_bytes.to_string() + " 字节"]
+  } else if remaining_bytes < expected_checksum_size {
+    errors = errors + ["校验和不完整: 期望 " + expected_checksum_size.to_string() + " 字节，实际 " + remaining_bytes.to_string() + " 字节"]
   }
     }
     Err(_) => ignore(())

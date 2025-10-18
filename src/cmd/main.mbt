@@ -8,6 +8,13 @@ fn main {
   
   run_demos()
   @zstd_examples.test_file_compression()
+  
+  // RFC 8878 Compliance: Official zstd tool compatibility
+  @zstd_examples.test_user_official_file()
+  
+  // RFC 8878 Compliance: Batch test all official golden files
+  @zstd_examples.test_all_golden_files()
+  
   run_tests()
 }
 

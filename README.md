@@ -1,35 +1,35 @@
-# 🚀 MoonBit ZSTD
+# MoonBit ZSTD
 
 A pure MoonBit implementation of Zstandard (ZSTD) compression algorithm, fully compliant with RFC 8878.
 
 纯 MoonBit 实现的 Zstandard (ZSTD) 压缩算法库，完全符合 RFC 8878 规范。
 
-## ✨ Why MoonBit ZSTD? / 为什么选择 MoonBit ZSTD？
+## Why MoonBit ZSTD? / 为什么选择 MoonBit ZSTD？
 
 Fast, reliable, and easy to use. This library brings the power of ZSTD compression to MoonBit with:
 
 快速、可靠、易用。本库将 ZSTD 压缩的强大功能带到 MoonBit：
 
-- ⚡ High-performance decompression optimized for speed / 高性能解压缩，针对速度优化
-- 🔒 Type-safe implementation with zero external dependencies / 类型安全实现，零外部依赖
-- ✅ 100% RFC 8878 compliance verified by comprehensive tests / 100% RFC 8878 兼容性，经过全面测试验证
-- 🎯 Clean API designed for developer productivity / 简洁 API，专为开发者效率设计
+- High-performance decompression optimized for speed / 高性能解压缩，针对速度优化
+- Type-safe implementation with zero external dependencies / 类型安全实现，零外部依赖
+- 100% RFC 8878 compliance verified by comprehensive tests / 100% RFC 8878 兼容性，经过全面测试验证
+- Clean API designed for developer productivity / 简洁 API，专为开发者效率设计
 
-## 🎯 Features / 特性
+## Features / 特性
 
 ### Core Capabilities / 核心功能
-- ✅ **Complete RFC 8878 Support** / **完整 RFC 8878 支持** - All ZSTD file formats and block types (Raw, RLE, Compressed) / 支持所有 ZSTD 文件格式和块类型
-- 🚄 **Optimized Performance** / **性能优化** - Fast decompression with efficient bitstream operations / 快速解压缩，高效位流操作
-- 🛡️ **Type-Safe** / **类型安全** - Pure MoonBit implementation with compile-time guarantees / 纯 MoonBit 实现，编译时保证
-- 🔍 **Deep Validation** / **深度验证** - Comprehensive error detection and integrity verification / 全面的错误检测和完整性验证
+- **Complete RFC 8878 Support** / **完整 RFC 8878 支持** - All ZSTD file formats and block types (Raw, RLE, Compressed) / 支持所有 ZSTD 文件格式和块类型
+- **Optimized Performance** / **性能优化** - Fast decompression with efficient bitstream operations / 快速解压缩，高效位流操作
+- **Type-Safe** / **类型安全** - Pure MoonBit implementation with compile-time guarantees / 纯 MoonBit 实现，编译时保证
+- **Deep Validation** / **深度验证** - Comprehensive error detection and integrity verification / 全面的错误检测和完整性验证
 
 ### Developer Experience / 开发体验
-- 📦 **Simple API** / **简洁 API** - Intuitive functions for common use cases / 直观的常用功能函数
-- 🧪 **Well Tested** / **充分测试** - 100% pass rate on official test suites / 官方测试套件 100% 通过率
-- 📖 **Clear Documentation** / **清晰文档** - Easy to understand and extend / 易于理解和扩展
-- 🏗️ **Modular Design** / **模块化设计** - Clean separation of concerns / 清晰的关注点分离
+- **Simple API** / **简洁 API** - Intuitive functions for common use cases / 直观的常用功能函数
+- **Well Tested** / **充分测试** - 100% pass rate on official test suites / 官方测试套件 100% 通过率
+- **Clear Documentation** / **清晰文档** - Easy to understand and extend / 易于理解和扩展
+- **Modular Design** / **模块化设计** - Clean separation of concerns / 清晰的关注点分离
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 src/
@@ -142,7 +142,7 @@ pub enum LiteralsType { Raw | RLE | Compressed | Treeless }
 - Decompression performance improvements / 解压缩性能改进
 - Dictionary support (basic structure ready) / 字典支持（基础结构已就绪）
 
-## 🚀 Quick Start / 快速开始
+## Quick Start / 快速开始
 
 ### Installation / 安装
 
@@ -185,7 +185,7 @@ This runs a comprehensive demo showcasing / 这将运行一个全面的演示，
 - 📝 File compression tests / 文件压缩测试 (text, binary, large data, round-trips / 文本、二进制、大数据、往返测试)
 - ✅ RFC 8878 compliance validation / RFC 8878 兼容性验证
 
-## 🧪 Testing / 测试
+## Testing / 测试
 
 ### Running Tests / 运行测试
 
@@ -352,7 +352,7 @@ for chunk in file_chunks {
 - [ ] Multi-frame processing / 多帧处理
 - [ ] Parallel operations / 并行操作
 
-## 🤝 Contributing / 贡献指南
+## Contributing / 贡献指南
 
 Contributions welcome! Here's how / 欢迎贡献！以下是步骤：
 
@@ -369,11 +369,11 @@ Contributions welcome! Here's how / 欢迎贡献！以下是步骤：
 - New features / 新功能
 - Bug fixes / Bug 修复
 
-## 📄 License / 许可证
+## License / 许可证
 
 Licensed under [Apache-2.0](LICENSE) / 采用 [Apache-2.0](LICENSE) 许可证。
 
-## 🙏 Acknowledgments / 致谢
+## Acknowledgments / 致谢
 
 - [RFC 8878](https://www.rfc-editor.org/rfc/rfc8878.html) - ZSTD specification / ZSTD 规范
 - [Facebook ZSTD](https://github.com/facebook/zstd) - Reference implementation / 参考实现

@@ -25,13 +25,13 @@ pub fn decompress(data : Bytes) -> @zstd_core.ZSTDResult[Bytes] {
     return Err(@zstd_core.invalid_data_error())
   }
 
-  // Check if it's a valid ZSTD file using analyzer
+  // Check file validity using analyzer (detects structural errors)
   let analysis = analyze_file(data)
   if !analysis.is_valid {
     return Err(@zstd_core.decompression_error())
   }
   
-  // 实现真正的解压缩逻辑
+  // Decompress ZSTD data (detects runtime errors like zero offset)
   let decompression_result = decompress_zstd_data(data)
   match decompression_result {
     Ok(decompressed_data) => Ok(decompressed_data)
@@ -144,7 +144,14 @@ fn parse_frame_header_for_decompressor(data: Bytes, offset: Int) -> Result[(@zst
   
   // 读取Frame_Content_Size
   let mut frame_content_size = 0
-  if frame_content_size_flag == 1 {
+  if frame_content_size_flag == 0 && single_segment {
+    // Single_Segment=1 且 FCS_Flag=0 时，读取 1 字节
+    if current_offset >= data.length() {
+      return Err("Frame_Content_Size字段不完整")
+    }
+    frame_content_size = data[current_offset].to_int()
+    current_offset = current_offset + 1
+  } else if frame_content_size_flag == 1 {
     if current_offset + 1 >= data.length() {
       return Err("Frame_Content_Size字段不完整")
     }
@@ -171,13 +178,6 @@ fn parse_frame_header_for_decompressor(data: Bytes, offset: Int) -> Result[(@zst
                         (data[current_offset + 3].to_int() << 24)
     // 忽略高4字节
     current_offset = current_offset + 8
-  } else {
-    // frame_content_size_flag == 0
-    // 如果single_segment=1，FCS从Window_Size推导；否则未知
-    if single_segment {
-      // FCS will be set when we know it
-      frame_content_size = 0
-    }
   }
   
   // 如果是single_segment模式，window_size等于frame_content_size
