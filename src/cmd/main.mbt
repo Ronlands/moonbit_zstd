@@ -2,6 +2,10 @@
 /// 展示ZSTD压缩、解压缩和分析功能
 
 fn init {
+  // 初始化代码（如果需要的话）
+}
+
+fn main {
   println("MoonBit ZSTD Library Demo")
   println("==========================")
   run_complete_demo()
@@ -23,12 +27,6 @@ fn init {
   } else {
     println("\nSome tests failed. Please check the implementation.")
   }
-}
-
-fn main {
-  println("MoonBit ZSTD Library Demo")
-  println("==========================")
-  run_complete_demo()
 }
 
 /// 运行完整的演示程序
@@ -540,7 +538,7 @@ fn simulate_error_test(filename: String) -> Bool {
   test_real_error_file(filename)
 }
 
-/// 测试真实的错误测试文件
+/// 测试真实的错误测试文件（使用运行时解压缩检测）
 fn test_real_error_file(filename: String) -> Bool {
   let test_file_path = "src/test-data/golden-decompression-errors/" + filename
   
@@ -549,37 +547,81 @@ fn test_real_error_file(filename: String) -> Bool {
     if @fs.path_exists(test_file_path) {
       let file_content = @fs.read_file_to_bytes(test_file_path)
       
-      // 简化错误调试信息
+      // 先进行静态分析
       let analysis = @zstd.analyze_file(file_content)
-      let should_be_invalid = !analysis.is_valid || analysis.error_message.length() > 0
-      println("    " + filename + " -> 错误检测:" + should_be_invalid.to_string() + 
-              (if analysis.error_message.length() > 0 { " (" + analysis.error_message + ")" } else { "" }))
       
-      // 对于错误测试文件，我们期望：
-      // 1. 要么分析显示文件无效
-      // 2. 要么解压缩失败或产生空结果
+      // 尝试真正的解压缩以触发运行时验证
+      let decompression_result = @zstd_decoder.decompress(file_content)
+      
+      // 检测是否有错误
+      let has_error = match decompression_result {
+        Ok(_) => false  // 解压缩成功，没有检测到错误
+        Err(_error) => {
+          // 检查错误消息是否包含我们期望的错误类型
+          true
+        }
+      }
+      
+      let static_error = !analysis.is_valid || analysis.error_message.length() > 0
+      let detected = has_error || static_error
+      
+      println("    " + filename + " -> 错误检测:" + detected.to_string() + 
+              (if has_error {
+                match decompression_result {
+                  Err(e) => " (运行时: " + @zstd_core.error_to_string(e) + ")"
+                  _ => ""
+                }
+              } else if static_error {
+                " (静态: " + analysis.error_message + ")"
+              } else {
+                ""
+              }))
+      
+      // 对于错误测试文件，我们期望检测到错误
       let result = match filename {
         "off0.bin.zst" => {
-          // 零偏移错误 - 应该被检测为无效
-          let detected = !analysis.is_valid || analysis.error_message.length() > 0
+          // 零偏移错误 - 应该在运行时被检测
           println("    [错误调试] 零偏移检测: " + detected.to_string())
           detected
         }
         "truncated_huff_state.zst" => {
-          // 截断的Huffman状态 - 应该被检测为无效
-          let detected = !analysis.is_valid || analysis.error_message.length() > 0
+          // 截断的Huffman状态 - 应该在运行时被检测
           println("    [错误调试] Huffman截断检测: " + detected.to_string())
+          
+          // 添加更详细的调试信息
+          if !detected {
+            println("    [深度调试] 文件分析:")
+            println("      - 有效性: " + analysis.is_valid.to_string())
+            println("      - 错误消息: '" + analysis.error_message + "'")
+            println("      - 块类型: " + analysis.first_block_type)
+            println("      - 块大小: " + analysis.first_block_size.to_string())
+            println("      - 文件总大小: " + file_content.length().to_string() + " 字节")
+            
+            match decompression_result {
+              Ok(data) => {
+                println("      - ⚠️ 解压成功，输出: " + data.length().to_string() + " 字节")
+                println("      - 这个文件应该失败但却成功了！")
+                println("      - 可能原因：")
+                println("        1. 没有真正触发Huffman解码路径")
+                println("        2. 使用了非Huffman字面量类型（Raw/RLE）")
+                println("        3. 回退机制掩盖了错误")
+                
+                // 详细分析文件内容
+                analyze_compressed_block_details(file_content)
+              }
+              Err(e) => println("      - 解压失败: " + @zstd_core.error_to_string(e))
+            }
+          }
+          
           detected
         }
         "zeroSeq_extraneous.zst" => {
-          // 多余的零序列 - 应该被检测为无效
-          let detected = !analysis.is_valid || analysis.error_message.length() > 0
+          // 多余的零序列 - 应该在运行时被检测
           println("    [错误调试] 零序列检测: " + detected.to_string())
           detected
         }
         _ => {
           // 其他错误文件 - 通用检测
-          let detected = !analysis.is_valid || analysis.error_message.length() > 0
           println("    [错误调试] 通用错误检测: " + detected.to_string())
           detected
         }
@@ -595,6 +637,122 @@ fn test_real_error_file(filename: String) -> Bool {
       println("    测试异常: " + error.to_string())
       false
     }
+  }
+}
+
+/// 分析压缩块的详细内容（用于调试）
+fn analyze_compressed_block_details(data: Bytes) -> Unit {
+  println("      [块内容详细分析]")
+  
+  if data.length() < 10 {
+    println("        文件太小，无法分析")
+    return
+  }
+  
+  // 正确解析帧头长度
+  let mut offset = 4  // 跳过魔数
+  
+  if offset >= data.length() {
+    println("        无法读取帧头描述符")
+    return
+  }
+  
+  let frame_descriptor = data[offset].to_int()
+  offset = offset + 1
+  
+  let single_segment = (frame_descriptor & 0x20) != 0
+  let content_checksum = (frame_descriptor & 0x04) != 0
+  let fcs_field_size = (frame_descriptor >> 6) & 0x3
+  let dict_id_flag = frame_descriptor & 0x3
+  
+  println("        帧头描述符: 0x" + frame_descriptor.to_string())
+  println("        单段模式: " + single_segment.to_string())
+  
+  // 窗口描述符（如果不是单段模式）
+  if !single_segment && offset < data.length() {
+    offset = offset + 1
+  }
+  
+  // 字典ID（如果存在）
+  if dict_id_flag > 0 && offset < data.length() {
+    offset = offset + dict_id_flag
+  }
+  
+  // 帧内容大小（如果存在）
+  if fcs_field_size > 0 && offset < data.length() {
+    let fcs_size = match fcs_field_size {
+      1 => 1
+      2 => 2
+      3 => 8
+      _ => 0
+    }
+    offset = offset + fcs_size
+  }
+  
+  println("        块数据偏移: " + offset.to_string())
+  
+  if offset + 3 > data.length() {
+    println("        无法读取块头")
+    return
+  }
+  
+  // 读取块头
+  let block_header = data[offset].to_int() | 
+                    (data[offset + 1].to_int() << 8) |
+                    (data[offset + 2].to_int() << 16)
+  
+  let block_type = (block_header >> 1) & 3
+  let block_size = block_header >> 3
+  
+  let block_type_name = match block_type {
+    0 => "Raw (原始，不压缩)"
+    1 => "RLE (运行长度编码)"
+    2 => "Compressed (压缩)"
+    3 => "Reserved (保留)"
+    _ => "Unknown"
+  }
+  
+  println("        块头偏移: " + offset.to_string())
+  println("        块头值: 0x" + block_header.to_string())
+  println("        块类型: " + block_type.to_string() + " = " + block_type_name)
+  println("        块大小: " + block_size.to_string() + " 字节")
+  
+  offset = offset + 3  // 跳过块头
+  
+  if block_type != 2 {  // 不是压缩块
+    println("        ✗ 块类型是 " + block_type_name)
+    println("        ✗ 这个文件不会触发Huffman解码，因此无法检测Huffman截断")
+    println("        ✗ 可能这个测试文件本身的块类型就是错的，或者它故意使用了非压缩格式")
+    return
+  }
+  
+  // 解析字面量头
+  if offset >= data.length() {
+    println("        无法读取字面量头")
+    return
+  }
+  
+  let literals_header = data[offset].to_int()
+  let literals_type = literals_header & 0x3
+  
+  let literals_type_name = match literals_type {
+    0 => "Raw (原始)"
+    1 => "RLE (运行长度编码)"
+    2 => "Compressed (Huffman压缩)"
+    3 => "Treeless (无树-需要前一个Huffman树)"
+    _ => "Unknown"
+  }
+  
+  println("        字面量头偏移: " + offset.to_string())
+  println("        字面量头值: 0x" + literals_header.to_string())
+  println("        字面量类型: " + literals_type.to_string() + " = " + literals_type_name)
+  
+  if literals_type == 2 || literals_type == 3 {
+    println("        ✓ 这个文件确实使用了Huffman相关的字面量类型！")
+    println("        ✓ 应该触发Huffman解码验证")
+  } else {
+    println("        ✗ 这个文件使用的是 " + literals_type_name)
+    println("        ✗ 不会触发Huffman解码，所以无法检测截断")
   }
 }
 

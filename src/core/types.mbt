@@ -65,14 +65,27 @@ pub fn make_frame_header(
   { frame_type, dict_id, frame_content_size, single_segment, checksum_flag, window_size }
 }
 
-/// Decompression context
+/// Decompression context with Huffman tree storage
 pub struct DecompressionContext {
   window_buffer: Bytes
   dictionary: Bytes
   window_size: Int
   window_pos: Int
   frame_content_size: Int
+  last_huffman_tree: Option[HuffmanTreeRef]  // 保存上一个 Huffman 树（用于未来扩展）
 } derive(Default)
+
+/// Huffman 树引用（用于 Treeless 模式）
+pub struct HuffmanTreeRef {
+  // 存储 Huffman 权重，以便重建树
+  weights: Array[Int]
+  max_symbol: Int
+}
+
+/// Create Huffman tree reference
+pub fn create_huffman_tree_ref(weights: Array[Int], max_symbol: Int) -> HuffmanTreeRef {
+  { weights, max_symbol }
+}
 
 /// Create new decompression context with parameters
 pub fn make_decompression_context_with_params(
@@ -82,7 +95,14 @@ pub fn make_decompression_context_with_params(
   window_pos: Int,
   frame_content_size: Int
 ) -> DecompressionContext {
-  { window_buffer, dictionary, window_size, window_pos, frame_content_size }
+  { 
+    window_buffer, 
+    dictionary, 
+    window_size, 
+    window_pos, 
+    frame_content_size,
+    last_huffman_tree: None
+  }
 }
 
 /// Create new decompression context with defaults
@@ -92,7 +112,8 @@ pub fn make_decompression_context() -> DecompressionContext {
     dictionary: b"",
     window_size: 65536,
     window_pos: 0,
-    frame_content_size: 0
+    frame_content_size: 0,
+    last_huffman_tree: None
   }
 }
 

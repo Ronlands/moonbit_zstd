@@ -190,12 +190,8 @@ fn decompress_single_block(data: Bytes, offset: Int, block_size: Int, block_type
       Ok(rle_data)
     }
     2 => {
-      // Compressed block - 简化处理
-      let mut compressed_data = Bytes::new(0)
-      for i = 0; i < block_size; i = i + 1 {
-        compressed_data = compressed_data + [data[offset + i]]
-      }
-      Ok(compressed_data)
+      // Compressed block - 使用真正的解压缩实现
+      decompress_compressed_block(data, offset, block_size)
     }
     3 => {
       // Reserved block type
