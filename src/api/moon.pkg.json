@@ -1,5 +1,9 @@
 {
   "import": [
+    {
+      "path": "Ronlands/moonbit_zstd/decoder",
+      "alias": "zstd_decoder"
+    }
   ],
   "link": {
     "wasm": {

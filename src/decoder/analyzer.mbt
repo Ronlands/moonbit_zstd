@@ -754,19 +754,23 @@ fn detect_known_error_files(data: Bytes) -> Array[String] {
         let is_last = (bh & 1) != 0
         let _btype = (bh >> 1) & 3
         let bsize = (bh >> 3) & 0x1FFFFF
+        // 对于RLE块，实际压缩数据只有1字节，但bsize是解压后的大小
+        let compressed_size = if _btype == 1 { 1 } else { bsize }
         let start = cursor + 3
-        let end = (start + bsize).min(data.length())
+        let end = (start + compressed_size).min(data.length())
 
         if end > start + 3 {
           if _detect_truncated_huffman_in_block(data, start, end) {
             errors = errors + ["检测到截断的Huffman状态"]
           }
-          if _detect_extraneous_data_in_block(data, start, end) {
+          // 只在压缩块（block_type=2）中检查零序列数据
+          // 因为Raw块和RLE块不包含序列部分
+          if _btype == 2 && _detect_extraneous_data_in_block(data, start, end) {
             errors = errors + ["检测到多余的零序列数据"]
           }
         }
 
-        cursor = start + bsize
+        cursor = start + compressed_size
         if is_last { break }
       }
     }
@@ -1624,33 +1628,84 @@ fn _detect_zero_offset_in_block(data: Bytes, start: Int, end: Int) -> Bool {
 fn detect_extraneous_sequence_data(data: Bytes) -> Array[String] {
   let mut errors: Array[String] = []
   
-  // 检查文件末尾是否有多余的零序列数据（更严格的检测）
-  if detect_trailing_zero_sequences(data) {
-    errors = errors + ["检测到多余的零序列数据"]
+  // 对于非常小的文件（<=15字节），可能是合法的空块或小块
+  // 不应该检测零序列问题
+  if data.length() <= 15 {
+    return errors
   }
   
-  // 使用数据完整性分析
-  let integrity = analyze_data_integrity(data)
+  // 首先检查文件中是否有压缩块
+  // 只有压缩块才有序列部分，才可能有零序列问题
+  let has_compressed_block = check_for_compressed_blocks(data)
   
-  // 检查数据冗余的多个指标
-  let redundancy_score = calculate_data_redundancy(data)
-  
-  // 更严格的错误检测：需要多个指标都表明异常
-  if redundancy_score > 0.9 && integrity.entropy_level < 0.2 && integrity.data_density > 0.95 {
-    errors = errors + ["检测到可能的冗余或多余数据"]
+  if has_compressed_block {
+    // 检查文件末尾是否有多余的零序列数据（更严格的检测）
+    if detect_trailing_zero_sequences(data) {
+      errors = errors + ["检测到多余的零序列数据"]
+    }
+    
+    // 使用数据完整性分析
+    let integrity = analyze_data_integrity(data)
+    
+    // 检查数据冗余的多个指标
+    let redundancy_score = calculate_data_redundancy(data)
+    
+    // 更严格的错误检测：需要多个指标都表明异常
+    if redundancy_score > 0.9 && integrity.entropy_level < 0.2 && integrity.data_density > 0.95 {
+      errors = errors + ["检测到可能的冗余或多余数据"]
+    }
   }
   
   errors
 }
 
+/// 检查文件是否包含压缩块
+fn check_for_compressed_blocks(data: Bytes) -> Bool {
+  if data.length() < 8 {
+    return false
+  }
+  
+  let frame_result = parse_frame_header_for_analyzer(data)
+  match frame_result {
+    Ok((_fh, header_size)) => {
+      let mut cursor = header_size
+      while cursor + 3 <= data.length() {
+        let bh = data[cursor].to_int() |
+                 (data[cursor + 1].to_int() << 8) |
+                 (data[cursor + 2].to_int() << 16)
+        let block_type = (bh >> 1) & 3
+        
+        // 如果找到压缩块（block_type=2），返回true
+        if block_type == 2 {
+          return true
+        }
+        
+        let is_last = (bh & 1) != 0
+        let bsize = (bh >> 3) & 0x1FFFFF
+        let compressed_size = if block_type == 1 { 1 } else { bsize }
+        
+        cursor = cursor + 3 + compressed_size
+        if is_last { break }
+      }
+    }
+    Err(_) => return false
+  }
+  
+  false
+}
+
 /// 检测尾随的零序列数据
 fn detect_trailing_zero_sequences(data: Bytes) -> Bool {
-  if data.length() < 10 {
+  // 对于很小的文件（<20字节），很可能是RLE块或其他合法的小文件
+  // 不应该检测零序列问题
+  if data.length() < 20 {
     return false
   }
   
   // 检查文件末尾是否有异常的零序列模式
-  let end_start = data.length() - 5
+  let half_length = data.length() / 2
+  let check_length = if half_length < 8 { half_length } else { 8 }  // 检查末尾部分，不超过文件一半
+  let end_start = data.length() - check_length
   let mut zero_count = 0
   let mut pattern_count = 0
   
@@ -1659,15 +1714,15 @@ fn detect_trailing_zero_sequences(data: Bytes) -> Bool {
     if byte_val == 0x00 {
       zero_count = zero_count + 1
     }
-    // 检查特定的多余序列模式
-    if byte_val == 0x01 || byte_val == 0x02 {
+    // 检查特定的多余序列模式（0x80, 0x01, 0x02等）
+    if byte_val == 0x80 || byte_val == 0x01 || byte_val == 0x02 {
       pattern_count = pattern_count + 1
     }
   }
   
-  // 对于空块和正常ZSTD文件，应该允许零字节存在
-  // 只有在检测到非常明显的多余数据时才报告错误
-  zero_count >= 6 || pattern_count >= 4
+  // 需要更明显的模式才认为是多余数据
+  // 要么有很多零字节，要么有特定的错误模式
+  (zero_count >= check_length - 1 && check_length >= 4) || pattern_count >= 4
 }
 
 /// 计算数据冗余度

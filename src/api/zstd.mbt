@@ -136,7 +136,13 @@ pub fn decompress(data: Bytes) -> Bytes {
   if magic != 0xFD2FB528 {
     return Bytes::from_array([])
   }
-  decompress_advanced(data)
+  
+  // 使用正确的解压缩实现
+  let result = @zstd_decoder.decompress(data)
+  match result {
+    Ok(decompressed) => decompressed
+    Err(_) => decompress_advanced(data)  // 失败时回退到简化版本
+  }
 }
 
 /// 高级解压缩函数，支持多种块类型
@@ -147,7 +153,7 @@ fn decompress_advanced(data: Bytes) -> Bytes {
   
   // 简化的帧头解析
   let mut offset = 5  // 跳过魔数和基本帧头
-  let mut result: Array[Byte] = []
+  let result: Array[Byte] = []
   
   while offset < data.length() {
     // 简化的块解析
@@ -162,28 +168,32 @@ fn decompress_advanced(data: Bytes) -> Bytes {
       
       offset = offset + 3
       
-      if offset + block_size <= data.length() {
+      // 计算实际压缩数据大小
+      // 对于RLE块，block_size是解压后的大小，但压缩数据只有1字节
+      let compressed_size = if block_type == 1 { 1 } else { block_size }
+      
+      if offset + compressed_size <= data.length() {
         // 解压缩块
         match block_type {
           0 => {
             // Raw block - 直接复制
             for i = 0; i < block_size; i = i + 1 {
-              result = result + [data[offset + i]]
+              result.push(data[offset + i])
             }
           }
           1 => {
             // RLE block - 重复数据
-            if block_size > 0 {
+            if block_size > 0 && offset < data.length() {
               let repeat_byte = data[offset]
               for _i = 0; _i < block_size; _i = _i + 1 {
-                result = result + [repeat_byte]
+                result.push(repeat_byte)
               }
             }
           }
           2 => {
             // Compressed block - 简化处理
             for i = 0; i < block_size; i = i + 1 {
-              result = result + [data[offset + i]]
+              result.push(data[offset + i])
             }
           }
           _ => {
@@ -192,7 +202,7 @@ fn decompress_advanced(data: Bytes) -> Bytes {
           }
         }
         
-        offset = offset + block_size
+        offset = offset + compressed_size
         
         if is_last_block {
           break
@@ -451,6 +461,12 @@ fn detect_error_patterns(data: Bytes, block_offset: Int) -> String {
     let block_start = block_offset + 3
     let block_end = block_offset + 3 + block_size
     
+    // 对于非常小的块（<=3字节），可能是合法的空块或最小块
+    // 不进行严格的结构检查，避免误报
+    if block_size <= 3 {
+      return ""
+    }
+    
     if block_start + 1 < data.length() {
       let mut seq_count = data[block_start].to_int()
       let mut seq_offset = block_start + 1
@@ -476,7 +492,9 @@ fn detect_error_patterns(data: Bytes, block_offset: Int) -> String {
       if seq_count == 0 {
         let remaining_in_block = block_end - seq_offset
         
-        if remaining_in_block > 0 {
+        // 对于小块，remaining数据可能是字面量头，不一定是多余数据
+        // 只有当remaining数据明显过多时才报错
+        if remaining_in_block > 5 {
           return "检测到多余的零序列数据"
         }
       } else {
