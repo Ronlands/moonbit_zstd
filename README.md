@@ -11,7 +11,6 @@ Fast, reliable, and easy to use. This library brings the power of ZSTD compressi
 快速、可靠、易用。本库将 ZSTD 压缩的强大功能带到 MoonBit：
 
 - High-performance decompression optimized for speed / 高性能解压缩，针对速度优化
-- Type-safe implementation with zero external dependencies / 类型安全实现，零外部依赖
 - 100% RFC 8878 compliance verified by comprehensive tests / 100% RFC 8878 兼容性，经过全面测试验证
 - Clean API designed for developer productivity / 简洁 API，专为开发者效率设计
 
