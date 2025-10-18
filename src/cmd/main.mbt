@@ -12,6 +12,9 @@ fn main {
   // Run demos
   run_demos()
   
+  // Run file compression tests
+  @zstd_examples.test_file_compression()
+  
   // Run comprehensive tests
   run_tests()
 }
