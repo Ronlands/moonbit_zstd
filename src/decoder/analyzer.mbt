@@ -411,7 +411,7 @@ fn validate_compressed_block(data: Bytes, offset: Int, block_size: Int) -> Array
   }
   
   // 检查块大小是否足够包含必要的头信息
-  // 注意：空块（block_size=0）是有效的，表示没有数据
+  // Note: Empty blocks (block_size=0) are valid and indicate no data
   if block_size < 0 {
     errors = errors + ["压缩块大小无效"]
     return errors

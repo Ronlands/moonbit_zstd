@@ -34,9 +34,8 @@ pub fn create_compression_context(config: CompressionConfig) -> CompressionConte
   { config: config }
 }
 
-/// 压缩数据
+/// 压缩数据（占位实现）
 pub fn compress_data(data: Bytes, _config: CompressionConfig) -> Result[Bytes, String] {
-  // TODO: 实现完整的压缩
   Ok(data)
 }
 

@@ -1,21 +1,13 @@
 /// ZSTD MoonBit Implementation - Main Entry Point
-/// Demonstrates ZSTD compression/decompression and runs test suite
 
-fn init {
-  // Initialization if needed
-}
+fn init {}
 
 fn main {
   println("MoonBit ZSTD Library Demo")
   println("==========================")
   
-  // Run demos
   run_demos()
-  
-  // Run file compression tests
   @zstd_examples.test_file_compression()
-  
-  // Run comprehensive tests
   run_tests()
 }
 
@@ -39,10 +31,8 @@ fn run_tests() -> Unit {
   println("开始执行完整的 RFC 8878 兼容性测试")
   println(@zstd_test.repeat_string("=", 60))
   
-  // Official test suite
   @zstd_test.run_official_test_suite()
   
-  // Basic and compatibility tests
   println("\n" + @zstd_test.repeat_string("=", 60))
   println("Running comprehensive test suite")
   println(@zstd_test.repeat_string("=", 60))
@@ -50,7 +40,6 @@ fn run_tests() -> Unit {
   let basic_tests_passed = @zstd_test.run_all_basic_tests()
   let compatibility_tests_passed = @zstd_test.run_all_compatibility_tests()
   
-  // Summary
   println("\nTest Results Summary:")
   println("Basic tests: " + (if basic_tests_passed { "PASSED" } else { "FAILED" }))
   println("Compatibility tests: " + (if compatibility_tests_passed { "PASSED" } else { "FAILED" }))

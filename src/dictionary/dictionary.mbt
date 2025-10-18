@@ -66,9 +66,6 @@ pub fn parse_zstd_dictionary(data: Bytes) -> Result[Dictionary, String] {
   Ok(dictionary)
 }
 
-// 注意：熵表解析被移除，因为当前entropy模块只有占位实现
-// 完整的熵表支持需要等entropy模块实现完成
-
 /// 使用字典进行解压缩
 pub fn decompress_with_dictionary(compressed_data: Bytes, dictionary: Dictionary) -> Result[Bytes, String] {
   // 检查字典ID是否匹配
@@ -83,8 +80,7 @@ pub fn decompress_with_dictionary(compressed_data: Bytes, dictionary: Dictionary
     return Err("字典ID不匹配: 期望 " + dictionary.dict_id.to_string() + ", 实际 " + frame_dict_id.to_string())
   }
   
-  // TODO: 实现真正的字典解压缩
-  // 需要将字典内容预加载到解压缩窗口中
+  // Note: Full dictionary decompression requires preloading dictionary content into the decompression window
   let decompression_result = @decoder.decompress_zstd_data(compressed_data)
   match decompression_result {
     Ok(decompressed) => Ok(decompressed)
@@ -92,21 +88,18 @@ pub fn decompress_with_dictionary(compressed_data: Bytes, dictionary: Dictionary
   }
 }
 
-/// 使用字典进行压缩
-/// TODO: 当前为简化实现，待encoder模块完善后增强
+/// 使用字典进行压缩（基础实现）
 pub fn compress_with_dictionary(data: Bytes, _dictionary: Dictionary) -> Result[Bytes, String] {
-  // 简化实现：当前encoder模块功能有限
-  // 完整实现需要：
-  // 1. 将字典内容预加载到压缩窗口
-  // 2. 在压缩时使用字典进行匹配
-  // 3. 在帧头中写入字典ID
+  // Simplified implementation. Full version would:
+  // 1. Preload dictionary content into compression window
+  // 2. Use dictionary for matching during compression
+  // 3. Write dictionary ID in frame header
   
   let config = @encoder.create_default_config()
   @encoder.compress_data(data, config)
 }
 
-/// 构建字典
-/// TODO: 实现更智能的字典构建算法（如Cover算法）
+/// 构建字典（简化实现，未来可优化为 Cover 算法）
 pub fn build_dictionary(samples: Array[Bytes], target_size: Int) -> Result[Dictionary, String] {
   if samples.length() == 0 {
     return Err("没有样本数据")
@@ -212,8 +205,7 @@ pub fn validate_dictionary(dictionary: Dictionary) -> Bool {
   true
 }
 
-/// 计算字典压缩收益（估算）
-/// TODO: 实现真实的压缩测试以获得准确收益
+/// 计算字典压缩收益（基于估算，非实际压缩测试）
 pub fn calculate_dictionary_benefit(data: Bytes, dictionary: Dictionary) -> Double {
   let config = @encoder.create_default_config()
   let without_dict_size = @encoder.estimate_compressed_size(data, config)
