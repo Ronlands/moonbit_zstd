@@ -32,17 +32,17 @@ fn run_demos() -> Unit {
 
 /// Run comprehensive test suite
 fn run_tests() -> Unit {
-  println("\n" + repeat_string("=", 60))
+  println("\n" + @zstd_test.repeat_string("=", 60))
   println("开始执行完整的 RFC 8878 兼容性测试")
-  println(repeat_string("=", 60))
+  println(@zstd_test.repeat_string("=", 60))
   
   // Official test suite
   @zstd_test.run_official_test_suite()
   
   // Basic and compatibility tests
-  println("\n" + repeat_string("=", 60))
+  println("\n" + @zstd_test.repeat_string("=", 60))
   println("Running comprehensive test suite")
-  println(repeat_string("=", 60))
+  println(@zstd_test.repeat_string("=", 60))
   
   let basic_tests_passed = @zstd_test.run_all_basic_tests()
   let compatibility_tests_passed = @zstd_test.run_all_compatibility_tests()
@@ -57,14 +57,5 @@ fn run_tests() -> Unit {
   } else {
     println("\nSome tests failed. Please check the implementation.")
   }
-}
-
-/// Utility: Repeat string n times
-fn repeat_string(s: String, n: Int) -> String {
-  let mut result = ""
-  for _i = 0; _i < n; _i = _i + 1 {
-    result = result + s
-  }
-  result
 }
 

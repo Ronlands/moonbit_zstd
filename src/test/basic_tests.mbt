@@ -12,16 +12,7 @@ pub fn run_all_basic_tests() -> Bool {
     ("Data Integrity", test_data_integrity()),
   ]
   
-  let mut passed = 0
-  let total = tests.length()
-  for i = 0; i < tests.length(); i = i + 1 {
-    if tests[i].1 {
-      passed = passed + 1
-    }
-  }
-  
-  println("Basic tests passed: \{passed}/\{total}")
-  passed == tests.length()
+  run_test_suite("Basic tests", tests)
 }
 
 /// Test basic compression and decompression
@@ -84,20 +75,3 @@ fn test_data_integrity() -> Bool {
   
   integrity.data_density >= 0.0 && integrity.data_density <= 1.0
 }
-
-/// Verify two byte sequences are equal
-fn verify_data_equal(a: Bytes, b: Bytes) -> Bool {
-  if a.length() != b.length() {
-    return false
-  }
-  
-  let mut equal = true
-  for i = 0; i < a.length(); i = i + 1 {
-    if a[i] != b[i] {
-      equal = false
-      break
-    }
-  }
-  equal
-}
-

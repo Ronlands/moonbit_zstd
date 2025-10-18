@@ -3,7 +3,7 @@
 /// Demo basic compression
 pub fn demo_basic_compression() -> Unit {
   println("\n1. 基本压缩和解压缩测试")
-  println("   " + repeat_string("-", 30))
+  println("   " + @zstd_test.repeat_string("-", 30))
   
   let test_data = @encoding/utf8.encode("Hello, ZSTD!")
   let original_size = test_data.length()
@@ -27,7 +27,7 @@ pub fn demo_basic_compression() -> Unit {
 /// Demo file analysis
 pub fn demo_file_analysis() -> Unit {
   println("\n2. ZSTD文件分析")
-  println("   " + repeat_string("-", 30))
+  println("   " + @zstd_test.repeat_string("-", 30))
   
   let test_data = @encoding/utf8.encode("Analysis test data")
   let compressed = @zstd.compress(test_data)
@@ -48,7 +48,7 @@ pub fn demo_file_analysis() -> Unit {
 /// Demo data integrity analysis
 pub fn demo_data_integrity() -> Unit {
   println("\n3. 数据完整性分析")
-  println("   " + repeat_string("-", 30))
+  println("   " + @zstd_test.repeat_string("-", 30))
   
   let test_sizes = [100, 1000, 10000]
   for i = 0; i < test_sizes.length(); i = i + 1 {
@@ -68,7 +68,7 @@ pub fn demo_data_integrity() -> Unit {
 /// Demo format detection
 pub fn demo_format_detection() -> Unit {
   println("\n4. 格式检测测试")
-  println("   " + repeat_string("-", 30))
+  println("   " + @zstd_test.repeat_string("-", 30))
   
   let test_data = @encoding/utf8.encode("Format test")
   let compressed = @zstd.compress(test_data)
@@ -91,7 +91,7 @@ pub fn demo_format_detection() -> Unit {
 /// Demo compression levels
 pub fn demo_compression_levels() -> Unit {
   println("\n5. 压缩级别比较")
-  println("   " + repeat_string("-", 30))
+  println("   " + @zstd_test.repeat_string("-", 30))
   
   let test_data = @encoding/utf8.encode("Compression level test data")
   let compressed = @zstd.compress(test_data)  // Use default compression
@@ -116,13 +116,3 @@ fn create_test_data(size: Int) -> Bytes {
   }
   Bytes::from_array(data)
 }
-
-/// Repeat string n times
-fn repeat_string(s: String, n: Int) -> String {
-  let mut result = ""
-  for _i = 0; _i < n; _i = _i + 1 {
-    result = result + s
-  }
-  result
-}
-

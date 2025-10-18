@@ -274,12 +274,3 @@ fn create_random_data() -> Bytes {
   }
   Bytes::from_array(arr)
 }
-
-fn repeat_string(s: String, n: Int) -> String {
-  let mut result = ""
-  for _i = 0; _i < n; _i = _i + 1 {
-    result = result + s
-  }
-  result
-}
-

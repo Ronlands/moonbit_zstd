@@ -3,6 +3,10 @@
     {
       "path": "Ronlands/moonbit_zstd/api",
       "alias": "zstd"
+    },
+    {
+      "path": "Ronlands/moonbit_zstd/test",
+      "alias": "zstd_test"
     }
   ]
 }
