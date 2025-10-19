@@ -1,6 +1,12 @@
 /// Finite State Entropy (FSE) decoder implementation
 /// Used for decoding sequence distributions (Literal Lengths, Match Lengths, Offsets)
 /// Following RFC 8878 specification
+///
+/// TODO: 实现 FSE 编码器
+/// - [ ] FSE 表构建（用于编码）
+/// - [ ] FSE 符号编码
+/// - [ ] 权重归一化算法
+/// - [ ] 表序列化输出
 
 /// Sequence structure
 pub struct Sequence {

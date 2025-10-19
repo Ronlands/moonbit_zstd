@@ -1,5 +1,11 @@
 /// ZSTD Block Decompression Module - Unified Implementation
 /// Handles all block types: Raw, RLE, and Compressed blocks
+///
+/// TODO: 性能优化
+/// - [ ] 序列执行优化（批量复制）
+/// - [ ] 减少数组分配次数
+/// - [ ] 优化 Huffman/FSE 解码性能
+/// - [ ] 使用更高效的数据结构
 
 // ============================================================================
 // Block Header Parsing

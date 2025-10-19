@@ -32,58 +32,76 @@ Fast, reliable, and easy to use. This library brings the power of ZSTD compressi
 
 ```
 src/
-├── api/                    # High-level API interfaces / 高级 API 接口
-│   ├── zstd.mbt           # Main API functions / 主要 API 函数
-│   └── moon.pkg.json      # API package configuration / API 包配置
-├── core/                   # Core types and utilities / 核心类型和工具
-│   ├── types.mbt          # ZSTD core data types / ZSTD 核心数据类型
-│   ├── bitstream.mbt      # Bitstream operations / 位流操作工具
-│   └── moon.pkg.json      # Core package configuration / 核心包配置
-├── decoder/               # Decompression modules / 解压缩模块
-│   ├── frame.mbt          # ZSTD frame format parsing / ZSTD 帧格式解析
-│   ├── block.mbt          # Block-level decompression / 块级解压缩
-│   ├── analyzer.mbt       # File structure analyzer / 文件结构分析器
-│   ├── decompressor.mbt   # Main decompressor / 主解压器
-│   └── moon.pkg.json      # Decoder package configuration / 解码器包配置
-├── encoder/               # Compression modules / 压缩模块
-│   ├── compressor.mbt     # Main compressor (basic implementation) / 主压缩器 (基础实现)
-│   └── moon.pkg.json      # Encoder package configuration / 编码器包配置
-├── entropy/               # Entropy coding modules / 熵编码模块
-│   ├── fse.mbt           # Finite State Entropy (FSE) / 有限状态熵 (FSE)
-│   ├── huffman.mbt       # Huffman coding / 霍夫曼编码
-│   └── moon.pkg.json     # Entropy coding package configuration / 熵编码包配置
-├── cmd/                   # Command-line tools / 命令行工具
-│   ├── main.mbt          # Test program entry point / 测试程序入口
-│   └── moon.pkg.json     # Main program package configuration / 主程序包配置
-├── examples/              # Example programs and custom tests / 示例程序和自定义测试
-│   ├── demos.mbt         # Feature demonstrations / 功能演示
-│   ├── file_compression.mbt # Compression test suite / 压缩测试套件
-│   └── moon.pkg.json     # Examples package configuration / 示例包配置
-├── test-data/             # Test data directory / 测试数据目录
-│   ├── golden-decompression/        # Official standard decompression tests / 官方标准解压缩测试
-│   │   ├── empty-block.zst         # Minimal valid ZSTD frame / 最小有效 ZSTD 帧
-│   │   ├── rle-first-block.zst     # RLE compressed data / RLE 压缩数据
-│   │   ├── zeroSeq_2B.zst          # Zero sequence data / 零序列数据
-│   │   └── block-128k.zst          # Large data block (128KB) / 大数据块 (128KB)
-│   ├── golden-decompression-errors/ # Official error detection tests / 官方错误检测测试
-│   │   ├── off0.bin.zst            # Invalid offset detection / 无效偏移检测
-│   │   ├── truncated_huff_state.zst # Truncated Huffman state / 截断 Huffman 状态
-│   │   └── zeroSeq_extraneous.zst  # Extraneous sequence data / 多余序列数据
-│   ├── golden-compression/          # Official compression tests / 官方压缩测试
-│   └── text/                       # User-contributed text test files / 用户新增文本测试文件
-│       ├── empty.txt.zst           # Empty text file / 空文本文件
-│       ├── single_char.txt.zst     # Single character file / 单字符文件
-│       ├── short.txt.zst           # Short content file / 短内容文件
-│       ├── long.txt.zst            # Long text content / 长文本内容
-│       ├── repeated.txt.zst        # Repeated character patterns / 重复字符模式
-│       ├── random.txt.zst          # Random data content / 随机数据内容
-│       ├── with_nulls.txt.zst      # Content with null bytes / 包含null字节
-│       ├── special_chars.txt.zst   # Special characters content / 特殊字符内容
-│       ├── numbers.txt.zst         # Numeric content / 数字内容
-│       └── json.txt.zst            # JSON format content / JSON格式内容
-└── tests/                 # Test modules / 测试模块
-    ├── basic_tests.mbt    # Basic functionality tests / 基础功能测试
-    └── compatibility_tests.mbt # Compatibility tests / 兼容性测试
+├── moonbit_zstd.mbt        # Root module entry / 根模块入口
+├── moon.pkg.json          # Root package configuration / 根包配置
+├── api/                   # High-level API interfaces / 高级 API 接口
+│   ├── zstd.mbt          # Main API functions / 主要 API 函数
+│   └── moon.pkg.json     # API package configuration / API 包配置
+├── core/                  # Core types and utilities / 核心类型和工具
+│   ├── types.mbt         # ZSTD core data types / ZSTD 核心数据类型
+│   ├── bitstream.mbt     # Bitstream operations / 位流操作工具
+│   ├── errors.mbt        # Error definitions / 错误定义
+│   └── moon.pkg.json     # Core package configuration / 核心包配置
+├── decoder/              # Decompression modules / 解压缩模块
+│   ├── frame.mbt         # ZSTD frame format parsing / ZSTD 帧格式解析
+│   ├── block.mbt         # Block-level decompression / 块级解压缩
+│   ├── analyzer.mbt      # File structure analyzer / 文件结构分析器
+│   ├── decompressor.mbt  # Main decompressor / 主解压器
+│   ├── fse.mbt           # FSE decoder (legacy, use entropy/) / FSE 解码器（遗留，使用 entropy/）
+│   ├── huffman.mbt       # Huffman decoder (legacy, use entropy/) / Huffman 解码器（遗留，使用 entropy/）
+│   ├── dictionary.mbt    # Dictionary helper (legacy, use dictionary/) / 字典辅助（遗留，使用 dictionary/）
+│   └── moon.pkg.json     # Decoder package configuration / 解码器包配置
+├── encoder/              # Compression modules / 压缩模块
+│   ├── compressor.mbt    # Main compressor (TODO: full implementation) / 主压缩器（TODO：完整实现）
+│   └── moon.pkg.json     # Encoder package configuration / 编码器包配置
+├── entropy/              # Entropy coding modules / 熵编码模块
+│   ├── fse.mbt          # Finite State Entropy (FSE) decoder / 有限状态熵 (FSE) 解码器
+│   ├── huffman.mbt      # Huffman decoder / 霍夫曼解码器
+│   └── moon.pkg.json    # Entropy coding package configuration / 熵编码包配置
+├── dictionary/           # Dictionary support / 字典支持
+│   ├── dictionary.mbt   # Dictionary parsing and utilities / 字典解析和工具
+│   └── moon.pkg.json    # Dictionary package configuration / 字典包配置
+├── cmd/                  # Command-line tools / 命令行工具
+│   ├── main.mbt         # Test program entry point / 测试程序入口
+│   └── moon.pkg.json    # Main program package configuration / 主程序包配置
+├── examples/             # Example programs and custom tests / 示例程序和自定义测试
+│   ├── demos.mbt        # Feature demonstrations / 功能演示
+│   ├── file_compression.mbt # File compression examples / 文件压缩示例
+│   ├── official_tool_compatibility.mbt # Official tool compatibility tests / 官方工具兼容性测试
+│   ├── rfc_compliance_tests.mbt # RFC 8878 compliance tests / RFC 8878 兼容性测试
+│   └── moon.pkg.json    # Examples package configuration / 示例包配置
+├── test/                 # Test modules / 测试模块
+│   ├── basic_tests.mbt  # Basic functionality tests / 基础功能测试
+│   ├── compliance_tests.mbt # Compliance tests / 兼容性测试
+│   ├── golden_tests.mbt # Golden file tests / 黄金文件测试
+│   ├── test_utils.mbt   # Test utilities / 测试工具
+│   └── moon.pkg.json    # Test package configuration / 测试包配置
+└── test-data/            # Test data directory / 测试数据目录
+    ├── golden-decompression/        # Official standard decompression tests / 官方标准解压缩测试
+    │   ├── empty-block.zst         # Minimal valid ZSTD frame / 最小有效 ZSTD 帧
+    │   ├── rle-first-block.zst     # RLE compressed data / RLE 压缩数据
+    │   ├── zeroSeq_2B.zst          # Zero sequence data / 零序列数据
+    │   └── block-128k.zst          # Large data block (128KB) / 大数据块 (128KB)
+    ├── golden-decompression-errors/ # Official error detection tests / 官方错误检测测试
+    │   ├── off0.bin.zst            # Invalid offset detection / 无效偏移检测
+    │   ├── truncated_huff_state.zst # Truncated Huffman state / 截断 Huffman 状态
+    │   └── zeroSeq_extraneous.zst  # Extraneous sequence data / 多余序列数据
+    ├── golden-compression/          # Official compression tests / 官方压缩测试
+    │   ├── http                    # HTTP response compression test / HTTP 响应压缩测试
+    │   ├── huffman-compressed-larger # Huffman compression edge case / Huffman 压缩边界情况
+    │   ├── large-literal-and-match-lengths # Large literal/match test / 大字面量/匹配测试
+    │   └── PR-3517-block-splitter-corruption-test # Block splitter test / 块分割器测试
+    └── text/                       # User-contributed text test files / 用户新增文本测试文件
+        ├── empty.txt.zst           # Empty text file / 空文本文件
+        ├── single_char.txt.zst     # Single character file / 单字符文件
+        ├── short.txt.zst           # Short content file / 短内容文件
+        ├── long.txt.zst            # Long text content / 长文本内容
+        ├── repeated.txt.zst        # Repeated character patterns / 重复字符模式
+        ├── random.txt.zst          # Random data content / 随机数据内容
+        ├── with_nulls.txt.zst      # Content with null bytes / 包含null字节
+        ├── special_chars.txt.zst   # Special characters content / 特殊字符内容
+        ├── numbers.txt.zst         # Numeric content / 数字内容
+        └── json.txt.zst            # JSON format content / JSON格式内容
 ```
 
 ## 🔧 Implementation Details
@@ -129,17 +147,52 @@ pub enum LiteralsType { Raw | RLE | Compressed | Treeless }
 ### Implementation Status / 实现状态
 
 #### ✅ Completed / 已完成
-- Frame format parsing with full RFC 8878 header support / 完整的 RFC 8878 帧格式解析
-- All block types: Raw, RLE, and Compressed (with FSE/Huffman decoding) / 所有块类型支持（含 FSE/Huffman 解码）
-- Comprehensive file validation and error handling / 全面的文件验证和错误处理
-- Clean, user-friendly API / 简洁易用的 API
-- Basic compression functionality / 基础压缩功能
-- Complete test suite with RFC 8878 compliance validation / 完整测试套件，RFC 8878 兼容性验证
+- **Decompression / 解压缩** (100% RFC 8878 compliant / 100% RFC 8878 兼容)
+  - Frame format parsing with full RFC 8878 header support / 完整的 RFC 8878 帧格式解析
+  - All block types: Raw, RLE, and Compressed / 所有块类型：Raw、RLE、Compressed
+  - FSE decoder for sequence distributions / FSE 解码器（序列分布）
+  - Huffman decoder for literals / Huffman 解码器（字面量）
+  - Comprehensive file validation and error handling / 全面的文件验证和错误处理
+  - File structure analyzer / 文件结构分析器
+- **API / 接口**
+  - Clean, user-friendly API / 简洁易用的 API
+  - Streaming decompression support / 流式解压缩支持
+- **Testing / 测试**
+  - Complete test suite with RFC 8878 compliance validation / 完整测试套件，RFC 8878 兼容性验证
+  - Golden decompression tests (4/4 passing) / 黄金标准解压缩测试（4/4 通过）
+  - Text file tests (10/10 passing) / 文本文件测试（10/10 通过）
+  - Error detection tests (3/3 passing) / 错误检测测试（3/3 通过）
 
 #### 🚧 In Progress / 进行中
-- Compression ratio optimization / 压缩比优化
-- Decompression performance improvements / 解压缩性能改进
-- Dictionary support (basic structure ready) / 字典支持（基础结构已就绪）
+- **Compression / 压缩** (stub implementation / 占位实现)
+  - ⚠️ Current: Returns input data as-is / 当前：直接返回输入数据
+  - 🎯 Target: Full ZSTD compression with FSE/Huffman encoding / 目标：完整 ZSTD 压缩含 FSE/Huffman 编码
+  - See TODO comments in `src/encoder/compressor.mbt` / 查看 `src/encoder/compressor.mbt` 中的 TODO 注释
+- **Dictionary Support / 字典支持** (basic structure ready / 基础结构已就绪)
+  - ✅ Dictionary parsing and validation / 字典解析和验证
+  - ✅ Dictionary ID matching / 字典 ID 匹配
+  - ⚠️ Dictionary content integration (not implemented) / 字典内容集成（未实现）
+  - See TODO comments in `src/dictionary/dictionary.mbt` / 查看 `src/dictionary/dictionary.mbt` 中的 TODO 注释
+- **Performance Optimization / 性能优化** (planned / 计划中)
+  - See TODO comments in `src/decoder/`, `src/core/bitstream.mbt` / 查看 `src/decoder/`、`src/core/bitstream.mbt` 中的 TODO 注释
+
+#### 📝 Code TODO Markers / 代码 TODO 标记
+All upcoming work is marked with `TODO` comments in the source code for easy tracking:
+所有待完成工作都在源代码中用 `TODO` 注释标记，方便跟踪：
+
+```bash
+# Search all TODO items / 搜索所有 TODO 项
+grep -r "TODO" src/
+```
+
+Key files with TODOs / 包含 TODO 的关键文件：
+- `src/encoder/compressor.mbt` - Compression implementation / 压缩实现
+- `src/entropy/fse.mbt` - FSE encoder / FSE 编码器
+- `src/entropy/huffman.mbt` - Huffman encoder / Huffman 编码器
+- `src/dictionary/dictionary.mbt` - Dictionary integration / 字典集成
+- `src/decoder/decompressor.mbt` - Performance optimization / 性能优化
+- `src/decoder/block.mbt` - Block processing optimization / 块处理优化
+- `src/core/bitstream.mbt` - Bitstream optimization / 位流优化
 
 ## Quick Start / 快速开始
 
@@ -330,26 +383,58 @@ for chunk in file_chunks {
 
 ### 🎯 Next Up / 近期目标
 
-**Encoder Module Improvements / 编码器模块改进**
+**Encoder Module Improvements / 编码器模块改进** (`src/encoder/compressor.mbt`)
 - [ ] Complete compression implementation / 完整压缩实现
   - Full block compression with FSE/Huffman encoding / 完整块压缩，含 FSE/Huffman 编码
-  - Sequence generation and optimization / 序列生成和优化
-  - Compression level support / 压缩级别支持
+  - Sequence generation and optimization (LZ77-style matching) / 序列生成和优化（LZ77 风格匹配）
+  - Compression level support (1-22 levels) / 压缩级别支持（1-22 级）
+  - Literal and Sequence separation and encoding / Literal 和 Sequence 分离与编码
+  - Hash chain/table implementation for pattern matching / 哈希链/哈希表实现用于模式匹配
+  - Block splitting strategy optimization / 块分割策略优化
+  - Optimal sequence selection algorithm / 最优序列选择算法
 - [ ] Compression ratio optimization / 压缩比优化
 
-**Dictionary Support / 字典支持**
+**Entropy Coding Encoders / 熵编码器实现**
+- [ ] FSE Encoder (`src/entropy/fse.mbt`)
+  - FSE table construction for encoding / FSE 表构建（用于编码）
+  - FSE symbol encoding / FSE 符号编码
+  - Weight normalization algorithm / 权重归一化算法
+  - Table serialization output / 表序列化输出
+- [ ] Huffman Encoder (`src/entropy/huffman.mbt`)
+  - Huffman tree construction for encoding / Huffman 树构建（用于编码）
+  - Huffman symbol encoding / Huffman 符号编码
+  - Weight optimization algorithm / 权重优化算法
+  - Table serialization output / 表序列化输出
+
+**Dictionary Support / 字典支持** (`src/dictionary/dictionary.mbt`)
 - [ ] Full dictionary decompression / 完整字典解压缩
   - Preload dictionary content into decompression window / 预加载字典到解压缩窗口
+  - Enable referencing dictionary content during decompression / 解压缩中引用字典内容
 - [ ] Full dictionary compression / 完整字典压缩
+  - Preload dictionary content into compression window / 预加载字典到压缩窗口
   - Dictionary matching during compression / 压缩时的字典匹配
   - Write dictionary ID in frame header / 在帧头中写入字典 ID
 - [ ] Smart dictionary building (Cover algorithm) / 智能字典构建（Cover 算法）
+  - Replace simple sample merging with Cover algorithm / 用 Cover 算法替换简单样本合并
 - [ ] Actual compression testing for benefit calculation / 实际压缩测试以计算收益
+  - Replace estimation with real compression comparison / 用真实压缩比较替换估算
 
-**Performance / 性能**
-- [ ] Decompression performance improvements / 解压缩性能改进
-- [ ] Multi-frame processing / 多帧处理
-- [ ] Parallel operations / 并行操作
+**Performance Optimization / 性能优化**
+- [ ] Decompression performance (`src/decoder/decompressor.mbt`)
+  - Bitstream operation optimization (batch read, caching) / 位流操作优化（批量读取、缓存）
+  - Memory allocation optimization (pre-allocation, buffer reuse) / 内存分配优化（预分配、重用缓冲区）
+  - Multi-frame processing support / 多帧处理支持
+  - Parallel decompression (multi-threading) / 并行解压缩（多线程）
+  - Cache-friendly data structures / 缓存友好的数据结构
+- [ ] Block decompression optimization (`src/decoder/block.mbt`)
+  - Sequence execution optimization (batch copy) / 序列执行优化（批量复制）
+  - Reduce array allocation count / 减少数组分配次数
+  - Optimize Huffman/FSE decoding performance / 优化 Huffman/FSE 解码性能
+  - Use more efficient data structures / 使用更高效的数据结构
+- [ ] Bitstream optimization (`src/core/bitstream.mbt`)
+  - Batch bit reading (caching mechanism) / 批量位读取（缓存机制）
+  - Reduce boundary checks / 减少边界检查
+  - Inline critical functions / 内联关键函数
 
 ## Contributing / 贡献指南
 

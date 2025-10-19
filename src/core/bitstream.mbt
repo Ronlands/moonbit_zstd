@@ -1,5 +1,10 @@
 /// Basic bitstream operations for ZSTD
 /// Simplified implementation for basic functionality
+///
+/// TODO: 性能优化
+/// - [ ] 批量位读取（缓存机制）
+/// - [ ] 减少边界检查
+/// - [ ] 内联关键函数
 
 /// BitStream structure
 pub struct BitStream {

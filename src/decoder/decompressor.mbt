@@ -1,5 +1,12 @@
 /// ZSTD decompressor module
 /// Simplified implementation using analyzer functionality
+///
+/// TODO: 性能优化
+/// - [ ] 位流操作优化（批量读取、缓存）
+/// - [ ] 内存分配优化（预分配、重用缓冲区）
+/// - [ ] 多帧处理支持
+/// - [ ] 并行解压缩（多线程）
+/// - [ ] 缓存友好的数据结构
 
 /// Decompressor structure
 pub struct Decompressor {

@@ -1,6 +1,12 @@
 /// Huffman decoder implementation
 /// Used for decoding literals in ZSTD
 /// Following RFC 8878 specification
+///
+/// TODO: 实现 Huffman 编码器
+/// - [ ] Huffman 树构建（用于编码）
+/// - [ ] Huffman 符号编码
+/// - [ ] 权重优化算法
+/// - [ ] 表序列化输出
 
 /// Huffman表结构
 pub struct HuffmanTable {

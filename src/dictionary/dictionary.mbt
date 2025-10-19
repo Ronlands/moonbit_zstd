@@ -1,5 +1,12 @@
 /// ZSTD字典支持模块
 /// 实现字典压缩和解压功能
+///
+/// TODO: 完整字典支持
+/// - [ ] 解压缩时预加载字典内容到解压缩窗口
+/// - [ ] 压缩时的字典匹配实现
+/// - [ ] 在帧头中正确写入字典 ID
+/// - [ ] 实现 Cover 算法用于智能字典构建
+/// - [ ] 实际压缩测试以计算字典收益（替换当前的估算）
 
 /// 字典类型
 pub enum DictionaryType {
@@ -67,6 +74,9 @@ pub fn parse_zstd_dictionary(data: Bytes) -> Result[Dictionary, String] {
 }
 
 /// 使用字典进行解压缩
+/// TODO: 完整实现字典解压缩
+/// - 需要在解压缩前将字典内容预加载到解压缩窗口
+/// - 这样在解压缩过程中可以引用字典中的内容
 pub fn decompress_with_dictionary(compressed_data: Bytes, dictionary: Dictionary) -> Result[Bytes, String] {
   // 检查字典ID是否匹配
   let frame_result = @decoder.parse_frame_header(compressed_data)
@@ -89,17 +99,19 @@ pub fn decompress_with_dictionary(compressed_data: Bytes, dictionary: Dictionary
 }
 
 /// 使用字典进行压缩（基础实现）
+/// TODO: 完整实现字典压缩
+/// 1. 将字典内容预加载到压缩窗口
+/// 2. 在压缩过程中使用字典进行匹配
+/// 3. 在帧头中写入字典 ID
 pub fn compress_with_dictionary(data: Bytes, _dictionary: Dictionary) -> Result[Bytes, String] {
-  // Simplified implementation. Full version would:
-  // 1. Preload dictionary content into compression window
-  // 2. Use dictionary for matching during compression
-  // 3. Write dictionary ID in frame header
-  
   let config = @encoder.create_default_config()
   @encoder.compress_data(data, config)
 }
 
 /// 构建字典（简化实现，未来可优化为 Cover 算法）
+/// TODO: 实现 Cover 算法用于智能字典构建
+/// - 当前只是简单合并样本数据
+/// - Cover 算法可以生成更优质的字典
 pub fn build_dictionary(samples: Array[Bytes], target_size: Int) -> Result[Dictionary, String] {
   if samples.length() == 0 {
     return Err("没有样本数据")
@@ -206,6 +218,9 @@ pub fn validate_dictionary(dictionary: Dictionary) -> Bool {
 }
 
 /// 计算字典压缩收益（基于估算，非实际压缩测试）
+/// TODO: 使用实际压缩测试来计算字典收益
+/// - 当前只是基于简单估算
+/// - 应该实际压缩并比较大小
 pub fn calculate_dictionary_benefit(data: Bytes, dictionary: Dictionary) -> Double {
   let config = @encoder.create_default_config()
   let without_dict_size = @encoder.estimate_compressed_size(data, config)
