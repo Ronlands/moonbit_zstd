@@ -409,3 +409,56 @@ pub fn test_basic_huffman() -> Bool {
     Err(_) => false
   }
 }
+
+// ============================================================================
+// Huffman Encoder Implementation / Huffman 编码器实现
+// ============================================================================
+
+/// Huffman 编码表项
+pub struct HuffmanCode {
+  code: Int      // Huffman code bits
+  length: Int    // Code length in bits
+}
+
+/// Huffman 编码表
+pub struct HuffmanEncodeTable {
+  codes: Array[HuffmanCode]   // Code for each symbol
+  max_symbol: Int              // Maximum symbol value
+}
+
+/// 统计符号频率
+pub fn count_huffman_symbols(data: Array[Byte], max_symbol: Int) -> Array[Int] {
+  let counts = Array::make(max_symbol + 1, 0)
+  for i = 0; i < data.length(); i = i + 1 {
+    let symbol = data[i].to_int()
+    if symbol >= 0 && symbol <= max_symbol {
+      counts[symbol] = counts[symbol] + 1
+    }
+  }
+  counts
+}
+
+/// 从频率构建 Huffman 编码表
+pub fn build_huffman_encode_table(frequencies: Array[Int]) -> HuffmanEncodeTable {
+  let codes: Array[HuffmanCode] = []
+  
+  // 简化实现：为每个符号分配固定长度代码
+  // 完整实现需要构建 Huffman 树并生成最优代码
+  let code_length = 8  // 默认 8 位
+  
+  for i = 0; i < frequencies.length(); i = i + 1 {
+    codes.push(HuffmanCode::{ code: i, length: code_length })
+  }
+  
+  HuffmanEncodeTable::{
+    codes: codes,
+    max_symbol: frequencies.length() - 1
+  }
+}
+
+/// 使用 Huffman 编码字面量
+pub fn huffman_encode_literals(literals: Array[Byte], table: HuffmanEncodeTable) -> Bytes {
+  // 简化实现：直接返回原始字面量
+  // 完整实现需要位流写入
+  Bytes::from_array(literals)
+}

@@ -269,3 +269,126 @@ pub fn test_basic_fse() -> Bool {
     Err(_) => false
   }
 }
+
+// ============================================================================
+// FSE Encoder Implementation / FSE 编码器实现
+// ============================================================================
+
+/// FSE 编码表（用于编码）
+pub struct FSEEncodeTable {
+  state_table: Array[Int]      // State transition table
+  symbol_table: Array[Int]      // Symbol for each state
+  table_log: Int                // Log2 of table size
+  normalized_counts: Array[Int] // Normalized symbol frequencies
+}
+
+/// 统计符号频率
+pub fn count_symbols(data: Array[Int], max_symbol: Int) -> Array[Int] {
+  let counts = Array::make(max_symbol + 1, 0)
+  for i = 0; i < data.length(); i = i + 1 {
+    let symbol = data[i]
+    if symbol >= 0 && symbol <= max_symbol {
+      counts[symbol] = counts[symbol] + 1
+    }
+  }
+  counts
+}
+
+/// 归一化频率到 2^tableLog
+pub fn normalize_counts(counts: Array[Int], table_log: Int) -> Array[Int] {
+  let table_size = 1 << table_log
+  let mut total = 0
+  
+  // 计算总频率
+  for i = 0; i < counts.length(); i = i + 1 {
+    total = total + counts[i]
+  }
+  
+  if total == 0 {
+    return Array::make(counts.length(), 0)
+  }
+  
+  let normalized: Array[Int] = []
+  let mut distributed = 0
+  
+  // 归一化每个符号的频率
+  for i = 0; i < counts.length(); i = i + 1 {
+    if counts[i] == 0 {
+      normalized.push(0)
+    } else {
+      // 计算归一化后的频率
+      let norm = (counts[i] * table_size) / total
+      let final_norm = if norm == 0 { 1 } else { norm }  // 至少为1
+      normalized.push(final_norm)
+      distributed = distributed + final_norm
+    }
+  }
+  
+  // 调整以确保总和等于 table_size
+  if distributed < table_size {
+    // 给最频繁的符号添加剩余
+    let mut max_idx = 0
+    let mut max_count = counts[0]
+    for i = 1; i < counts.length(); i = i + 1 {
+      if counts[i] > max_count {
+        max_count = counts[i]
+        max_idx = i
+      }
+    }
+    normalized[max_idx] = normalized[max_idx] + (table_size - distributed)
+  } else if distributed > table_size {
+    // 从最频繁的符号减去多余
+    let mut max_idx = 0
+    let mut max_norm = normalized[0]
+    for i = 1; i < normalized.length(); i = i + 1 {
+      if normalized[i] > max_norm {
+        max_norm = normalized[i]
+        max_idx = i
+      }
+    }
+    normalized[max_idx] = normalized[max_idx] - (distributed - table_size)
+  }
+  
+  normalized
+}
+
+/// 构建 FSE 编码表
+pub fn build_fse_encode_table(counts: Array[Int], table_log: Int) -> FSEEncodeTable {
+  let normalized = normalize_counts(counts, table_log)
+  let table_size = 1 << table_log
+  
+  let state_table: Array[Int] = []
+  let symbol_table: Array[Int] = []
+  
+  // 构建编码表
+  let mut position = 0
+  for symbol = 0; symbol < normalized.length(); symbol = symbol + 1 {
+    for _j = 0; _j < normalized[symbol]; _j = _j + 1 {
+      if position < table_size {
+        state_table.push(position)
+        symbol_table.push(symbol)
+        position = position + 1
+      }
+    }
+  }
+  
+  FSEEncodeTable::{
+    state_table: state_table,
+    symbol_table: symbol_table,
+    table_log: table_log,
+    normalized_counts: normalized
+  }
+}
+
+/// 使用 FSE 编码符号序列
+pub fn fse_encode_symbols(symbols: Array[Int], table: FSEEncodeTable) -> Bytes {
+  // 简化实现：直接返回原始数据
+  // 完整实现需要状态机和位流写入
+  let output: Array[Byte] = []
+  
+  for i = 0; i < symbols.length(); i = i + 1 {
+    output.push(symbols[i].to_byte())
+  }
+  
+  Bytes::from_array(output)
+}
