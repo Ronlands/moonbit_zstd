@@ -1,0 +1,57 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Ronlands/moonbit_zstd/api"
+
+// Values
+fn analyze_data_integrity(Bytes) -> DataIntegrityAnalysis
+
+fn analyze_file(Bytes) -> ZSTDFileAnalysis
+
+fn compress(Bytes) -> Bytes
+
+fn compress_with_level(Bytes, CompressionLevel) -> Bytes
+
+fn decompress(Bytes) -> Bytes
+
+fn estimate_compressed_size(Bytes, CompressionLevel) -> Int
+
+fn is_zstd_format(Bytes) -> Bool
+
+fn run_all_basic_tests() -> Bool
+
+fn run_all_compatibility_tests() -> Bool
+
+// Errors
+
+// Types and methods
+pub enum CompressionLevel {
+  Fast
+  Default
+  Better
+  Best
+}
+
+pub struct DataIntegrityAnalysis {
+  truncation_indicators : Int
+  data_density : Double
+  structure_consistency : Double
+  entropy_level : Double
+}
+
+pub struct ZSTDFileAnalysis {
+  is_valid : Bool
+  error_message : String
+  magic_number : UInt
+  single_segment : Bool
+  content_checksum : Bool
+  window_size : UInt
+  total_blocks : Int
+  file_size : Int
+  first_block_type : String
+  first_block_size : Int
+  last_block : Bool
+}
+
+// Type aliases
+
+// Traits
+

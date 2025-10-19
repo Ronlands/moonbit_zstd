@@ -1,0 +1,362 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Ronlands/moonbit_zstd/core"
+
+// Values
+const ZSTD_BLOCK_HEADER_SIZE : Int = 3
+
+const ZSTD_MAGIC_NUMBER : UInt = 0xFD2FB528
+
+const ZSTD_MAGIC_NUMBER_INT : Int = 0xFD2FB528
+
+const ZSTD_MAGIC_NUMBER_SIZE : Int = 4
+
+const ZSTD_MAX_BLOCK_SIZE : Int = 131072
+
+const ZSTD_SKIPPABLE_MAGIC_MASK : Int = 0xFFFFFFF0
+
+const ZSTD_SKIPPABLE_MAGIC_MAX : Int = 0x184D2A5F
+
+const ZSTD_SKIPPABLE_MAGIC_MIN : Int = 0x184D2A50
+
+fn apply_recovery_strategy(RecoveryStrategy, String) -> String
+
+fn compressed_block_type() -> BlockType
+
+fn compressed_literals_type() -> LiteralsType
+
+fn compression_error() -> ZSTDError
+
+fn create_contextual_error(ZSTDError, ErrorSeverity, ErrorContext) -> ContextualError
+
+fn create_empty_dictionary() -> Dictionary
+
+fn create_error_context(String, String, Int, String) -> ErrorContext
+
+fn create_error_stats() -> ErrorStats
+
+fn create_formatted_dictionary(Bytes, UInt) -> Dictionary
+
+fn create_huffman_tree_ref(Array[Int], Int) -> HuffmanTreeRef
+
+fn create_raw_dictionary_from_data(Bytes, UInt) -> Dictionary
+
+fn create_window_buffer(Int, Dictionary) -> WindowBuffer
+
+fn decompression_error() -> ZSTDError
+
+fn determine_recovery_strategy(ZSTDError) -> RecoveryStrategy
+
+fn error_to_string(ZSTDError) -> String
+
+fn format_error(ContextualError) -> String
+
+fn fse_compressed_mode() -> SequenceMode
+
+fn get_error_stats_report(ErrorStats) -> String
+
+fn get_sequence_literal_length(Sequence) -> Int
+
+fn get_sequence_match_length(Sequence) -> Int
+
+fn get_sequence_offset(Sequence) -> Int
+
+fn get_window_buffer(WindowBuffer) -> Array[Byte]
+
+fn get_window_capacity(WindowBuffer) -> Int
+
+fn get_window_dictionary(WindowBuffer) -> Dictionary
+
+fn get_window_position(WindowBuffer) -> Int
+
+fn get_window_size(WindowBuffer) -> Int
+
+fn increment_window_position(WindowBuffer, Int) -> Unit
+
+fn increment_window_size(WindowBuffer) -> Unit
+
+fn insufficient_data_error() -> ZSTDError
+
+fn invalid_data_error() -> ZSTDError
+
+fn invalid_frame_header_error() -> ZSTDError
+
+fn invalid_magic_number_error() -> ZSTDError
+
+fn make_block_header(BlockType, Int, Bool) -> BlockHeader
+
+fn make_decompression_context() -> DecompressionContext
+
+fn make_decompression_context_with_params(Bytes, Bytes, Int, Int, Int) -> DecompressionContext
+
+fn make_frame_header(FrameType, Int, Int, Bool, Bool, Int) -> FrameHeader
+
+fn make_literals_header(LiteralsType, Int, Int, Int) -> LiteralsHeader
+
+fn make_literals_section_info(LiteralsType, Int, Int, Int) -> LiteralsSectionInfo
+
+fn make_sequence(Int, Int, Int) -> Sequence
+
+fn make_sequences_section_info(Int, SequenceMode, SequenceMode, SequenceMode) -> SequencesSectionInfo
+
+fn message_error(String) -> ZSTDError
+
+fn new_bitstream(Bytes) -> BitStream
+
+fn parse_error(String) -> ZSTDError
+
+fn predefined_mode() -> SequenceMode
+
+fn raw_block_type() -> BlockType
+
+fn raw_literals_type() -> LiteralsType
+
+fn read_byte(BitStream) -> (BitStream, Byte)
+
+fn read_bytes(BitStream, Int) -> (BitStream, Bytes)
+
+fn read_le_int(BitStream, Int) -> (BitStream, Int)
+
+fn repeat_mode() -> SequenceMode
+
+fn reserved_block_type() -> BlockType
+
+fn[T] result_from_string(Result[T, String]) -> Result[T, ZSTDError]
+
+fn[T] result_to_string(Result[T, ZSTDError]) -> Result[T, String]
+
+fn rle_block_type() -> BlockType
+
+fn rle_literals_type() -> LiteralsType
+
+fn rle_mode() -> SequenceMode
+
+fn set_window_position(WindowBuffer, Int) -> Unit
+
+fn set_window_size(WindowBuffer, Int) -> Unit
+
+fn severity_to_string(ErrorSeverity) -> String
+
+fn skip_bytes(BitStream, Int) -> BitStream
+
+fn skippable_frame_type() -> FrameType
+
+fn string_to_error(String) -> ZSTDError
+
+fn treeless_literals_type() -> LiteralsType
+
+fn unknown_block_type_error() -> ZSTDError
+
+fn update_error_stats(ErrorStats, ErrorSeverity) -> Unit
+
+fn validate_block_header(UInt, Int) -> Result[Unit, ContextualError]
+
+fn validate_data_integrity(Bytes, UInt) -> Result[Unit, ContextualError]
+
+fn validate_frame_descriptor(Byte) -> Result[Unit, ContextualError]
+
+fn validate_history_reference(Int, Int) -> Result[Unit, ContextualError]
+
+fn validate_magic_number(Bytes, Int) -> Result[Unit, ContextualError]
+
+fn validate_window_size(Int) -> Result[Unit, ContextualError]
+
+fn validation_error(String) -> ZSTDError
+
+fn zstd_error_to_string(ZSTDError) -> String
+
+fn zstd_frame_type() -> FrameType
+
+// Errors
+
+// Types and methods
+pub struct BitStream {
+  data : Bytes
+  position : Int
+}
+
+pub struct BlockHeader {
+  block_type : BlockType
+  block_size : Int
+  last_block : Bool
+}
+fn BlockHeader::default() -> Self // from trait `Default`
+impl Default for BlockHeader
+
+pub enum BlockType {
+  Raw
+  RLE
+  Compressed
+  Reserved
+}
+fn BlockType::equal(Self, Self) -> Bool // from trait `Eq`
+#deprecated
+fn BlockType::op_equal(Self, Self) -> Bool // from trait `Eq`
+impl Eq for BlockType
+
+pub struct ContextualError {
+  error : ZSTDError
+  severity : ErrorSeverity
+  context : ErrorContext
+  timestamp : Int
+}
+
+pub struct DecompressionContext {
+  window_buffer : Bytes
+  dictionary : Bytes
+  window_size : Int
+  window_pos : Int
+  frame_content_size : Int
+  last_huffman_tree : HuffmanTreeRef?
+}
+fn DecompressionContext::default() -> Self // from trait `Default`
+impl Default for DecompressionContext
+
+pub struct Dictionary {
+  dict_type : DictionaryType
+  dict_id : UInt
+  data : Bytes
+  size : Int
+}
+
+pub enum DictionaryType {
+  None
+  Raw
+  Formatted
+}
+fn DictionaryType::equal(Self, Self) -> Bool // from trait `Eq`
+#deprecated
+fn DictionaryType::op_equal(Self, Self) -> Bool // from trait `Eq`
+impl Eq for DictionaryType
+
+pub struct ErrorContext {
+  location : String
+  operation : String
+  data_offset : Int
+  additional_info : String
+}
+
+pub enum ErrorSeverity {
+  Error
+  Fatal
+}
+
+pub struct ErrorStats {
+  mut error_count : Int
+  mut fatal_count : Int
+  mut total_count : Int
+}
+
+pub struct FrameHeader {
+  frame_type : FrameType
+  dict_id : Int
+  frame_content_size : Int
+  single_segment : Bool
+  checksum_flag : Bool
+  window_size : Int
+}
+fn FrameHeader::default() -> Self // from trait `Default`
+impl Default for FrameHeader
+
+pub enum FrameType {
+  ZSTD_frame
+  Skippable_frame
+}
+
+pub struct HuffmanTreeRef {
+  weights : Array[Int]
+  max_symbol : Int
+}
+
+pub struct LiteralsHeader {
+  literals_type : LiteralsType
+  size : Int
+  regenerated_size : Int
+  streams_count : Int
+}
+fn LiteralsHeader::default() -> Self // from trait `Default`
+impl Default for LiteralsHeader
+
+pub struct LiteralsSectionInfo {
+  literals_type : LiteralsType
+  regenerated_size : Int
+  compressed_size : Int
+  num_streams : Int
+}
+fn LiteralsSectionInfo::default() -> Self // from trait `Default`
+impl Default for LiteralsSectionInfo
+
+pub enum LiteralsType {
+  Raw
+  RLE
+  Compressed
+  Treeless
+}
+fn LiteralsType::equal(Self, Self) -> Bool // from trait `Eq`
+#deprecated
+fn LiteralsType::op_equal(Self, Self) -> Bool // from trait `Eq`
+impl Eq for LiteralsType
+
+pub enum RecoveryStrategy {
+  Skip
+  Retry
+  Abort
+}
+
+pub struct Sequence {
+  literal_length : Int
+  match_length : Int
+  offset : Int
+}
+fn Sequence::default() -> Self // from trait `Default`
+impl Default for Sequence
+
+pub enum SequenceMode {
+  Predefined
+  RLE
+  FSECompressed
+  Repeat
+}
+fn SequenceMode::equal(Self, Self) -> Bool // from trait `Eq`
+#deprecated
+fn SequenceMode::op_equal(Self, Self) -> Bool // from trait `Eq`
+impl Eq for SequenceMode
+
+pub struct SequencesSectionInfo {
+  num_sequences : Int
+  ll_mode : SequenceMode
+  ml_mode : SequenceMode
+  of_mode : SequenceMode
+}
+fn SequencesSectionInfo::default() -> Self // from trait `Default`
+impl Default for SequencesSectionInfo
+
+pub struct WindowBuffer {
+  buffer : Array[Byte]
+  capacity : Int
+  mut position : Int
+  mut size : Int
+  dictionary : Dictionary
+}
+
+pub enum ZSTDError {
+  InvalidData
+  InvalidMagicNumber
+  InvalidFrameHeader
+  UnknownBlockType
+  InsufficientData
+  CompressionError
+  DecompressionError
+  Message(String)
+  ParseError(String)
+  ValidationError(String)
+}
+fn ZSTDError::equal(Self, Self) -> Bool // from trait `Eq`
+#deprecated
+fn ZSTDError::op_equal(Self, Self) -> Bool // from trait `Eq`
+impl Eq for ZSTDError
+
+// Type aliases
+pub typealias Result[T, ZSTDError] as ZSTDResult[T]
+
+// Traits
+

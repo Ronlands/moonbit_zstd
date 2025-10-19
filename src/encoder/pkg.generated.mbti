@@ -1,0 +1,42 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Ronlands/moonbit_zstd/encoder"
+
+import(
+  "Ronlands/moonbit_zstd/core"
+)
+
+// Values
+fn compress(Bytes) -> Result[Bytes, @core.ZSTDError]
+
+fn compress_data(Bytes, CompressionConfig) -> Result[Bytes, String]
+
+fn compress_with_context(Compressor, Bytes) -> Result[(Compressor, Bytes), @core.ZSTDError]
+
+fn create_compression_context(CompressionConfig) -> CompressionContext
+
+fn create_default_config() -> CompressionConfig
+
+fn estimate_compressed_size(Bytes, CompressionConfig) -> Int
+
+fn new_compressor() -> Compressor
+
+// Errors
+
+// Types and methods
+pub struct CompressionConfig {
+  level : Int
+  window_log : Int
+}
+
+pub struct CompressionContext {
+  config : CompressionConfig
+}
+
+pub struct Compressor {
+  level : Int
+}
+
+// Type aliases
+
+// Traits
+

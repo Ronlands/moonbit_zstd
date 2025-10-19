@@ -1,0 +1,24 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Ronlands/moonbit_zstd/test"
+
+// Values
+fn repeat_string(String, Int) -> String
+
+fn run_all_basic_tests() -> Bool
+
+fn run_all_compatibility_tests() -> Bool
+
+fn run_official_test_suite() -> Unit
+
+fn run_test_suite(String, Array[(String, Bool)]) -> Bool
+
+fn verify_data_equal(Bytes, Bytes) -> Bool
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

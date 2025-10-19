@@ -1,0 +1,100 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Ronlands/moonbit_zstd/entropy"
+
+// Values
+fn build_fse_table_from_weights(Array[Int], Int) -> Result[FSETable, String]
+
+fn build_huffman_table(HuffmanWeights) -> Result[HuffmanTable, String]
+
+fn build_huffman_table_from_weights(HuffmanWeights) -> Result[HuffmanTable, String]
+
+fn create_default_huffman_weights() -> HuffmanWeights
+
+fn create_fse_state(FSETable) -> FSEState
+
+fn create_fse_table() -> FSETable
+
+fn create_fse_table_with_params(Array[Int], Array[Int], Int, Int, Int) -> FSETable
+
+fn create_huffman_table() -> HuffmanTable
+
+fn create_huffman_table_with_params(Array[Int], Array[Int], Int, HuffmanNode) -> HuffmanTable
+
+fn create_huffman_weights(Array[Int]) -> HuffmanWeights
+
+fn decode_fse_sequences(Bytes, Int, Int, Array[Int], Array[Int], Array[Int]) -> Result[Array[Sequence], String]
+
+fn decode_huffman_literals(Bytes, Int, Int, Array[Int]) -> Result[Array[Byte], String]
+
+fn fse_decode_multiple(FSETable, Bytes, Int, Int) -> Result[(Array[Int], Int), String]
+
+fn fse_decode_symbol(FSEState, Bytes, Int) -> Result[(Int, Int, Int), String]
+
+fn huffman_decode_multiple(HuffmanTable, Bytes, Int, Int) -> Result[(Array[Int], Int), String]
+
+fn huffman_decode_symbol(HuffmanTable, Bytes, Int) -> Result[(Int, Int), String]
+
+fn init_fse_state(FSEState, Int) -> FSEState
+
+fn make_sequence(Int, Int, Int) -> Sequence
+
+fn parse_fse_table_header(Bytes, Int) -> Result[(Array[Int], Int, Int), String]
+
+fn parse_huffman_weights(Bytes, Int, Int) -> Result[(HuffmanWeights, Int), String]
+
+fn test_basic_fse() -> Bool
+
+fn test_basic_huffman() -> Bool
+
+// Errors
+
+// Types and methods
+pub struct FSEState {
+  state : Int
+  table : FSETable
+}
+fn FSEState::default() -> Self // from trait `Default`
+impl Default for FSEState
+
+pub struct FSETable {
+  symbols : Array[Int]
+  num_bits : Array[Int]
+  table_log : Int
+  max_symbol : Int
+  total_count : Int
+}
+fn FSETable::default() -> Self // from trait `Default`
+impl Default for FSETable
+
+pub enum HuffmanNode {
+  Leaf(Int)
+  Internal(HuffmanNode, HuffmanNode)
+}
+
+pub struct HuffmanTable {
+  symbols : Array[Int]
+  num_bits : Array[Int]
+  max_bits : Int
+  root : HuffmanNode
+}
+
+pub struct HuffmanWeights {
+  weights : Array[Int]
+  count : Int
+}
+fn HuffmanWeights::output(Self, &Logger) -> Unit // from trait `Show`
+fn HuffmanWeights::to_string(Self) -> String // from trait `Show`
+impl Show for HuffmanWeights
+
+pub struct Sequence {
+  literal_length : Int
+  match_length : Int
+  offset : Int
+}
+fn Sequence::default() -> Self // from trait `Default`
+impl Default for Sequence
+
+// Type aliases
+
+// Traits
+

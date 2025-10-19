@@ -1,0 +1,30 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Ronlands/moonbit_zstd/examples"
+
+// Values
+fn demo_basic_compression() -> Unit
+
+fn demo_compression_levels() -> Unit
+
+fn demo_data_integrity() -> Unit
+
+fn demo_file_analysis() -> Unit
+
+fn demo_format_detection() -> Unit
+
+fn print_summary() -> Unit
+
+fn test_all_golden_files() -> Unit
+
+fn test_file_compression() -> Unit
+
+fn test_user_official_file() -> Unit
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+

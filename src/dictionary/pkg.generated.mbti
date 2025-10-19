@@ -1,0 +1,42 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Ronlands/moonbit_zstd/dictionary"
+
+// Values
+fn build_dictionary(Array[Bytes], Int) -> Result[Dictionary, String]
+
+fn calculate_dictionary_benefit(Bytes, Dictionary) -> Double
+
+fn compress_with_dictionary(Bytes, Dictionary) -> Result[Bytes, String]
+
+fn create_raw_dictionary(Bytes, UInt) -> Dictionary
+
+fn decompress_with_dictionary(Bytes, Dictionary) -> Result[Bytes, String]
+
+fn get_dictionary_stats(Dictionary) -> String
+
+fn merge_dictionaries(Array[Dictionary], Int) -> Result[Dictionary, String]
+
+fn parse_zstd_dictionary(Bytes) -> Result[Dictionary, String]
+
+fn save_zstd_dictionary(Dictionary) -> Bytes
+
+fn validate_dictionary(Dictionary) -> Bool
+
+// Errors
+
+// Types and methods
+pub struct Dictionary {
+  dict_type : DictionaryType
+  dict_id : UInt
+  content : Bytes
+}
+
+pub enum DictionaryType {
+  Raw
+  Formatted
+}
+
+// Type aliases
+
+// Traits
+

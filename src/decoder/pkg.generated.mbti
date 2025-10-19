@@ -1,0 +1,180 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Ronlands/moonbit_zstd/decoder"
+
+import(
+  "Ronlands/moonbit_zstd/core"
+)
+
+// Values
+fn analyze_file(Bytes) -> ZSTDFileAnalysis
+
+fn build_fse_table(Array[Int], Int, Int) -> Result[FSETable, String]
+
+fn build_huffman_table(Array[Int], Int) -> Result[HuffmanTable, String]
+
+fn build_huffman_table_from_weights(HuffmanWeights) -> Result[HuffmanTable, String]
+
+fn calculate_window_size(Byte) -> Int
+
+fn copy_match(@core.WindowBuffer, Int, Int) -> Result[Bytes, String]
+
+fn create_decompressor(Int) -> Decompressor
+
+fn create_fse_decoder(FSETable, Int) -> FSEDecoder
+
+fn create_huffman_decoder(HuffmanTable) -> HuffmanDecoder
+
+fn decode_fse_sequence(FSETable, Bytes, Int, Int) -> Result[Array[Int], String]
+
+fn decode_fse_symbol(FSEDecoder, Bytes, Int) -> Result[(Int, FSEDecoder, Int), String]
+
+fn decode_huffman_stream(HuffmanTable, Bytes, Int, Int) -> Result[Bytes, String]
+
+fn decode_huffman_symbol(HuffmanDecoder, Bytes, Int) -> Result[(Byte, HuffmanDecoder, Int), String]
+
+fn decompress(Bytes) -> Result[Bytes, @core.ZSTDError]
+
+fn decompress_block(Bytes, Int) -> Result[(Bytes, Int, Bool), String]
+
+fn decompress_with_decompressor(@core.DecompressionContext, Bytes) -> Result[(@core.DecompressionContext, Bytes), @core.ZSTDError]
+
+fn decompress_zstd_data(Bytes) -> Result[Bytes, String]
+
+fn get_available_history_size(@core.WindowBuffer) -> Int
+
+fn get_content_checksum(ZSTDFileAnalysis) -> Bool
+
+fn get_error_message(ZSTDFileAnalysis) -> String
+
+fn get_file_size(ZSTDFileAnalysis) -> Int
+
+fn get_first_block_size(ZSTDFileAnalysis) -> Int
+
+fn get_first_block_type(ZSTDFileAnalysis) -> String
+
+fn get_frame_content_size(ZSTDFileAnalysis) -> Int
+
+fn get_is_valid(ZSTDFileAnalysis) -> Bool
+
+fn get_last_block(ZSTDFileAnalysis) -> Bool
+
+fn get_magic_number(ZSTDFileAnalysis) -> UInt
+
+fn get_predefined_fse_table(String) -> Result[FSETable, String]
+
+fn get_single_segment(ZSTDFileAnalysis) -> Bool
+
+fn get_total_blocks(ZSTDFileAnalysis) -> Int
+
+fn get_window_info(@core.WindowBuffer) -> String
+
+fn get_window_size(ZSTDFileAnalysis) -> Int
+
+fn is_zstd_file(Bytes) -> Bool
+
+fn new_decompressor() -> @core.DecompressionContext
+
+fn parse_formatted_dictionary(Bytes) -> Result[@core.Dictionary, String]
+
+fn parse_frame_header(Bytes) -> Result[(@core.FrameHeader, Int), @core.ZSTDError]
+
+fn parse_frame_header_simple(Bytes) -> (Int, Int)
+
+fn parse_fse_header(Bytes, Int) -> Result[(Array[Int], Int, Int), String]
+
+fn parse_huffman_weights(Bytes, Int, Int) -> Result[(HuffmanWeights, Int), String]
+
+fn preload_dictionary(@core.WindowBuffer) -> Unit
+
+fn print_fse_table_info(FSETable) -> String
+
+fn print_huffman_table_info(HuffmanTable) -> String
+
+fn read_from_window(@core.WindowBuffer, Int, Int) -> Result[Bytes, String]
+
+fn reset_decompressor(Decompressor) -> Decompressor
+
+fn reset_window(@core.WindowBuffer) -> Unit
+
+fn validate_dictionary(@core.Dictionary) -> Bool
+
+fn validate_file(Bytes) -> (Bool, String)
+
+fn validate_frame_header(@core.FrameHeader) -> Bool
+
+fn validate_fse_table(FSETable) -> Bool
+
+fn validate_huffman_table(HuffmanTable) -> Bool
+
+fn write_to_window(@core.WindowBuffer, Bytes) -> Unit
+
+// Errors
+
+// Types and methods
+pub struct Decompressor {
+  window_size : Int
+  context : @core.DecompressionContext
+}
+
+pub struct FSEDecoder {
+  table : FSETable
+  mut state : Int
+  mut bit_buffer : Int64
+  mut bits_cached : Int
+}
+
+pub struct FSETable {
+  table_log : Int
+  table : Array[FSETableEntry]
+}
+
+pub struct FSETableEntry {
+  symbol : Int
+  num_bits : Int
+  baseline : Int
+}
+
+pub struct HuffmanDecoder {
+  table : HuffmanTable
+  mut bit_buffer : Int64
+  mut bits_cached : Int
+}
+
+type HuffmanEntry
+
+pub struct HuffmanTable {
+  table : Array[HuffmanEntry]
+  table_log : Int
+  max_bits : Int
+  max_symbol : Int
+}
+
+pub struct HuffmanWeights {
+  weights : Array[Int]
+  count : Int
+}
+
+pub struct ZSTDFileAnalysis {
+  is_valid : Bool
+  error_message : String
+  magic_number : UInt
+  single_segment : Bool
+  content_checksum : Bool
+  frame_content_size : Int
+  window_size : Int
+  total_blocks : Int
+  file_size : Int
+  first_block_type : String
+  first_block_size : Int
+  last_block : Bool
+}
+
+// Type aliases
+pub typealias @core.Dictionary as Dictionary
+
+pub typealias @core.DictionaryType as DictionaryType
+
+pub typealias @core.WindowBuffer as WindowBuffer
+
+// Traits
+

@@ -2,5 +2,5 @@
 target/
 .mooncakes/
 .moonagent/
-.zstd/
-.zstd-v1.5.6-win64/
+zstd/
+zstd-v1.5.6-win64/
