@@ -11,7 +11,7 @@ pub struct Sequence {
 
 /// Create new sequence
 pub fn make_sequence(literal_length: Int, match_length: Int, offset: Int) -> Sequence {
-  { literal_length, match_length, offset }
+  Sequence::{ literal_length, match_length, offset }
 }
 
 /// FSE表结构
@@ -31,7 +31,7 @@ pub struct FSEState {
 
 /// 创建空的FSE表
 pub fn create_fse_table() -> FSETable {
-  {
+  FSETable::{
     symbols: [],
     num_bits: [],
     table_log: 0,
@@ -48,7 +48,7 @@ pub fn create_fse_table_with_params(
   max_symbol: Int,
   total_count: Int
 ) -> FSETable {
-  { symbols, num_bits, table_log, max_symbol, total_count }
+  FSETable::{ symbols, num_bits, table_log, max_symbol, total_count }
 }
 
 /// 解析FSE权重并构建表
@@ -101,12 +101,12 @@ pub fn build_fse_table_from_weights(weights: Array[Int], table_log: Int) -> Resu
 
 /// 创建FSE状态
 pub fn create_fse_state(table: FSETable) -> FSEState {
-  { state: 0, table: table }
+  FSEState::{ state: 0, table: table }
 }
 
 /// 初始化FSE状态
 pub fn init_fse_state(state: FSEState, initial_value: Int) -> FSEState {
-  { state: initial_value, table: state.table }
+  FSEState::{ state: initial_value, table: state.table }
 }
 
 /// 从位流中读取FSE值
@@ -156,7 +156,7 @@ pub fn fse_decode_multiple(
     match decode_result {
       Ok((symbol, new_state, new_bit_pos)) => {
         result.push(symbol)
-        state = { state: new_state, table: table }
+        state = FSEState::{ state: new_state, table: table }
         current_bit_pos = new_bit_pos
       }
       Err(e) => return Err(e)

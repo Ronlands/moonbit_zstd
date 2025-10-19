@@ -24,7 +24,7 @@ pub struct HuffmanWeights {
 
 /// 创建空的Huffman表
 pub fn create_huffman_table() -> HuffmanTable {
-  {
+  HuffmanTable::{
     symbols: [],
     num_bits: [],
     max_bits: 0,
@@ -39,12 +39,12 @@ pub fn create_huffman_table_with_params(
   max_bits: Int,
   root: HuffmanNode
 ) -> HuffmanTable {
-  { symbols, num_bits, max_bits, root }
+  HuffmanTable::{ symbols, num_bits, max_bits, root }
 }
 
 /// 创建默认的Huffman权重
 pub fn create_default_huffman_weights() -> HuffmanWeights {
-  {
+  HuffmanWeights::{
     weights: Array::make(256, 0),
     count: 0
   }
@@ -52,7 +52,7 @@ pub fn create_default_huffman_weights() -> HuffmanWeights {
 
 /// 创建Huffman权重
 pub fn create_huffman_weights(weights: Array[Int]) -> HuffmanWeights {
-  {
+  HuffmanWeights::{
     weights: weights,
     count: weights.length()
   }

@@ -18,12 +18,12 @@ pub struct CompressionContext {
 
 /// Create new compressor
 pub fn new_compressor() -> Compressor {
-  { level: 1 }
+  Compressor::{ level: 1 }
 }
 
 /// 创建默认配置
 pub fn create_default_config() -> CompressionConfig {
-  {
+  CompressionConfig::{
     level: 3,
     window_log: 17
   }
@@ -31,7 +31,7 @@ pub fn create_default_config() -> CompressionConfig {
 
 /// 创建压缩上下文
 pub fn create_compression_context(config: CompressionConfig) -> CompressionContext {
-  { config: config }
+  CompressionContext::{ config: config }
 }
 
 /// 压缩数据（占位实现）

@@ -16,7 +16,7 @@ pub struct Dictionary {
 
 /// 创建原始字典
 pub fn create_raw_dictionary(content: Bytes, dict_id: UInt) -> Dictionary {
-  {
+  Dictionary::{
     dict_type: Raw,
     dict_id: dict_id,
     content: content
@@ -57,7 +57,7 @@ pub fn parse_zstd_dictionary(data: Bytes) -> Result[Dictionary, String] {
     Bytes::new(0)
   }
   
-  let dictionary = {
+  let dictionary = Dictionary::{
     dict_type: Formatted,
     dict_id: dict_id,
     content: content
