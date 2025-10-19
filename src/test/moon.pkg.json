@@ -12,6 +12,10 @@
     {
       "path": "Ronlands/moonbit_zstd/decoder",
       "alias": "zstd_decoder"
+    },
+    {
+      "path": "Ronlands/moonbit_zstd/dictionary",
+      "alias": "zstd_dictionary"
     }
   ]
 }

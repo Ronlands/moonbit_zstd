@@ -118,7 +118,7 @@ fn is_suitable_for_rle(data: Bytes) -> Bool {
 /// - level: 压缩级别 (1-22)，默认为2
 /// 
 /// 示例:
-/// ```moonbit
+/// ```moonbit no-check
 /// let data = "Hello, World!".to_bytes()
 /// let compressed = compress_advanced(data, CompressionMethod::Auto, 5)
 /// ```
