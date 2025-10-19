@@ -196,13 +196,36 @@ pub fn compress_data(data: Bytes, config: CompressionConfig) -> Result[Bytes, St
   if data.length() == 0 { return compress_empty_frame() }
   if is_rle_beneficial(data) { return compress_as_rle_block(data, config) }
   
-  // ⚠️ Compressed block 暂时禁用
-  // FSE编码器需要完整的位流实现才能与解码器兼容
-  // 当前使用Raw/RLE块以确保稳定性和正确性
-  // TODO: 实现完整的tANS位流FSE编码器
+  // ✅ Compressed block 已启用！
+  // 使用完整的 tANS 位流 FSE 编码器
+  // 对于有足够重复模式的数据，尝试使用 Compressed block
+  if data.length() >= 64 && should_try_compressed_block(data) {
+    match try_compressed_block(data, config) {
+      Ok(compressed) => {
+        // 如果 Compressed block 更小，使用它
+        let raw_size = estimate_raw_block_size(data)
+        if compressed.length() < raw_size {
+          return Ok(compressed)
+        }
+      }
+      Err(_) => ()  // 失败则降级到 Raw block
+    }
+  }
   
-  // 使用 Raw 块（稳定可靠）
+  // 降级到 Raw 块（稳定可靠）
   compress_as_raw_block(data, config)
+}
+
+/// 判断是否应该尝试 Compressed block
+fn should_try_compressed_block(data: Bytes) -> Bool {
+  // 数据足够大且有一定的重复模式
+  data.length() >= 64
+}
+
+/// 估算 Raw block 的大小
+fn estimate_raw_block_size(data: Bytes) -> Int {
+  // Raw block = magic(4) + header(2) + block_header(3) + data
+  data.length() + 9
 }
 
 /// Check if RLE compression would be beneficial
@@ -870,15 +893,44 @@ fn build_compressed_block(
   
   // 1. Literals Section - 使用 Raw literals（简化版）
   encode_raw_literals_section(literals, block_content)
+  println("  ✅ Literals编码完成，block_content.length=\{block_content.length()}")
   
   // 2. Sequences Section - 使用预定义模式（简化版）
+  let seq_start_pos = block_content.length()
   match encode_sequences_section(sequences, block_content) {
     Ok(_) => ()
     Err(e) => return Err(e)
   }
+  println("  ✅ Sequences编码完成，block_content.length=\{block_content.length()}")
+  println("  ✅ Sequences区占用: \{block_content.length() - seq_start_pos} 字节（位置\{seq_start_pos}-\{block_content.length()-1}）")
   
   // Block Header: Last_Block=1, Block_Type=Compressed(2), Block_Size
   let block_size = block_content.length()
+  println("  📦 block_content总大小: \{block_size} 字节")
+  
+  // FSE数据位置 = seq_start_pos（literals结束） + 2（seq_count + mode_byte）
+  let fse_data_start = seq_start_pos + 2
+  let fse_data_end = block_content.length()
+  let fse_data_len = fse_data_end - fse_data_start
+  println("  📦 FSE数据应该在: block_content[\{fse_data_start}-\{fse_data_end - 1}]（\{fse_data_len}字节）")
+  
+  if fse_data_len > 0 {
+    println("  📦 block_content中实际的FSE数据（前10字节+后10字节）:")
+    // 前10字节
+    for i = fse_data_start; i < block_content.length().min(fse_data_start + 10); i = i + 1 {
+      let hex_val = block_content[i].to_int()
+      println("    [\{i}] = 0x\{hex_val.to_string()}")
+    }
+    // 后10字节
+    if block_content.length() > 10 {
+      println("  📦 最后10字节:")
+      for i = (block_content.length() - 10).max(fse_data_start); i < block_content.length(); i = i + 1 {
+        let hex_val = block_content[i].to_int()
+        println("    [\{i}] = 0x\{hex_val.to_string()}")
+      }
+    }
+  }
+  
   let block_header = 0x01 | (2 << 1) | (block_size << 3)
   output.push((block_header & 0xFF).to_byte())
   output.push(((block_header >> 8) & 0xFF).to_byte())
@@ -897,34 +949,57 @@ fn build_compressed_block(
 fn encode_raw_literals_section(literals: Array[Byte], output: Array[Byte]) -> Unit {
   let size = literals.length()
   
+  println("  📝 编码Literals区: \{size} 字节")
+  let header_start = output.length()
+  
   // Literals_Block_Type = Raw (00), Size_Format 根据大小决定
   if size < 32 {
     // Size_Format = 00 (1 byte), 5 bits for size
+    // Byte: [Size(5bit)][Size_Format(2bit)][Type(2bit)]
     let header = 0x00 | (size << 3)
+    println("    Literals头部（1字节）: 0x\{header.to_string()}")
     output.push(header.to_byte())
   } else if size < 4096 {
     // Size_Format = 01 (2 bytes), 12 bits for size
-    let header = 0x01 | ((size & 0x1F) << 3)
-    output.push((header & 0xFF).to_byte())
-    output.push(((size >> 5) & 0xFF).to_byte())
+    // Byte1: [Size_low(4bit)][Size_Format(2bit)][Type(2bit)]
+    // Byte2: [Size_high(8bit)]
+    let header_byte1 = 0x00 | (0x01 << 2) | ((size & 0xF) << 4)
+    let header_byte2 = (size >> 4) & 0xFF
+    println("    Literals头部（2字节）: 0x\{header_byte1.to_string()} 0x\{header_byte2.to_string()}")
+    output.push(header_byte1.to_byte())
+    output.push(header_byte2.to_byte())
   } else {
     // Size_Format = 10 (3 bytes), 20 bits for size
-    let header = 0x02 | ((size & 0x1F) << 3)
-    output.push((header & 0xFF).to_byte())
-    output.push(((size >> 5) & 0xFF).to_byte())
-    output.push(((size >> 13) & 0xFF).to_byte())
+    // Byte1: [Size_low(4bit)][Size_Format(2bit)][Type(2bit)]
+    // Byte2: [Size_mid(8bit)]
+    // Byte3: [Size_high(8bit)]
+    let header_byte1 = 0x00 | (0x02 << 2) | ((size & 0xF) << 4)
+    let header_byte2 = (size >> 4) & 0xFF
+    let header_byte3 = (size >> 12) & 0xFF
+    println("    Literals头部（3字节）: 0x\{header_byte1.to_string()} 0x\{header_byte2.to_string()} 0x\{header_byte3.to_string()}")
+    output.push(header_byte1.to_byte())
+    output.push(header_byte2.to_byte())
+    output.push(header_byte3.to_byte())
   }
+  
+  let header_size = output.length() - header_start
+  println("    Literals数据: \{literals.length()} 字节")
+  println("    总大小（头部+数据）: \{header_size + literals.length()} 字节")
   
   // 直接写入字面量数据
   for i = 0; i < literals.length(); i = i + 1 {
     output.push(literals[i])
   }
+  
+  println("    ✓ Literals区结束，序列区开始于output[\{output.length()}]")
 }
 
 /// Encode sequences section using FSE compression
 /// 使用 FSE 压缩编码序列部分
 fn encode_sequences_section(sequences: Array[Sequence], output: Array[Byte]) -> Result[Unit, String] {
   let num_seq = sequences.length()
+  
+  println("  📤 编码序列区: \{num_seq} 个序列")
   
   if num_seq == 0 {
     output.push(0)
@@ -933,119 +1008,227 @@ fn encode_sequences_section(sequences: Array[Sequence], output: Array[Byte]) -> 
   
   // Number of Sequences
   if num_seq < 128 {
+    println("    序列数量（1字节）: \{num_seq}")
     output.push(num_seq.to_byte())
   } else if num_seq < 32768 {
+    println("    序列数量（2字节）: \{num_seq}")
     output.push(((num_seq >> 8) | 0x80).to_byte())
     output.push((num_seq & 0xFF).to_byte())
   } else {
+    println("    序列数量（3字节）: \{num_seq}")
     output.push(0xFF)
     output.push((num_seq & 0xFF).to_byte())
     output.push(((num_seq >> 8) & 0xFF).to_byte())
   }
   
-  // 使用预定义模式（Predefined Mode）
-  // 这是最可靠的方式，解码器使用标准的预定义 FSE 表
-  // Literal_Lengths_Mode = Predefined (00)
-  // Offsets_Mode = Predefined (00)  
-  // Match_Lengths_Mode = Predefined (00)
-  // Modes byte: LL(bits 6-7) | OF(bits 4-5) | ML(bits 2-3) | reserved(bits 0-1)
+  // ✅ 使用预定义模式（最稳定）
+  // FSE 压缩模式需要完整的 tANS 位流解码器支持
+  // 预定义模式使用标准 FSE 表，解码器已完全支持
+  println("    模式字节: 0x00 (all predefined)")
   output.push(0x00)  // 0b00_00_00_00 = all predefined
   
-  // 使用预定义 FSE 编码序列
-  // 预定义模式下，解码器使用标准 FSE 表进行解码
-  // 我们需要将序列编码为符号流
-  match encode_sequences_predefined_fse(sequences, output) {
-    Ok(_) => Ok(())
-    Err(e) => Err(e)
-  }
+  let before_fse_len = output.length()
+  println("    ⚠️ FSE编码前output.length=\{before_fse_len}")
+  
+  // 编码序列（使用预定义 FSE 表）
+  let result = encode_sequences_predefined_fse(sequences, output)
+  
+  println("    ⚠️ FSE编码后output.length=\{output.length()}")
+  println("    ⚠️ FSE实际增加: \{output.length() - before_fse_len} 字节")
+  
+  result
 }
 
-/// 使用预定义 FSE 表编码序列
-/// 这与解码器完全兼容
-fn encode_sequences_predefined_fse(sequences: Array[Sequence], output: Array[Byte]) -> Result[Unit, String] {
-  // 预定义模式：不需要发送 FSE 表，解码器使用内置表
-  // 但我们仍然需要正确编码序列符号和额外位
+/// 提取序列符号（用于 FSE 编码）
+fn extract_sequence_symbols(sequences: Array[Sequence]) -> (Array[Int], Array[Int], Array[Int]) {
+  let ll_symbols: Array[Int] = []
+  let ml_symbols: Array[Int] = []
+  let of_symbols: Array[Int] = []
   
   for i = 0; i < sequences.length(); i = i + 1 {
     let seq = sequences[i]
+    ll_symbols.push(encode_ll_symbol(seq.literal_length))
+    ml_symbols.push(encode_ml_symbol(seq.match_length))
+    of_symbols.push(encode_of_symbol(seq.offset))
+  }
+  
+  (ll_symbols, ml_symbols, of_symbols)
+}
+
+/// 编码 Literal Length 为符号（使用 RFC 8878 标准表）
+fn encode_ll_symbol(ll: Int) -> Int {
+  let (code, _) = @zstd_entropy.encode_ll(ll)
+  code
+}
+
+/// 编码 Match Length 为符号（使用 RFC 8878 标准表）
+fn encode_ml_symbol(ml: Int) -> Int {
+  let (code, _) = @zstd_entropy.encode_ml(ml)
+  code
+}
+
+/// 编码 Offset 为符号（使用 RFC 8878 标准表）
+fn encode_of_symbol(offset: Int) -> Int {
+  let (code, _) = @zstd_entropy.encode_of(offset)
+  code
+}
+
+/// 使用预定义 FSE 表编码序列
+/// 使用标准的 ZSTD 预定义表和 tANS 位流编码
+fn encode_sequences_predefined_fse(sequences: Array[Sequence], output: Array[Byte]) -> Result[Unit, String] {
+  // 禁用调试输出
+  
+  if sequences.length() == 0 {
+    return Ok(())
+  }
+  
+  // 提取符号
+  let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(sequences)
+  
+  // 调试：打印前几个序列
+  for i = 0; i < sequences.length().min(5); i = i + 1 {
+    let seq = sequences[i]
+    println("  序列\{i}: LL=\{seq.literal_length} ML=\{seq.match_length} OF=\{seq.offset} -> ll_sym=\{ll_symbols[i]} ml_sym=\{ml_symbols[i]} of_sym=\{of_symbols[i]}")
+  }
+  
+  // 使用预定义的归一化频率（与解码器一致）
+  let ll_predefined = get_predefined_ll_counts()
+  let ml_predefined = get_predefined_ml_counts()
+  let of_predefined = get_predefined_of_counts()
+  
+  // 构建 FSE 编码表
+  let ll_table = match @zstd_entropy.build_fse_ctable(ll_predefined, 35, 6) {
+    Ok(t) => t
+    Err(_) => return Err("Failed to build LL FSE table")
+  }
+  let ml_table = match @zstd_entropy.build_fse_ctable(ml_predefined, 52, 6) {
+    Ok(t) => t
+    Err(_) => return Err("Failed to build ML FSE table")
+  }
+  let of_table = match @zstd_entropy.build_fse_ctable(of_predefined, 28, 5) {
+    Ok(t) => t
+    Err(_) => return Err("Failed to build OF FSE table")
+  }
+  
+  // ✅ 交错编码序列（ZSTD规范要求）
+  // 位流从末尾往前读，所以我们从前往后编码
+  let bitstream = @zstd_entropy.create_bitstream()
+  
+  // 准备最后一个序列（用于初始化FSE状态）
+  let last_idx = sequences.length() - 1
+  let last_seq = sequences[last_idx]
+  let last_ll_code = ll_symbols[last_idx]
+  let last_ml_code = ml_symbols[last_idx]
+  let last_of_code = of_symbols[last_idx]
+  
+  // 用最后一个序列的 code 初始化 FSE 状态（官方标准）
+  let mut ll_state = @zstd_entropy.init_fse_cstate_with_symbol(ll_table, last_ll_code)
+  let mut ml_state = @zstd_entropy.init_fse_cstate_with_symbol(ml_table, last_ml_code)
+  let mut of_state = @zstd_entropy.init_fse_cstate_with_symbol(of_table, last_of_code)
+  
+  // 步骤1: 从后往前编码其他序列（last_idx-1 到 0）
+  let mut i = sequences.length() - 2
+  while i >= 0 {
+    let seq = sequences[i]
+    let ll_code = ll_symbols[i]
+    let ml_code = ml_symbols[i]
+    let of_code = of_symbols[i]
     
-    // 编码 Literal Length
-    encode_ll_symbol_and_bits(seq.literal_length, output)
+    // 2.1: FSE 编码符号（按 OF -> ML -> LL 顺序）
+    of_state = @zstd_entropy.encode_symbol_fse(of_state, of_code, of_table, bitstream)
+    ml_state = @zstd_entropy.encode_symbol_fse(ml_state, ml_code, ml_table, bitstream)
+    ll_state = @zstd_entropy.encode_symbol_fse(ll_state, ll_code, ll_table, bitstream)
     
-    // 编码 Offset
-    encode_of_symbol_and_bits(seq.offset, output)
+    // 2.2: 写入额外位（参照官方 line 352-367：LL → ML → OF）
+    let ll_bits = @zstd_entropy.get_ll_bits(ll_code)
+    let ml_bits = @zstd_entropy.get_ml_bits(ml_code)
+    let of_bits = @zstd_entropy.get_of_bits(of_code)
     
-    // 编码 Match Length  
-    encode_ml_symbol_and_bits(seq.match_length, output)
+    // 写入完整值（由bits自动mask）
+    if ll_bits > 0 {
+      @zstd_entropy.add_bits(bitstream, seq.literal_length.to_uint64(), ll_bits)
+    }
+    if ml_bits > 0 {
+      let ml_base = (seq.match_length - 3).max(0)
+      @zstd_entropy.add_bits(bitstream, ml_base.to_uint64(), ml_bits)
+    }
+    if of_bits > 0 {
+      @zstd_entropy.add_bits(bitstream, seq.offset.to_uint64(), of_bits)
+    }
+    // 暂时不flush，让bitstream保持连续
+    
+    i = i - 1
+  }
+  
+  // 步骤2: 写入最后一个序列（参照官方 line 314-329）
+  // 顺序：LL → ML → OF（不是OF→ML→LL！）
+  let last_ll_bits = @zstd_entropy.get_ll_bits(last_ll_code)
+  let last_ml_bits = @zstd_entropy.get_ml_bits(last_ml_code)
+  let last_of_bits = @zstd_entropy.get_of_bits(last_of_code)
+  
+  // LL: 写入完整litLength
+  if last_ll_bits > 0 {
+    @zstd_entropy.add_bits(bitstream, last_seq.literal_length.to_uint64(), last_ll_bits)
+  }
+  
+  // ML: 写入mlBase
+  if last_ml_bits > 0 {
+    let ml_base = (last_seq.match_length - 3).max(0)
+    @zstd_entropy.add_bits(bitstream, ml_base.to_uint64(), last_ml_bits)
+  }
+  
+  // OF: 写入完整offset
+  if last_of_bits > 0 {
+    @zstd_entropy.add_bits(bitstream, last_seq.offset.to_uint64(), last_of_bits)
+  }
+  
+  // ✅ 写入最终状态前flush（参照官方 line 330）
+  @zstd_entropy.flush_bits(bitstream)
+  
+  // ✅ 写入最终状态（参照官方：ML -> OF -> LL）
+  @zstd_entropy.flush_final_state(bitstream, ml_state, 6)
+  @zstd_entropy.flush_final_state(bitstream, of_state, 5)
+  @zstd_entropy.flush_final_state(bitstream, ll_state, 6)
+  
+  // 添加 padding bit并刷新
+  @zstd_entropy.add_bits(bitstream, 1UL, 1)
+  @zstd_entropy.flush_bits(bitstream)
+  
+  // 写入编码数据
+  let encoded = @zstd_entropy.get_bytes(bitstream)
+  
+  for i = 0; i < encoded.length(); i = i + 1 {
+    output.push(encoded[i])
   }
   
   Ok(())
 }
 
-/// 编码 Literal Length 符号和额外位
-fn encode_ll_symbol_and_bits(ll: Int, output: Array[Byte]) -> Unit {
-  // LL 符号表（ZSTD RFC 8878）
-  if ll < 16 {
-    output.push(ll.to_byte())  // 符号 0-15：直接值
-  } else if ll < 32 {
-    output.push(16)  // 符号 16
-    output.push((ll - 16).to_byte())  // 4 额外位
-  } else if ll < 64 {
-    output.push(17)  // 符号 17
-    output.push((ll - 32).to_byte())  // 5 额外位
-  } else {
-    output.push(18)  // 符号 18
-    output.push((ll - 64).to_byte())  // 6+ 额外位
-  }
+/// 获取预定义的 Literal Lengths 归一化频率
+fn get_predefined_ll_counts() -> Array[Int] {
+  [
+    4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1,
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1,
+    -1, -1, -1, -1
+  ]
 }
 
-/// 编码 Offset 符号和额外位
-fn encode_of_symbol_and_bits(offset: Int, output: Array[Byte]) -> Unit {
-  // Offset 编码（对数编码）
-  if offset <= 0 {
-    output.push(1)  // 默认偏移
-    return
-  }
-  
-  // 计算对数
-  let mut nbBits = 0
-  let mut temp = offset
-  while temp > 1 {
-    temp = temp >> 1
-    nbBits = nbBits + 1
-  }
-  
-  // 符号 = nbBits
-  output.push(nbBits.to_byte())
-  
-  // 额外位 = offset - (1 << nbBits)
-  if nbBits > 0 {
-    let base = 1 << nbBits
-    let extra = offset - base
-    output.push((extra & 0xFF).to_byte())
-    if extra > 255 {
-      output.push(((extra >> 8) & 0xFF).to_byte())
-    }
-  }
+/// 获取预定义的 Match Lengths 归一化频率
+fn get_predefined_ml_counts() -> Array[Int] {
+  [
+    1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1,
+    -1, -1, -1, -1, -1
+  ]
 }
 
-/// 编码 Match Length 符号和额外位
-fn encode_ml_symbol_and_bits(ml: Int, output: Array[Byte]) -> Unit {
-  // ML 编码：ML_Code = ML - MINMATCH (MINMATCH = 3)
-  let ml_base = (ml - 3).max(0)
-  
-  if ml_base < 16 {
-    output.push(ml_base.to_byte())  // 符号 0-15
-  } else if ml_base < 32 {
-    output.push(16)  // 符号 16
-    output.push((ml_base - 16).to_byte())  // 4 额外位
-  } else if ml_base < 64 {
-    output.push(17)  // 符号 17
-    output.push((ml_base - 32).to_byte())  // 5 额外位
-  } else {
-    output.push(18)  // 符号 18
-    output.push((ml_base - 64).to_byte())  // 6+ 额外位
-  }
+/// 获取预定义的 Offsets 归一化频率
+fn get_predefined_of_counts() -> Array[Int] {
+  [
+    1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1
+  ]
 }
 
 /// Compress as RLE block with dictionary ID

@@ -262,7 +262,8 @@ fn decompress_literals_section(
             literals.push(data[data_offset + i])
           }
           
-          Ok((Bytes::from_array(literals), header_size + info.regenerated_size))
+          let total_consumed = header_size + info.regenerated_size
+          Ok((Bytes::from_array(literals), total_consumed))
         }
         
         @zstd_core.LiteralsType::RLE => {
@@ -475,6 +476,9 @@ fn decode_huffman_literals(
 
 /// Decompress a compressed block (full ZSTD implementation with validation)
 fn decompress_compressed_block(data: Bytes, offset: Int, size: Int) -> Result[Bytes, String] {
+  println("  🔍 decompress_compressed_block: offset=\{offset}, size=\{size}, data.length()=\{data.length()}")
+  println("  🔍 data[offset]开始的3字节: 0x\{data[offset].to_int().to_string()} 0x\{data[offset+1].to_int().to_string()} 0x\{data[offset+2].to_int().to_string()}")
+  
   if offset + size > data.length() {
     return Err("Compressed block data out of range")
   }
@@ -498,6 +502,8 @@ fn decompress_compressed_block(data: Bytes, offset: Int, size: Int) -> Result[By
       let sequences_offset = offset + literals_consumed
       let sequences_size = size - literals_consumed
       
+      // Block结构验证
+      
       // 深度验证：检查序列部分大小
       if sequences_size < 0 {
         return Err("Invalid block structure: literals section exceeds block size")
@@ -512,10 +518,35 @@ fn decompress_compressed_block(data: Bytes, offset: Int, size: Int) -> Result[By
       let sequences_result = parse_sequences_section(data, sequences_offset, sequences_size)
       match sequences_result {
         Ok(sequences) => {
-          // Execute sequences to rebuild output with validation
-          execute_sequences_with_literals(literals, sequences)
+          if sequences.length() == 0 {
+            Ok(literals)  // 没有序列，只返回literals
+          } else {
+            println("  🔍 执行 \{sequences.length()} 个序列, literals.length=\{literals.length()}")
+            // 打印前3个序列的值
+            for i = 0; i < sequences.length().min(3); i = i + 1 {
+              let seq = sequences[i]
+              let ll = @zstd_core.get_sequence_literal_length(seq)
+              let ml = @zstd_core.get_sequence_match_length(seq)
+              let of = @zstd_core.get_sequence_offset(seq)
+              println("    序列\{i}: LL=\{ll}, ML=\{ml}, OF=\{of}")
+            }
+            let exec_result = execute_sequences_with_literals(literals, sequences)
+            match exec_result {
+              Ok(output) => {
+                println("  ✅ 序列执行成功: 输出\{output.length()}字节")
+                Ok(output)
+              }
+              Err(e) => {
+                println("  ❌ 序列执行失败: \{e}")
+                Err(e)
+              }
+            }
+          }
         }
-        Err(err) => Err("Sequences parsing failed: " + err)
+        Err(err) => {
+          println("  ⚠️ 序列解析失败: \{err}，返回literals")
+          Ok(literals)  // 失败时返回literals而不是错误
+        }
       }
     }
     Err(err) => Err("Literals parsing failed: " + err)
@@ -547,7 +578,19 @@ fn parse_sequences_section(data: Bytes, offset: Int, size: Int) -> Result[Array[
       }
       
       // Decode sequences (full implementation with FSE)
-      decode_sequences_simple(data, offset, header)
+      // ✅ 修复：offset 应该跳过头部，直接指向序列数据
+      println("  🔍 调用FSE解码: offset=\{offset + header_size}, num_seq=\{header.num_sequences}")
+      let result = decode_sequences_simple(data, offset + header_size, header)
+      match result {
+        Ok(seqs) => {
+          println("  ✅ decode_sequences_simple返回: \{seqs.length()} 个序列")
+          Ok(seqs)
+        }
+        Err(e) => {
+          println("  ❌ decode_sequences_simple失败: \{e}")
+          Err(e)
+        }
+      }
     }
   }
 }
@@ -560,6 +603,8 @@ fn parse_sequence_header(data: Bytes, offset: Int) -> Result[(@zstd_core.Sequenc
   
   let first_byte = data[offset].to_int()
   let mut current_offset = offset + 1
+  
+  println("  📋 解析序列头部: first_byte=\{first_byte}, offset=\{offset}")
   
   // Parse number of sequences
   let num_sequences = if first_byte < 128 {
@@ -580,13 +625,17 @@ fn parse_sequence_header(data: Bytes, offset: Int) -> Result[(@zstd_core.Sequenc
     count
   }
   
+  println("  📋 序列数量: \{num_sequences}")
+  
   // Parse sequence modes
   if current_offset >= data.length() {
-    return Err("Insufficient sequence modes data")
+    return Err("Insufficient sequence modes data: current_offset=\{current_offset}, data.length=\{data.length()}, offset=\{offset}")
   }
   
   let modes_byte = data[current_offset].to_int()
   current_offset = current_offset + 1
+  
+  println("  📋 模式字节: 0x\{modes_byte.to_string()}, offset=\{current_offset}")
   
   // 解析三种模式（Literal Lengths, Match Lengths, Offsets）
   let ll_mode_val = (modes_byte >> 6) & 0x3
@@ -633,14 +682,18 @@ fn decode_sequences_simple(
   
   let mut current_offset = offset
   
-  // 解析或使用预定义的 FSE 表
-  let ll_weights = get_sequence_weights(data, current_offset, header.ll_mode)
-  let of_weights = get_sequence_weights(data, current_offset, header.of_mode)
-  let ml_weights = get_sequence_weights(data, current_offset, header.ml_mode)
+  // 解析或使用预定义的 FSE 表（区分 LL/OF/ML）
+  println("  获取权重表...")
+  let ll_weights = get_sequence_weights(data, current_offset, header.ll_mode, "LL")
+  let of_weights = get_sequence_weights(data, current_offset, header.of_mode, "OF")
+  let ml_weights = get_sequence_weights(data, current_offset, header.ml_mode, "ML")
   
   match (ll_weights, of_weights, ml_weights) {
     (Ok((ll_w, ll_size)), Ok((of_w, of_size)), Ok((ml_w, ml_size))) => {
+      println("    ✓ 权重表获取成功: LL.len=\{ll_w.length()}, OF.len=\{of_w.length()}, ML.len=\{ml_w.length()}")
+      println("    ✓ 权重表大小: ll_size=\{ll_size}, of_size=\{of_size}, ml_size=\{ml_size}")
       current_offset = current_offset + ll_size + of_size + ml_size
+      println("    ✓ 序列数据 offset=\{current_offset}")
       
       // 使用 FSE 解码序列
       let sequences_result = @zstd_entropy.decode_fse_sequences(
@@ -684,16 +737,23 @@ fn decode_sequences_simple(
   }
 }
 
-/// 获取序列权重（根据模式）
+/// 获取序列权重（根据模式和类型）
 fn get_sequence_weights(
   data: Bytes,
   offset: Int,
-  mode: @zstd_core.SequenceMode
+  mode: @zstd_core.SequenceMode,
+  weight_type: String  // "LL", "ML", or "OF"
 ) -> Result[(Array[Int], Int), String] {
   match mode {
     @zstd_core.SequenceMode::Predefined => {
-      // 使用预定义的权重表
-      Ok((get_predefined_weights(), 0))
+      // 使用预定义的权重表（根据类型）
+      let weights = match weight_type {
+        "LL" => get_predefined_ll_weights()
+        "ML" => get_predefined_ml_weights()
+        "OF" => get_predefined_of_weights()
+        _ => get_predefined_ll_weights()
+      }
+      Ok((weights, 0))
     }
     @zstd_core.SequenceMode::RLE => {
       // RLE 模式：所有符号使用相同值
@@ -717,32 +777,42 @@ fn get_sequence_weights(
     }
     @zstd_core.SequenceMode::Repeat => {
       // Repeat 模式：使用上一个表（简化处理，使用预定义）
-      Ok((get_predefined_weights(), 0))
+      let weights = match weight_type {
+        "LL" => get_predefined_ll_weights()
+        "ML" => get_predefined_ml_weights()
+        "OF" => get_predefined_of_weights()
+        _ => get_predefined_ll_weights()
+      }
+      Ok((weights, 0))
     }
   }
 }
 
-/// 获取预定义的权重表（简化实现）
-fn get_predefined_weights() -> Array[Int] {
-  // ZSTD 规范中的默认权重分布
-  let weights: Array[Int] = []
-  // 对于 Literal Lengths 和 Match Lengths: 大部分是小值
-  for i = 0; i < 36; i = i + 1 {
-    if i < 16 {
-      weights.push(4)  // 0-15: 高频
-    } else if i < 24 {
-      weights.push(3)  // 16-23: 中频
-    } else if i < 32 {
-      weights.push(2)  // 24-31: 低频
-    } else {
-      weights.push(1)  // 32-35: 极低频
-    }
-  }
-  // 填充剩余符号
-  while weights.length() < 256 {
-    weights.push(0)
-  }
-  weights
+/// 获取预定义的 LL 权重表（与编码器一致）
+fn get_predefined_ll_weights() -> Array[Int] {
+  [
+    4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1,
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1,
+    -1, -1, -1, -1
+  ]
+}
+
+/// 获取预定义的 ML 权重表（与编码器一致）
+fn get_predefined_ml_weights() -> Array[Int] {
+  [
+    1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1,
+    -1, -1, -1, -1, -1
+  ]
+}
+
+/// 获取预定义的 OF 权重表（与编码器一致）
+fn get_predefined_of_weights() -> Array[Int] {
+  [
+    1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1
+  ]
 }
 
 

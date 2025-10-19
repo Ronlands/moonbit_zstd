@@ -11,6 +11,8 @@ pub fn run_all_basic_tests() -> Bool {
     ("Empty Data", test_empty_data()),
     ("Data Integrity", test_data_integrity()),
     ("Compressed Block", test_compressed_block()),
+    ("FSE Bitstream", test_fse_bitstream()),
+    ("FSE Encode Simple", test_fse_encode_simple()),
   ]
   
   run_test_suite("Basic tests", tests)
@@ -87,16 +89,19 @@ fn test_compressed_block() -> Bool {
   }
   let test_data = @encoding/utf8.encode(test_text)
   
-  // 当前使用 Raw block（Compressed block 架构已就绪，等待 FSE 编码器）
   let compressed = @zstd.compress(test_data)
   
-  // 验证压缩后的数据不为空
   if compressed.length() == 0 {
     return false
   }
   
-  // 解压缩验证（Raw block 应该正常工作）
   let decompressed = @zstd.decompress(compressed)
+  
+  // 验证长度
+  if test_data.length() != decompressed.length() {
+    println("  ❌ 长度不匹配：原始=\{test_data.length()} 解压=\{decompressed.length()}")
+    return false
+  }
   
   // 验证往返正确
   verify_data_equal(test_data, decompressed)
@@ -238,6 +243,46 @@ fn test_cover_algorithm() -> Bool {
     Ok(dict) => {
       // 验证字典有效
       @zstd_dictionary.validate_dictionary(dict)
+    }
+    Err(_) => false
+  }
+}
+
+// ============================================================================
+// FSE Encoder Tests / FSE 编码器测试
+// ============================================================================
+
+/// 测试位流基本操作
+fn test_fse_bitstream() -> Bool {
+  let bs = @entropy.create_bitstream()
+  
+  // 添加一些位
+  @entropy.add_bits(bs, 0b101UL, 3)
+  @entropy.add_bits(bs, 0b1111UL, 4)
+  @entropy.add_bits(bs, 0xFFUL, 8)
+  
+  // 刷新位流
+  @entropy.flush_bits(bs)
+  
+  // 获取输出
+  let output = @entropy.get_bytes(bs)
+  
+  // 验证输出不为空
+  output.length() > 0
+}
+
+/// 测试简单的 FSE 编码
+fn test_fse_encode_simple() -> Bool {
+  // 创建简单的符号序列
+  let symbols = [0, 1, 2, 3, 0, 1, 0, 2]
+  
+  // 编码
+  let result = @entropy.fse_encode_complete(symbols, 10, 6)
+  
+  match result {
+    Ok(encoded) => {
+      // 验证编码输出不为空
+      encoded.length() > 0
     }
     Err(_) => false
   }

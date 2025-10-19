@@ -16,6 +16,10 @@
     {
       "path": "Ronlands/moonbit_zstd/dictionary",
       "alias": "zstd_dictionary"
+    },
+    {
+      "path": "Ronlands/moonbit_zstd/entropy",
+      "alias": "entropy"
     }
   ]
 }
