@@ -8,7 +8,17 @@ fn analyze_file(Bytes) -> ZSTDFileAnalysis
 
 fn compress(Bytes) -> Bytes
 
+fn compress_advanced(Bytes, CompressionMethod, Int) -> Bytes
+
+fn compress_as_compressed(Bytes, Int) -> Bytes
+
+fn compress_as_raw(Bytes, Int) -> Bytes
+
+fn compress_as_rle(Bytes, Int) -> Bytes
+
 fn compress_with_level(Bytes, CompressionLevel) -> Bytes
+
+fn compress_with_level_int(Bytes, Int) -> Bytes
 
 fn decompress(Bytes) -> Bytes
 
@@ -29,6 +39,16 @@ pub enum CompressionLevel {
   Better
   Best
 }
+
+pub enum CompressionMethod {
+  Auto
+  Raw
+  RLE
+  Compressed
+}
+fn CompressionMethod::output(Self, &Logger) -> Unit // from trait `Show`
+fn CompressionMethod::to_string(Self) -> String // from trait `Show`
+impl Show for CompressionMethod
 
 pub struct DataIntegrityAnalysis {
   truncation_indicators : Int

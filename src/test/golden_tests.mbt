@@ -83,7 +83,6 @@ fn run_compression_compatibility_tests() -> Unit {
   ]
   
   let mut passed = 0
-  let total = tests.length()
   for i = 0; i < tests.length(); i = i + 1 {
     let (name, data) = tests[i]
     println("  " + name + " ... ")
@@ -93,11 +92,11 @@ fn run_compression_compatibility_tests() -> Unit {
       println("兼容")
       passed = passed + 1
     } else {
-      println("不兼容")
+      println("不兼容 (原始:\{data.length()} 压缩:\{compressed.length()} 解压:\{decompressed.length()})")
     }
   }
   
-  println("  兼容性: \{passed}/\{total}")
+  println("  兼容性: \{passed}/\{tests.length()}")
 }
 
 /// RFC compliance tests

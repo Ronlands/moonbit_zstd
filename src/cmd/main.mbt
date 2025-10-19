@@ -28,6 +28,11 @@ fn run_demos() -> Unit {
   @zstd_examples.demo_format_detection()
   @zstd_examples.demo_compression_levels()
   
+  // 新增：压缩方法和级别演示
+  @zstd_examples.demo_compression_methods()
+  @zstd_examples.demo_compression_levels_advanced()
+  @zstd_examples.demo_method_comparison()
+  
   println("\n所有演示完成！")
   @zstd_examples.print_summary()
 }

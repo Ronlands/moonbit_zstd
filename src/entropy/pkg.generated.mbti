@@ -2,11 +2,19 @@
 package "Ronlands/moonbit_zstd/entropy"
 
 // Values
+fn build_fse_encode_table(Array[Int], Int) -> FSEEncodeTable
+
 fn build_fse_table_from_weights(Array[Int], Int) -> Result[FSETable, String]
+
+fn build_huffman_encode_table(Array[Int]) -> HuffmanEncodeTable
 
 fn build_huffman_table(HuffmanWeights) -> Result[HuffmanTable, String]
 
 fn build_huffman_table_from_weights(HuffmanWeights) -> Result[HuffmanTable, String]
+
+fn count_huffman_symbols(Array[Byte], Int) -> Array[Int]
+
+fn count_symbols(Array[Int], Int) -> Array[Int]
 
 fn create_default_huffman_weights() -> HuffmanWeights
 
@@ -30,13 +38,19 @@ fn fse_decode_multiple(FSETable, Bytes, Int, Int) -> Result[(Array[Int], Int), S
 
 fn fse_decode_symbol(FSEState, Bytes, Int) -> Result[(Int, Int, Int), String]
 
+fn fse_encode_symbols(Array[Int], FSEEncodeTable) -> Bytes
+
 fn huffman_decode_multiple(HuffmanTable, Bytes, Int, Int) -> Result[(Array[Int], Int), String]
 
 fn huffman_decode_symbol(HuffmanTable, Bytes, Int) -> Result[(Int, Int), String]
 
+fn huffman_encode_literals(Array[Byte], HuffmanEncodeTable) -> Bytes
+
 fn init_fse_state(FSEState, Int) -> FSEState
 
 fn make_sequence(Int, Int, Int) -> Sequence
+
+fn normalize_counts(Array[Int], Int) -> Array[Int]
 
 fn parse_fse_table_header(Bytes, Int) -> Result[(Array[Int], Int, Int), String]
 
@@ -49,6 +63,13 @@ fn test_basic_huffman() -> Bool
 // Errors
 
 // Types and methods
+pub struct FSEEncodeTable {
+  state_table : Array[Int]
+  symbol_table : Array[Int]
+  table_log : Int
+  normalized_counts : Array[Int]
+}
+
 pub struct FSEState {
   state : Int
   table : FSETable
@@ -65,6 +86,16 @@ pub struct FSETable {
 }
 fn FSETable::default() -> Self // from trait `Default`
 impl Default for FSETable
+
+pub struct HuffmanCode {
+  code : Int
+  length : Int
+}
+
+pub struct HuffmanEncodeTable {
+  codes : Array[HuffmanCode]
+  max_symbol : Int
+}
 
 pub enum HuffmanNode {
   Leaf(Int)

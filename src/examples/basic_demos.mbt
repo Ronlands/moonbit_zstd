@@ -1,6 +1,6 @@
-/// ZSTD usage demonstrations
+/// Basic ZSTD demonstrations
+/// 基础功能演示
 
-/// Demo basic compression
 pub fn demo_basic_compression() -> Unit {
   println("\n1. 基本压缩和解压缩测试")
   println("   " + @zstd_test.repeat_string("-", 30))
@@ -24,7 +24,6 @@ pub fn demo_basic_compression() -> Unit {
   println("   数据完整性: \{correctness}")
 }
 
-/// Demo file analysis
 pub fn demo_file_analysis() -> Unit {
   println("\n2. ZSTD文件分析")
   println("   " + @zstd_test.repeat_string("-", 30))
@@ -45,7 +44,6 @@ pub fn demo_file_analysis() -> Unit {
   println("   - 内容校验: \{analysis.content_checksum}")
 }
 
-/// Demo data integrity analysis
 pub fn demo_data_integrity() -> Unit {
   println("\n3. 数据完整性分析")
   println("   " + @zstd_test.repeat_string("-", 30))
@@ -65,7 +63,6 @@ pub fn demo_data_integrity() -> Unit {
   }
 }
 
-/// Demo format detection
 pub fn demo_format_detection() -> Unit {
   println("\n4. 格式检测测试")
   println("   " + @zstd_test.repeat_string("-", 30))
@@ -88,13 +85,12 @@ pub fn demo_format_detection() -> Unit {
   println("   空数据检测: \{empty_result}")
 }
 
-/// Demo compression levels
 pub fn demo_compression_levels() -> Unit {
   println("\n5. 压缩级别比较")
   println("   " + @zstd_test.repeat_string("-", 30))
   
   let test_data = @encoding/utf8.encode("Compression level test data")
-  let compressed = @zstd.compress(test_data)  // Use default compression
+  let compressed = @zstd.compress(test_data)
   let compressed_size = compressed.length()
   let ratio = compressed.length().to_double() / test_data.length().to_double()
   
@@ -103,12 +99,10 @@ pub fn demo_compression_levels() -> Unit {
   println("     压缩比: \{ratio}")
 }
 
-/// Print summary
 pub fn print_summary() -> Unit {
   println("\nMoonBit ZSTD 库功能总结")
 }
 
-/// Create test data of specified size
 fn create_test_data(size: Int) -> Bytes {
   let data : Array[Byte] = []
   for i = 0; i < size; i = i + 1 {
@@ -116,3 +110,4 @@ fn create_test_data(size: Int) -> Bytes {
   }
   Bytes::from_array(data)
 }
+

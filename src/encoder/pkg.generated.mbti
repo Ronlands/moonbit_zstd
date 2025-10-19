@@ -8,11 +8,21 @@ import(
 // Values
 fn compress(Bytes) -> Result[Bytes, @core.ZSTDError]
 
+fn compress_as_compressed_block(Bytes, CompressionConfig) -> Result[Bytes, String]
+
+fn compress_as_raw_block(Bytes, CompressionConfig) -> Result[Bytes, String]
+
+fn compress_as_rle_block(Bytes, CompressionConfig) -> Result[Bytes, String]
+
 fn compress_data(Bytes, CompressionConfig) -> Result[Bytes, String]
+
+fn compress_data_with_dict(Bytes, CompressionConfig, Bytes, UInt) -> Result[Bytes, String]
 
 fn compress_with_context(Compressor, Bytes) -> Result[(Compressor, Bytes), @core.ZSTDError]
 
 fn create_compression_context(CompressionConfig) -> CompressionContext
+
+fn create_config_with_level(Int) -> CompressionConfig
 
 fn create_default_config() -> CompressionConfig
 
@@ -26,6 +36,8 @@ fn new_compressor() -> Compressor
 pub struct CompressionConfig {
   level : Int
   window_log : Int
+  min_match : Int
+  search_depth : Int
 }
 
 pub struct CompressionContext {
@@ -34,6 +46,8 @@ pub struct CompressionContext {
 
 pub struct Compressor {
   level : Int
+  hash_table : Array[Int]
+  window_size : Int
 }
 
 // Type aliases

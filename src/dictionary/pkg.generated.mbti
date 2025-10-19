@@ -4,6 +4,10 @@ package "Ronlands/moonbit_zstd/dictionary"
 // Values
 fn build_dictionary(Array[Bytes], Int) -> Result[Dictionary, String]
 
+fn build_dictionary_with_cover(Array[Bytes], Int, Int) -> Result[Dictionary, String]
+
+fn build_optimized_dictionary(Array[Bytes], Int) -> Result[Dictionary, String]
+
 fn calculate_dictionary_benefit(Bytes, Dictionary) -> Double
 
 fn compress_with_dictionary(Bytes, Dictionary) -> Result[Bytes, String]

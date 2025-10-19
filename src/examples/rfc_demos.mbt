@@ -1,4 +1,5 @@
-/// RFC 8878 Compliance Tests - Batch testing with official files
+/// RFC 8878 Compliance Demonstrations
+/// Batch testing with official golden files
 
 pub fn test_all_golden_files() -> Unit {
   println("\n" + @zstd_test.repeat_string("=", 60))
@@ -109,28 +110,24 @@ fn test_user_file() -> Unit {
   println("  原始文件: \{original.length()} 字节")
   println("  压缩文件: \{compressed.length()} 字节")
   
-  // 测试分析器
   let analysis = @zstd_decoder.analyze_file(compressed)
   println("  分析器结果: is_valid=\{analysis.is_valid}")
   if !analysis.is_valid {
     println("  分析器错误: \{analysis.error_message}")
   }
   
-  // 测试直接解压
   let direct_result = @zstd_decoder.decompress_zstd_data(compressed)
   match direct_result {
     Ok(data) => println("  ✓ decompress_zstd_data: 成功 (\{data.length()} 字节)")
     Err(msg) => println("  ✗ decompress_zstd_data: 失败 - \{msg}")
   }
   
-  // 测试完整解压
   let full_result = @zstd_decoder.decompress(compressed)
   match full_result {
     Ok(data) => println("  ✓ @zstd_decoder.decompress: 成功 (\{data.length()} 字节)")
     Err(err) => println("  ✗ @zstd_decoder.decompress: 失败 - \{@zstd_core.error_to_string(err)}")
   }
   
-  // 测试高层 API
   let api_result = @zstd.decompress(compressed)
   println("  @zstd.decompress: \{api_result.length()} 字节")
   

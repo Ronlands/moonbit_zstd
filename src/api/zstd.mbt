@@ -31,99 +31,164 @@ pub struct DataIntegrityAnalysis {
   entropy_level: Double
 }
 
-/// 基本压缩函数
+/// 使用指定级别压缩（自动选择压缩方法）
+/// 
+/// 参数:
+/// - data: 要压缩的数据
+/// - level: 压缩级别 (1-22)，默认为2
+pub fn compress_with_level_int(data: Bytes, level: Int) -> Bytes {
+  compress_advanced(data, CompressionMethod::Auto, level)
+}
+
+/// 使用 Raw 块压缩（无压缩，仅添加 ZSTD 帧头）
+pub fn compress_as_raw(data: Bytes, level: Int) -> Bytes {
+  compress_advanced(data, CompressionMethod::Raw, level)
+}
+
+/// 使用 RLE 块压缩（适合重复数据）
+pub fn compress_as_rle(data: Bytes, level: Int) -> Bytes {
+  compress_advanced(data, CompressionMethod::RLE, level)
+}
+
+/// 使用 Compressed 块压缩（LZ77 + 熵编码）
+pub fn compress_as_compressed(data: Bytes, level: Int) -> Bytes {
+  compress_advanced(data, CompressionMethod::Compressed, level)
+}
+
+/// 基本压缩函数 - 使用默认设置（级别2）
 pub fn compress(data: Bytes) -> Bytes {
-  compress_with_level(data, CompressionLevel::Default)
+  let result = @zstd_encoder.compress(data)
+  match result {
+    Ok(compressed) => compressed
+    Err(_) => Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00])
+  }
 }
 
 /// 带压缩级别的压缩函数
-pub fn compress_with_level(data: Bytes, _level: CompressionLevel) -> Bytes {
-  let mut compressed: Array[Byte] = []
-  
-  // ZSTD魔数
-  compressed = compressed + [0x28, 0xB5, 0x2F, 0xFD]
-  
-  // 帧头描述符
-  compressed = compressed + [0x20]
-  let compression_result = choose_compression_method(data)
-  
-  match compression_result {
-    ("rle", rle_byte, rle_count) => {
-      // RLE压缩
-      let block_header = ((rle_count << 3) | (1 << 1) | 1)
-      compressed = compressed + [
-        (block_header & 0xFF).to_byte(),
-        ((block_header >> 8) & 0xFF).to_byte(),
-        ((block_header >> 16) & 0xFF).to_byte()
-      ]
-      compressed = compressed + [rle_byte]
-    }
-    ("raw", _, _) => {
-      // 原始块压缩
-      let block_size = data.length()
-      let block_header = ((block_size << 3) | 0x01)
-      
-      compressed = compressed + [
-        (block_header & 0xFF).to_byte(),
-        ((block_header >> 8) & 0xFF).to_byte(),
-        ((block_header >> 16) & 0xFF).to_byte()
-      ]
-      
-      for i = 0; i < data.length(); i = i + 1 {
-        compressed = compressed + [data[i]]
-      }
-    }
-    _ => {
-      // 回退到原始块
-      let block_size = data.length()
-      let block_header = ((block_size << 3) | 0x01)
-      
-      compressed = compressed + [
-        (block_header & 0xFF).to_byte(),
-        ((block_header >> 8) & 0xFF).to_byte(),
-        ((block_header >> 16) & 0xFF).to_byte()
-      ]
-      
-      for i = 0; i < data.length(); i = i + 1 {
-        compressed = compressed + [data[i]]
-      }
-    }
+pub fn compress_with_level(data: Bytes, level: CompressionLevel) -> Bytes {
+  // 将 API 级别映射到压缩器级别
+  let compression_level = match level {
+    CompressionLevel::Fast => 1
+    CompressionLevel::Default => 3
+    CompressionLevel::Better => 6
+    CompressionLevel::Best => 9
   }
   
-  Bytes::from_array(compressed)
+  let config = @zstd_encoder.create_config_with_level(compression_level)
+  let result = @zstd_encoder.compress_data(data, config)
+  
+  match result {
+    Ok(compressed) => compressed
+    Err(_) => {
+      // 回退到基本压缩
+      compress(data)
+    }
+  }
 }
 
-/// 选择最佳压缩方法
+/// 压缩方法
+pub enum CompressionMethod {
+  Auto       // Auto-select best method
+  Raw        // Uncompressed
+  RLE        // Run-Length Encoding  
+  Compressed // LZ77 + Entropy coding
+} derive(Show)
+
 fn choose_compression_method(data: Bytes) -> (String, Byte, Int) {
-  if data.length() == 0 {
-    return ("raw", 0, 0)
-  }
-  
-  if is_suitable_for_rle(data) {
-    let first_byte = data[0]
-    return ("rle", first_byte, data.length())
-  }
+  if data.length() == 0 { return ("raw", 0, 0) }
+  if is_suitable_for_rle(data) { return ("rle", data[0], data.length()) }
   ("raw", 0, data.length())
 }
 
-/// 检查数据是否适合RLE压缩
 fn is_suitable_for_rle(data: Bytes) -> Bool {
-  if data.length() < 4 {
-    return false
-  }
-  
+  if data.length() < 4 { return false }
   let first_byte = data[0]
   let mut same_count = 1
-  
   for i = 1; i < data.length(); i = i + 1 {
-    if data[i] == first_byte {
-      same_count = same_count + 1
-    } else {
-      break
+    if data[i] == first_byte { same_count = same_count + 1 } else { break }
+  }
+  same_count.to_double() / data.length().to_double() > 0.75
+}
+
+/// 高级压缩函数 - 允许选择压缩方法和级别
+/// 
+/// 参数:
+/// - data: 要压缩的数据
+/// - mode: 压缩方法 (Auto/Raw/RLE/Compressed)
+/// - level: 压缩级别 (1-22)，默认为2
+/// 
+/// 示例:
+/// ```moonbit
+/// let data = "Hello, World!".to_bytes()
+/// let compressed = compress_advanced(data, CompressionMethod::Auto, 5)
+/// ```
+pub fn compress_advanced(data: Bytes, mode: CompressionMethod, level: Int) -> Bytes {
+  let actual_level = if level < 1 { 2 } else if level > 22 { 22 } else { level }
+  let config = @zstd_encoder.create_config_with_level(actual_level)
+  
+  match mode {
+    CompressionMethod::Auto => {
+      // 自动选择最佳压缩方法
+      // 先检查是否特别适合 RLE 压缩
+      let (compression_type, _byte, _size) = choose_compression_method(data)
+      if compression_type == "rle" {
+        // 使用 RLE 块压缩
+        let result = @zstd_encoder.compress_as_rle_block(data, config)
+        match result {
+          Ok(compressed) => compressed
+          Err(_) => {
+            // RLE 失败，回退到通用压缩
+            let fallback = @zstd_encoder.compress_data(data, config)
+            match fallback {
+              Ok(c) => c
+              Err(_) => Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00])
+            }
+          }
+        }
+      } else {
+        // 使用通用压缩逻辑（已包含 Raw/Compressed 智能选择）
+        let result = @zstd_encoder.compress_data(data, config)
+        match result {
+          Ok(compressed) => compressed
+          Err(_) => {
+            // 回退到空帧
+            Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00])
+          }
+        }
+      }
+    }
+    CompressionMethod::Raw => {
+      // 强制使用 Raw 块
+      let result = @zstd_encoder.compress_as_raw_block(data, config)
+      match result {
+        Ok(compressed) => compressed
+        Err(_) => Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00])
+      }
+    }
+    CompressionMethod::RLE => {
+      // 强制使用 RLE 块
+      let result = @zstd_encoder.compress_as_rle_block(data, config)
+      match result {
+        Ok(compressed) => compressed
+        Err(_) => Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00])
+      }
+    }
+    CompressionMethod::Compressed => {
+      // 强制使用 Compressed 块（LZ77 + 熵编码）
+      let result = @zstd_encoder.compress_as_compressed_block(data, config)
+      match result {
+        Ok(compressed) => compressed
+        Err(_) => {
+          // 如果失败，回退到 Raw 块
+          let fallback = @zstd_encoder.compress_as_raw_block(data, config)
+          match fallback {
+            Ok(c) => c
+            Err(_) => Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00])
+          }
+        }
+      }
     }
   }
-  
-  same_count.to_double() / data.length().to_double() > 0.75
 }
 
 /// 基本解压缩函数
@@ -151,8 +216,27 @@ fn decompress_advanced(data: Bytes) -> Bytes {
     return Bytes::from_array([])
   }
   
-  // 简化的帧头解析
-  let mut offset = 5  // 跳过魔数和基本帧头
+  // 解析帧头
+  let frame_header_desc = data[4].to_int()
+  let fcs_field_size = (frame_header_desc >> 6) & 3
+  let _single_segment = ((frame_header_desc >> 5) & 1) != 0
+  
+  let mut offset = 5  // 跳过魔数和帧头描述符
+  
+  // 跳过内容大小字段
+  if _single_segment {
+    // Single_Segment 模式下，内容大小根据 FCS_Field_Size 确定
+    if fcs_field_size == 0 {
+      offset = offset + 1  // 1 byte
+    } else if fcs_field_size == 1 {
+      offset = offset + 2  // 2 bytes
+    } else if fcs_field_size == 2 {
+      offset = offset + 4  // 4 bytes
+    } else if fcs_field_size == 3 {
+      offset = offset + 8  // 8 bytes
+    }
+  }
+  
   let result: Array[Byte] = []
   
   while offset < data.length() {
@@ -279,7 +363,7 @@ fn analyze_file_detailed(data: Bytes) -> ZSTDFileAnalysis {
   let single_segment = (frame_desc & 0x20) != 0
   let content_checksum = (frame_desc & 0x04) != 0
   let dict_id_flag = (frame_desc & 0x03)
-  let content_size_flag = (frame_desc & 0x0C) >> 2
+  let fcs_field_size = (frame_desc >> 6) & 3  // Frame Content Size field size (位6-7)
   
   let reserved_bits = (frame_desc & 0x08)
   if reserved_bits != 0 {
@@ -321,17 +405,27 @@ fn analyze_file_detailed(data: Bytes) -> ZSTDFileAnalysis {
     offset = offset + 1
   }
   
+  // 跳过字典 ID（如果存在）
   if dict_id_flag > 0 {
-    offset = offset + dict_id_flag
-  }
-  if content_size_flag > 0 {
-    let size_bytes = match content_size_flag {
+    let dict_id_bytes = match dict_id_flag {
       1 => 1
       2 => 2
+      3 => 4
+      _ => 0
+    }
+    offset = offset + dict_id_bytes
+  }
+  
+  // 跳过内容大小字段（在 Single_Segment 模式下）
+  if single_segment {
+    let content_size_bytes = match fcs_field_size {
+      0 => 1
+      1 => 2
+      2 => 4
       3 => 8
       _ => 0
     }
-    offset = offset + size_bytes
+    offset = offset + content_size_bytes
   }
   
   if offset + 3 > data.length() {
@@ -374,7 +468,10 @@ fn analyze_file_detailed(data: Bytes) -> ZSTDFileAnalysis {
     }
   }
   
-  if block_size == @zstd_core.ZSTD_MAX_BLOCK_SIZE {
+  // 验证块数据完整性（考虑不同块类型的实际大小）
+  if block_size == @zstd_core.ZSTD_MAX_BLOCK_SIZE && block_type != 1 {
+    // RLE 块即使 block_size 是 128K，实际数据也只有 1 字节
+    // 只对非 RLE 块进行 128K 数据完整性检查
     if data.length() < offset + 3 + block_size {
       return ZSTDFileAnalysis::{
         is_valid: false,

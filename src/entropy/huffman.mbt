@@ -457,8 +457,32 @@ pub fn build_huffman_encode_table(frequencies: Array[Int]) -> HuffmanEncodeTable
 }
 
 /// 使用 Huffman 编码字面量
+/// 简化实现：使用表进行基本编码
 pub fn huffman_encode_literals(literals: Array[Byte], table: HuffmanEncodeTable) -> Bytes {
-  // 简化实现：直接返回原始字面量
-  // 完整实现需要位流写入
-  Bytes::from_array(literals)
+  let output: Array[Byte] = []
+  
+  // 使用 Huffman 表进行简化编码
+  for i = 0; i < literals.length(); i = i + 1 {
+    let symbol = literals[i].to_int()
+    
+    // 使用 Huffman 编码表
+    if symbol < table.codes.length() {
+      let code = table.codes[symbol]
+      
+      // 简化：直接写入码长较短的表示
+      // 真正的实现需要位流写入
+      if code.length <= 8 {
+        output.push((code.code & 0xFF).to_byte())
+      } else {
+        // 对于较长的码，分两个字节写入
+        output.push((code.code & 0xFF).to_byte())
+        output.push(((code.code >> 8) & 0xFF).to_byte())
+      }
+    } else {
+      // 超出范围的符号，直接写入
+      output.push(literals[i])
+    }
+  }
+  
+  Bytes::from_array(output)
 }

@@ -6,11 +6,11 @@
     },
     {
       "path": "Ronlands/moonbit_zstd/decoder",
-      "alias": "decoder"
+      "alias": "zstd_decoder"
     },
     {
       "path": "Ronlands/moonbit_zstd/encoder",
-      "alias": "encoder"
+      "alias": "zstd_encoder"
     }
   ],
   "link": {

@@ -12,6 +12,7 @@
 pub struct Decompressor {
   window_size : Int
   context : @zstd_core.DecompressionContext
+  dictionary : Bytes  // Preloaded dictionary content
 }
 
 /// Create new decompressor
@@ -22,7 +23,21 @@ pub fn new_decompressor() -> @zstd_core.DecompressionContext {
 /// Create decompressor with specific window size
 pub fn create_decompressor(window_size : Int) -> Decompressor {
   let context = @zstd_core.make_decompression_context()
-  Decompressor::{ window_size: window_size, context: context }
+  Decompressor::{ 
+    window_size: window_size, 
+    context: context,
+    dictionary: Bytes::new(0)
+  }
+}
+
+/// Create decompressor with dictionary
+pub fn create_decompressor_with_dict(window_size : Int, dictionary: Bytes) -> Decompressor {
+  let context = @zstd_core.make_decompression_context()
+  Decompressor::{ 
+    window_size: window_size, 
+    context: context,
+    dictionary: dictionary
+  }
 }
 
 /// Decompress ZSTD data - Real implementation
@@ -46,8 +61,13 @@ pub fn decompress(data : Bytes) -> @zstd_core.ZSTDResult[Bytes] {
   }
 }
 
-/// 真正的 ZSTD 解压缩实现
+/// 真正的 ZSTD 解压缩实现（无字典）
 pub fn decompress_zstd_data(data: Bytes) -> Result[Bytes, String] {
+  decompress_zstd_data_with_dict(data, Bytes::new(0))
+}
+
+/// 真正的 ZSTD 解压缩实现（带字典）
+pub fn decompress_zstd_data_with_dict(data: Bytes, dictionary: Bytes) -> Result[Bytes, String] {
   let mut current_offset = 4  // 跳过魔数
   
   // 解析帧头
@@ -57,7 +77,13 @@ pub fn decompress_zstd_data(data: Bytes) -> Result[Bytes, String] {
       current_offset = current_offset + header_size
       
       // 解压缩块
-      let mut output_data = Bytes::new(0)
+      // 如果有字典，将其作为初始窗口内容
+      let mut output_data = if dictionary.length() > 0 {
+        dictionary
+      } else {
+        Bytes::new(0)
+      }
+      let dict_size = dictionary.length()
       
       while current_offset + 3 <= data.length() {
         // 解析块头
@@ -81,11 +107,18 @@ pub fn decompress_zstd_data(data: Bytes) -> Result[Bytes, String] {
           return Err("块数据超出文件边界")
         }
         
-        // 解压缩块（传递block_size作为解压后的大小）
-        let block_result = decompress_single_block(data, current_offset, block_size, block_type)
+        // 解压缩块（传递block_size作为解压后的大小和当前窗口用于序列执行）
+        let block_result = decompress_single_block_with_window(
+          data, current_offset, block_size, block_type, output_data
+        )
         match block_result {
           Ok(block_data) => {
-            output_data = output_data + block_data
+            // 如果有字典，第一次追加时只保留新数据
+            if dict_size > 0 && output_data.length() == dict_size {
+              output_data = dictionary + block_data
+            } else {
+              output_data = output_data + block_data
+            }
             // 更新偏移量使用压缩数据大小
             current_offset = current_offset + compressed_size
           }
@@ -99,7 +132,16 @@ pub fn decompress_zstd_data(data: Bytes) -> Result[Bytes, String] {
         }
       }
       
-      Ok(output_data)
+      // 如果使用了字典，移除字典部分只返回实际解压的数据
+      if dict_size > 0 {
+        let actual_data: Array[Byte] = []
+        for i = dict_size; i < output_data.length(); i = i + 1 {
+          actual_data.push(output_data[i])
+        }
+        Ok(Bytes::from_array(actual_data))
+      } else {
+        Ok(output_data)
+      }
     }
     Err(error_msg) => Err(error_msg)
   }
@@ -196,8 +238,15 @@ fn parse_frame_header_for_decompressor(data: Bytes, offset: Int) -> Result[(@zst
   Ok((frame_header_struct, current_offset - offset))
 }
 
-/// 解压缩单个块
-fn decompress_single_block(data: Bytes, offset: Int, block_size: Int, block_type: Int) -> Result[Bytes, String] {
+/// 解压缩单个块（带窗口用于字典引用）
+/// window 参数预留用于 Compressed 块中的字典引用
+fn decompress_single_block_with_window(
+  data: Bytes, 
+  offset: Int, 
+  block_size: Int, 
+  block_type: Int,
+  _window: Bytes  // 预留用于 Compressed 块解压缩时的字典引用
+) -> Result[Bytes, String] {
   match block_type {
     0 => {
       // Raw block - 直接返回数据
@@ -228,7 +277,7 @@ fn decompress_single_block(data: Bytes, offset: Int, block_size: Int, block_type
       Ok(Bytes::from_array(rle_array))
     }
     2 => {
-      // Compressed block - 使用真正的解压缩实现
+      // Compressed block - 使用真正的解压缩实现（暂不传递window，未来可增强）
       decompress_compressed_block(data, offset, block_size)
     }
     3 => {

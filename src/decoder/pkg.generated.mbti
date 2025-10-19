@@ -20,6 +20,8 @@ fn copy_match(@core.WindowBuffer, Int, Int) -> Result[Bytes, String]
 
 fn create_decompressor(Int) -> Decompressor
 
+fn create_decompressor_with_dict(Int, Bytes) -> Decompressor
+
 fn create_fse_decoder(FSETable, Int) -> FSEDecoder
 
 fn create_huffman_decoder(HuffmanTable) -> HuffmanDecoder
@@ -39,6 +41,8 @@ fn decompress_block(Bytes, Int) -> Result[(Bytes, Int, Bool), String]
 fn decompress_with_decompressor(@core.DecompressionContext, Bytes) -> Result[(@core.DecompressionContext, Bytes), @core.ZSTDError]
 
 fn decompress_zstd_data(Bytes) -> Result[Bytes, String]
+
+fn decompress_zstd_data_with_dict(Bytes, Bytes) -> Result[Bytes, String]
 
 fn get_available_history_size(@core.WindowBuffer) -> Int
 
@@ -114,6 +118,7 @@ fn write_to_window(@core.WindowBuffer, Bytes) -> Unit
 pub struct Decompressor {
   window_size : Int
   context : @core.DecompressionContext
+  dictionary : Bytes
 }
 
 pub struct FSEDecoder {

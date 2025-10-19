@@ -30,13 +30,22 @@ pub fn verify_data_equal(a: Bytes, b: Bytes) -> Bool {
 pub fn run_test_suite(name: String, tests: Array[(String, Bool)]) -> Bool {
   let mut passed = 0
   let total = tests.length()
+  let failed_tests: Array[String] = []
   for i = 0; i < tests.length(); i = i + 1 {
     if tests[i].1 {
       passed = passed + 1
+    } else {
+      failed_tests.push(tests[i].0)
     }
   }
   
   println("\{name} passed: \{passed}/\{total}")
+  if failed_tests.length() > 0 {
+    println("Failed tests:")
+    for i = 0; i < failed_tests.length(); i = i + 1 {
+      println("  - \{failed_tests[i]}")
+    }
+  }
   passed == total
 }
 

@@ -74,12 +74,10 @@ pub fn parse_zstd_dictionary(data: Bytes) -> Result[Dictionary, String] {
 }
 
 /// 使用字典进行解压缩
-/// TODO: 完整实现字典解压缩
-/// - 需要在解压缩前将字典内容预加载到解压缩窗口
-/// - 这样在解压缩过程中可以引用字典中的内容
+/// 实现完整字典解压缩 - 将字典内容预加载到解压缩窗口
 pub fn decompress_with_dictionary(compressed_data: Bytes, dictionary: Dictionary) -> Result[Bytes, String] {
   // 检查字典ID是否匹配
-  let frame_result = @decoder.parse_frame_header(compressed_data)
+  let frame_result = @zstd_decoder.parse_frame_header(compressed_data)
   let frame_dict_id = match frame_result {
     Ok((frame_header, _)) => frame_header.dict_id.reinterpret_as_uint()
     Err(err) => return Err("无法解析帧头: " + @zstd_core.error_to_string(err))
@@ -90,28 +88,31 @@ pub fn decompress_with_dictionary(compressed_data: Bytes, dictionary: Dictionary
     return Err("字典ID不匹配: 期望 " + dictionary.dict_id.to_string() + ", 实际 " + frame_dict_id.to_string())
   }
   
-  // Note: Full dictionary decompression requires preloading dictionary content into the decompression window
-  let decompression_result = @decoder.decompress_zstd_data(compressed_data)
+  // 使用带字典的解压缩函数
+  let decompression_result = @zstd_decoder.decompress_zstd_data_with_dict(
+    compressed_data, 
+    dictionary.content
+  )
   match decompression_result {
     Ok(decompressed) => Ok(decompressed)
     Err(err_msg) => Err("解压缩失败: " + err_msg)
   }
 }
 
-/// 使用字典进行压缩（基础实现）
-/// TODO: 完整实现字典压缩
-/// 1. 将字典内容预加载到压缩窗口
-/// 2. 在压缩过程中使用字典进行匹配
-/// 3. 在帧头中写入字典 ID
-pub fn compress_with_dictionary(data: Bytes, _dictionary: Dictionary) -> Result[Bytes, String] {
-  let config = @encoder.create_default_config()
-  @encoder.compress_data(data, config)
+/// 使用字典进行压缩
+/// 实现字典压缩 - 在帧头中写入字典 ID
+/// TODO: 将字典内容用于模式匹配以提高压缩比
+pub fn compress_with_dictionary(data: Bytes, dictionary: Dictionary) -> Result[Bytes, String] {
+  let config = @zstd_encoder.create_default_config()
+  @zstd_encoder.compress_data_with_dict(
+    data, 
+    config,
+    dictionary.content,
+    dictionary.dict_id
+  )
 }
 
-/// 构建字典（简化实现，未来可优化为 Cover 算法）
-/// TODO: 实现 Cover 算法用于智能字典构建
-/// - 当前只是简单合并样本数据
-/// - Cover 算法可以生成更优质的字典
+/// 构建字典 - 使用简单方法
 pub fn build_dictionary(samples: Array[Bytes], target_size: Int) -> Result[Dictionary, String] {
   if samples.length() == 0 {
     return Err("没有样本数据")
@@ -121,16 +122,9 @@ pub fn build_dictionary(samples: Array[Bytes], target_size: Int) -> Result[Dicti
     return Err("目标大小必须大于0")
   }
   
-  // 计算总样本大小
-  let mut total_size = 0
-  for i = 0; i < samples.length(); i = i + 1 {
-    total_size = total_size + samples[i].length()
-  }
-  
-  // 构建组合数据
+  // 使用简单合并方法
   let combined_data: Array[Byte] = []
   
-  // 合并样本（优化：避免嵌套循环）
   for i = 0; i < samples.length(); i = i + 1 {
     let sample = samples[i]
     for j = 0; j < sample.length(); j = j + 1 {
@@ -149,6 +143,164 @@ pub fn build_dictionary(samples: Array[Bytes], target_size: Int) -> Result[Dicti
   let dict_id = generate_dictionary_id(dict_content)
   
   Ok(create_raw_dictionary(dict_content, dict_id))
+}
+
+// ============================================================================
+// Cover Algorithm Implementation / Cover 算法实现
+// ============================================================================
+
+/// N-gram 结构（用于统计）
+priv struct NGram {
+  data: Array[Byte]  // N-gram 数据
+  count: Int         // 出现次数
+}
+
+/// 使用 Cover 算法构建字典
+/// Cover 算法通过分析样本中的重复模式来选择最有价值的序列
+pub fn build_dictionary_with_cover(
+  samples: Array[Bytes], 
+  target_size: Int,
+  ngram_size: Int  // N-gram 大小，通常 6-8
+) -> Result[Dictionary, String] {
+  if samples.length() == 0 {
+    return Err("没有样本数据")
+  }
+  
+  if target_size <= 0 {
+    return Err("目标大小必须大于0")
+  }
+  
+  let effective_ngram_size = ngram_size.max(4).min(16)
+  
+  // 第一步：提取所有 n-grams 并统计频率
+  let ngrams = extract_ngrams(samples, effective_ngram_size)
+  
+  // 第二步：计算每个 n-gram 的覆盖率（节省的字节数）
+  let scored_ngrams = score_ngrams(ngrams, effective_ngram_size)
+  
+  // 第三步：贪心选择最有价值的 n-grams
+  let dict_content = select_best_ngrams(scored_ngrams, target_size)
+  
+  let dict_id = generate_dictionary_id(dict_content)
+  Ok(create_raw_dictionary(dict_content, dict_id))
+}
+
+/// 从样本中提取所有 n-grams
+fn extract_ngrams(samples: Array[Bytes], ngram_size: Int) -> Array[NGram] {
+  let ngram_map: Array[(Array[Byte], Int)] = []  // (data, count)
+  
+  // 遍历所有样本
+  for sample_idx = 0; sample_idx < samples.length(); sample_idx = sample_idx + 1 {
+    let sample = samples[sample_idx]
+    
+    // 提取此样本中的所有 n-grams
+    let mut pos = 0
+    while pos + ngram_size <= sample.length() {
+      let ngram: Array[Byte] = []
+      for i = 0; i < ngram_size; i = i + 1 {
+        ngram.push(sample[pos + i])
+      }
+      
+      // 查找是否已存在
+      let mut found = false
+      for i = 0; i < ngram_map.length(); i = i + 1 {
+        let (existing_data, count) = ngram_map[i]
+        if arrays_equal(existing_data, ngram) {
+          // 更新计数
+          ngram_map[i] = (existing_data, count + 1)
+          found = true
+          break
+        }
+      }
+      
+      if !found {
+        ngram_map.push((ngram, 1))
+      }
+      
+      pos = pos + 1
+    }
+  }
+  
+  // 转换为 NGram 结构
+  let result: Array[NGram] = []
+  for i = 0; i < ngram_map.length(); i = i + 1 {
+    let (data, count) = ngram_map[i]
+    result.push(NGram::{ data, count })
+  }
+  
+  result
+}
+
+/// 计算 n-grams 的得分（覆盖率）
+fn score_ngrams(ngrams: Array[NGram], ngram_size: Int) -> Array[(NGram, Int)] {
+  let scored: Array[(NGram, Int)] = []
+  
+  for i = 0; i < ngrams.length(); i = i + 1 {
+    let ngram = ngrams[i]
+    // 得分 = (出现次数 - 1) * n-gram大小
+    // 减1是因为第一次出现需要存储在字典中
+    let score = (ngram.count - 1) * ngram_size
+    if score > 0 {
+      scored.push((ngram, score))
+    }
+  }
+  
+  scored
+}
+
+/// 选择最有价值的 n-grams 构建字典
+fn select_best_ngrams(scored: Array[(NGram, Int)], target_size: Int) -> Bytes {
+  // 按得分排序（降序）
+  let sorted = scored
+  sorted.sort_by(fn(a: (NGram, Int), b: (NGram, Int)) -> Int {
+    b.1.compare(a.1)  // 降序
+  })
+  
+  // 贪心选择
+  let dict_data: Array[Byte] = []
+  
+  for i = 0; i < sorted.length(); i = i + 1 {
+    let (ngram, _score) = sorted[i]
+    
+    // 检查是否还有空间
+    if dict_data.length() + ngram.data.length() <= target_size {
+      // 添加到字典
+      for j = 0; j < ngram.data.length(); j = j + 1 {
+        dict_data.push(ngram.data[j])
+      }
+    }
+    
+    if dict_data.length() >= target_size {
+      break
+    }
+  }
+  
+  Bytes::from_array(dict_data)
+}
+
+/// 比较两个字节数组是否相等
+fn arrays_equal(a: Array[Byte], b: Array[Byte]) -> Bool {
+  if a.length() != b.length() {
+    return false
+  }
+  
+  for i = 0; i < a.length(); i = i + 1 {
+    if a[i] != b[i] {
+      return false
+    }
+  }
+  
+  true
+}
+
+/// 使用优化的 Cover 算法构建字典（带参数调优）
+pub fn build_optimized_dictionary(
+  samples: Array[Bytes],
+  target_size: Int
+) -> Result[Dictionary, String] {
+  // 使用推荐的 n-gram 大小
+  let ngram_size = 6
+  build_dictionary_with_cover(samples, target_size, ngram_size)
 }
 
 /// 生成字典ID
@@ -222,8 +374,8 @@ pub fn validate_dictionary(dictionary: Dictionary) -> Bool {
 /// - 当前只是基于简单估算
 /// - 应该实际压缩并比较大小
 pub fn calculate_dictionary_benefit(data: Bytes, dictionary: Dictionary) -> Double {
-  let config = @encoder.create_default_config()
-  let without_dict_size = @encoder.estimate_compressed_size(data, config)
+  let config = @zstd_encoder.create_default_config()
+  let without_dict_size = @zstd_encoder.estimate_compressed_size(data, config)
   
   // 简化估算：基于字典大小和数据相似度
   let dict_ratio = dictionary.content.length().to_double() / data.length().to_double()

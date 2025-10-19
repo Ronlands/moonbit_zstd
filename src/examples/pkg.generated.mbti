@@ -6,11 +6,17 @@ fn demo_basic_compression() -> Unit
 
 fn demo_compression_levels() -> Unit
 
+fn demo_compression_levels_advanced() -> Unit
+
+fn demo_compression_methods() -> Unit
+
 fn demo_data_integrity() -> Unit
 
 fn demo_file_analysis() -> Unit
 
 fn demo_format_detection() -> Unit
+
+fn demo_method_comparison() -> Unit
 
 fn print_summary() -> Unit
 
