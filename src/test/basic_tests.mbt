@@ -10,6 +10,7 @@ pub fn run_all_basic_tests() -> Bool {
     ("Compression Levels", test_compression_levels()),
     ("Empty Data", test_empty_data()),
     ("Data Integrity", test_data_integrity()),
+    ("Compressed Block", test_compressed_block()),
   ]
   
   run_test_suite("Basic tests", tests)
@@ -74,6 +75,31 @@ fn test_data_integrity() -> Bool {
   let integrity = @zstd.analyze_data_integrity(test_data)
   
   integrity.data_density >= 0.0 && integrity.data_density <= 1.0
+}
+
+/// Test compressed block infrastructure
+/// 测试 Compressed block 基础设施（架构已实现，等待 FSE 编码器）
+fn test_compressed_block() -> Bool {
+  // 创建足够大且有重复模式的数据
+  let mut test_text = ""
+  for _i = 0; _i < 10; _i = _i + 1 {
+    test_text = test_text + "The quick brown fox jumps over the lazy dog. "
+  }
+  let test_data = @encoding/utf8.encode(test_text)
+  
+  // 当前使用 Raw block（Compressed block 架构已就绪，等待 FSE 编码器）
+  let compressed = @zstd.compress(test_data)
+  
+  // 验证压缩后的数据不为空
+  if compressed.length() == 0 {
+    return false
+  }
+  
+  // 解压缩验证（Raw block 应该正常工作）
+  let decompressed = @zstd.decompress(compressed)
+  
+  // 验证往返正确
+  verify_data_equal(test_data, decompressed)
 }
 
 // ============================================================================

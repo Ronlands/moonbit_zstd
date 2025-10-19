@@ -3,6 +3,10 @@
     {
       "path": "Ronlands/moonbit_zstd/core",
       "alias": "zstd_core"
+    },
+    {
+      "path": "Ronlands/moonbit_zstd/entropy",
+      "alias": "zstd_entropy"
     }
   ],
   "test-import": [],
