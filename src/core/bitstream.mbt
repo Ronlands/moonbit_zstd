@@ -9,7 +9,7 @@ pub struct BitStream {
 
 /// Create new bitstream
 pub fn new_bitstream(data: Bytes) -> BitStream {
-  { data: data, position: 0 }
+  BitStream::{ data: data, position: 0 }
 }
 
 /// Read bytes from stream
@@ -23,7 +23,7 @@ pub fn read_bytes(stream: BitStream, count: Int) -> (BitStream, Bytes) {
     for i = stream.position; i < end_pos; i = i + 1 {
       result_bytes = result_bytes + [stream.data[i]]
     }
-    let new_stream = { data: stream.data, position: end_pos }
+    let new_stream = BitStream::{ data: stream.data, position: end_pos }
     (new_stream, Bytes::from_array(result_bytes))
   }
 }
@@ -34,7 +34,7 @@ pub fn read_byte(stream: BitStream) -> (BitStream, Byte) {
     (stream, b'\x00')
   } else {
     let byte_val = stream.data[stream.position]
-    let new_stream = { data: stream.data, position: stream.position + 1 }
+    let new_stream = BitStream::{ data: stream.data, position: stream.position + 1 }
     (new_stream, byte_val)
   }
 }
@@ -53,8 +53,8 @@ pub fn read_le_int(stream: BitStream, bytes: Int) -> (BitStream, Int) {
 pub fn skip_bytes(stream: BitStream, count: Int) -> BitStream {
   let new_pos = stream.position + count
   if new_pos > stream.data.length() {
-    { data: stream.data, position: stream.data.length() }
+    BitStream::{ data: stream.data, position: stream.data.length() }
   } else {
-    { data: stream.data, position: new_pos }
+    BitStream::{ data: stream.data, position: new_pos }
   }
 }

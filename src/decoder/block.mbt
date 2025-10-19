@@ -225,7 +225,7 @@ priv struct BlockContext {
 
 /// 创建块上下文
 fn create_block_context() -> BlockContext {
-  { last_huffman_weights: None }
+  BlockContext::{ last_huffman_weights: None }
 }
 
 /// Decompress literals section with context support

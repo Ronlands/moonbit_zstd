@@ -125,7 +125,7 @@ fn parse_direct_weights(data: Bytes, offset: Int, num_weights: Int, _max_size: I
     weights[num_weights] = last_weight_log + 1
   }
   
-  let result = {
+  let result = HuffmanWeights::{
     weights: weights,
     count: num_weights + 1
   }
@@ -195,7 +195,7 @@ fn parse_fse_compressed_weights(data: Bytes, offset: Int, compressed_size: Int, 
     }
   }
   
-  let result = {
+  let result = HuffmanWeights::{
     weights: weights,
     count: weight_count
   }
@@ -298,7 +298,7 @@ pub fn build_huffman_table(weights: Array[Int], max_symbol: Int) -> Result[Huffm
     }
   }
   
-  Ok({
+  Ok(HuffmanTable::{
     table: table,
     table_log: table_log,
     max_bits: max_weight,
@@ -317,7 +317,7 @@ pub fn build_huffman_table_from_weights(weights: HuffmanWeights) -> Result[Huffm
 
 /// Create Huffman decoder
 pub fn create_huffman_decoder(table: HuffmanTable) -> HuffmanDecoder {
-  { table: table, bit_buffer: 0L, bits_cached: 0 }
+  HuffmanDecoder::{ table: table, bit_buffer: 0L, bits_cached: 0 }
 }
 
 /// Refill bit buffer

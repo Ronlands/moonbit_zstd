@@ -146,7 +146,7 @@ pub fn build_fse_table(
     }
   }
   
-  Ok({
+  Ok(FSETable::{
     table_log: table_log,
     table: table
   })
@@ -317,7 +317,7 @@ pub fn create_fse_decoder(
   table: FSETable,
   initial_state: Int
 ) -> FSEDecoder {
-  {
+  FSEDecoder::{
     table: table,
     state: initial_state,
     bit_buffer: 0L,

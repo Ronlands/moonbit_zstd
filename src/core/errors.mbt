@@ -27,7 +27,7 @@ pub struct ContextualError {
 
 /// 创建错误上下文
 pub fn create_error_context(location: String, operation: String, offset: Int, info: String) -> ErrorContext {
-  {
+  ErrorContext::{
     location: location,
     operation: operation,
     data_offset: offset,
@@ -37,7 +37,7 @@ pub fn create_error_context(location: String, operation: String, offset: Int, in
 
 /// 创建带上下文的错误
 pub fn create_contextual_error(error: ZSTDError, severity: ErrorSeverity, context: ErrorContext) -> ContextualError {
-  {
+  ContextualError::{
     error: error,
     severity: severity,
     context: context,
@@ -266,7 +266,7 @@ pub struct ErrorStats {
 
 /// 创建错误统计
 pub fn create_error_stats() -> ErrorStats {
-  {
+  ErrorStats::{
     error_count: 0,
     fatal_count: 0,
     total_count: 0

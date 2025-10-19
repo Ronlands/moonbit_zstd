@@ -62,7 +62,7 @@ pub fn make_frame_header(
   checksum_flag: Bool,
   window_size: Int
 ) -> FrameHeader {
-  { frame_type, dict_id, frame_content_size, single_segment, checksum_flag, window_size }
+  FrameHeader::{ frame_type, dict_id, frame_content_size, single_segment, checksum_flag, window_size }
 }
 
 /// Decompression context with Huffman tree storage
@@ -84,7 +84,7 @@ pub struct HuffmanTreeRef {
 
 /// Create Huffman tree reference
 pub fn create_huffman_tree_ref(weights: Array[Int], max_symbol: Int) -> HuffmanTreeRef {
-  { weights, max_symbol }
+  HuffmanTreeRef::{ weights, max_symbol }
 }
 
 /// Create new decompression context with parameters
@@ -95,7 +95,7 @@ pub fn make_decompression_context_with_params(
   window_pos: Int,
   frame_content_size: Int
 ) -> DecompressionContext {
-  { 
+  DecompressionContext::{ 
     window_buffer, 
     dictionary, 
     window_size, 
@@ -107,7 +107,7 @@ pub fn make_decompression_context_with_params(
 
 /// Create new decompression context with defaults
 pub fn make_decompression_context() -> DecompressionContext {
-  {
+  DecompressionContext::{
     window_buffer: b"",
     dictionary: b"",
     window_size: 65536,
@@ -160,7 +160,7 @@ pub struct Sequence {
 
 /// Create new sequence
 pub fn make_sequence(literal_length: Int, match_length: Int, offset: Int) -> Sequence {
-  { literal_length, match_length, offset }
+  Sequence::{ literal_length, match_length, offset }
 }
 
 /// Accessor functions for Sequence
@@ -194,7 +194,7 @@ pub struct BlockHeader {
 
 /// Create new block header
 pub fn make_block_header(block_type: BlockType, block_size: Int, last_block: Bool) -> BlockHeader {
-  { block_type, block_size, last_block }
+  BlockHeader::{ block_type, block_size, last_block }
 }
 
 /// Literals header structure
@@ -212,7 +212,7 @@ pub fn make_literals_header(
   regenerated_size: Int,
   streams_count: Int
 ) -> LiteralsHeader {
-  { literals_type, size, regenerated_size, streams_count }
+  LiteralsHeader::{ literals_type, size, regenerated_size, streams_count }
 }
 
 /// Literals section info structure
@@ -230,7 +230,7 @@ pub fn make_literals_section_info(
   compressed_size: Int,
   num_streams: Int
 ) -> LiteralsSectionInfo {
-  { literals_type, regenerated_size, compressed_size, num_streams }
+  LiteralsSectionInfo::{ literals_type, regenerated_size, compressed_size, num_streams }
 }
 
 /// Sequences section info structure
@@ -248,7 +248,7 @@ pub fn make_sequences_section_info(
   ml_mode: SequenceMode,
   of_mode: SequenceMode
 ) -> SequencesSectionInfo {
-  { num_sequences, ll_mode, ml_mode, of_mode }
+  SequencesSectionInfo::{ num_sequences, ll_mode, ml_mode, of_mode }
 }
 
 // ============================================================================
@@ -337,7 +337,7 @@ pub struct Dictionary {
 
 /// Create empty dictionary
 pub fn create_empty_dictionary() -> Dictionary {
-  {
+  Dictionary::{
     dict_type: None,
     dict_id: 0U,
     data: Bytes::from_array([]),
@@ -347,7 +347,7 @@ pub fn create_empty_dictionary() -> Dictionary {
 
 /// Create raw dictionary
 pub fn create_raw_dictionary_from_data(data: Bytes, dict_id: UInt) -> Dictionary {
-  {
+  Dictionary::{
     dict_type: Raw,
     dict_id: dict_id,
     data: data,
@@ -357,7 +357,7 @@ pub fn create_raw_dictionary_from_data(data: Bytes, dict_id: UInt) -> Dictionary
 
 /// Create formatted dictionary
 pub fn create_formatted_dictionary(data: Bytes, dict_id: UInt) -> Dictionary {
-  {
+  Dictionary::{
     dict_type: Formatted,
     dict_id: dict_id,
     data: data,
@@ -382,7 +382,7 @@ pub struct WindowBuffer {
 /// Create window buffer
 pub fn create_window_buffer(capacity: Int, dictionary: Dictionary) -> WindowBuffer {
   let actual_capacity = capacity.max(1024)  // Minimum 1KB
-  {
+  WindowBuffer::{
     buffer: Array::make(actual_capacity, 0),
     capacity: actual_capacity,
     position: 0,

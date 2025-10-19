@@ -15,7 +15,7 @@ pub fn new_decompressor() -> @zstd_core.DecompressionContext {
 /// Create decompressor with specific window size
 pub fn create_decompressor(window_size : Int) -> Decompressor {
   let context = @zstd_core.make_decompression_context()
-  { window_size: window_size, context: context }
+  Decompressor::{ window_size: window_size, context: context }
 }
 
 /// Decompress ZSTD data - Real implementation
