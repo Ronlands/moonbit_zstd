@@ -6,6 +6,9 @@
       "exports": [
         "test_basic_fse",
         "test_basic_huffman",
+        "test_huffman_encoder",
+        "test_huffman_roundtrip",
+        "demo_huffman_encoding",
         "build_fse_table_from_weights",
         "build_huffman_table_from_weights",
         "parse_huffman_weights",

@@ -27,11 +27,14 @@ fn run_demos() -> Unit {
   @zstd_examples.demo_data_integrity()
   @zstd_examples.demo_format_detection()
   @zstd_examples.demo_compression_levels()
-  
+
   // 新增：压缩方法和级别演示
   @zstd_examples.demo_compression_methods()
   @zstd_examples.demo_compression_levels_advanced()
   @zstd_examples.demo_method_comparison()
+
+  // 新增：Huffman 编码演示
+  @zstd_examples.demo_huffman_encoding()
   
   println("\n所有演示完成！")
   @zstd_examples.print_summary()
@@ -39,6 +42,12 @@ fn run_demos() -> Unit {
 
 /// Run comprehensive test suite
 fn run_tests() -> Unit {
+  // 保存压缩文件用于官方工具验证
+  @zstd_test.test_save_and_verify()
+  
+  // 首先运行编码测试
+  @zstd_test.run_all_encoding_tests()
+  
   println("\n" + @zstd_test.repeat_string("=", 60))
   println("开始执行完整的 RFC 8878 兼容性测试")
   println(@zstd_test.repeat_string("=", 60))
@@ -54,10 +63,10 @@ fn run_tests() -> Unit {
   let dictionary_tests_passed = @zstd_test.run_all_dictionary_tests()
   
   println("\nTest Results Summary:")
-  println("Basic tests (7): " + (if basic_tests_passed { "PASSED" } else { "FAILED" }))
+  println("Basic tests (9): " + (if basic_tests_passed { "PASSED" } else { "FAILED" }))
   println("Compatibility tests (5): " + (if compatibility_tests_passed { "PASSED" } else { "FAILED" }))
   println("Dictionary tests (5): " + (if dictionary_tests_passed { "PASSED" } else { "FAILED" }))
-  println("Total: 17 tests")
+  println("Total: 19 tests")
   
   if basic_tests_passed && compatibility_tests_passed && dictionary_tests_passed {
     println("\nAll tests passed! ZSTD implementation is working correctly.")

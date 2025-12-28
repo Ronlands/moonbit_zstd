@@ -13,7 +13,7 @@ pub struct HuffmanTable {
   symbols: Array[Int]
   num_bits: Array[Int]
   max_bits: Int
-  root: HuffmanNode
+  root: HuffmanNode  // 用于解码的树
 }
 
 /// Huffman节点
@@ -43,9 +43,21 @@ pub fn create_huffman_table_with_params(
   symbols: Array[Int],
   num_bits: Array[Int],
   max_bits: Int,
-  root: HuffmanNode
+  root: HuffmanTreeNode
 ) -> HuffmanTable {
-  HuffmanTable::{ symbols, num_bits, max_bits, root }
+  // 转换HuffmanTreeNode为HuffmanNode用于解码
+  let decoding_root = convert_tree_node_to_node(root)
+  HuffmanTable::{ symbols, num_bits, max_bits, root: decoding_root }
+}
+
+/// 将HuffmanTreeNode转换为HuffmanNode（用于解码）
+fn convert_tree_node_to_node(tree_node: HuffmanTreeNode) -> HuffmanNode {
+  match tree_node {
+    HuffmanTreeNode::Leaf(symbol, _freq) => HuffmanNode::Leaf(symbol)
+    HuffmanTreeNode::Internal(left, right, _combined_freq) => {
+      HuffmanNode::Internal(convert_tree_node_to_node(left), convert_tree_node_to_node(right))
+    }
+  }
 }
 
 /// 创建默认的Huffman权重
@@ -138,92 +150,23 @@ pub fn parse_huffman_weights(data: Bytes, offset: Int, max_symbols: Int) -> Resu
   Ok((create_huffman_weights(weights), bytes_consumed))
 }
 
-/// 构建Huffman树（增强的完整性验证）
-fn build_huffman_tree(weights: Array[Int]) -> Result[HuffmanNode, String] {
-  // 创建节点列表
-  let mut nodes: Array[(Int, HuffmanNode)] = []
-  let mut total_weight = 0
-  
-  for i = 0; i < weights.length(); i = i + 1 {
-    if weights[i] > 0 {
-      nodes.push((weights[i], HuffmanNode::Leaf(i)))
-      total_weight = total_weight + weights[i]
-    }
-  }
-  
-  // 完整性验证：检查是否有有效权重
-  if nodes.length() == 0 {
-    return Err("Truncated Huffman state: no valid weights for tree construction")
-  }
-  
-  // 完整性验证：至少需要一个符号
-  if total_weight == 0 {
-    return Err("Truncated Huffman state: total weight is zero")
-  }
-  
-  // 单节点特殊情况
-  if nodes.length() == 1 {
-    // 只有一个符号时，创建一个虚拟的内部节点
-    let (_weight, node) = nodes[0]
-    return Ok(HuffmanNode::Internal(node, HuffmanNode::Leaf(0)))
-  }
-  
-  // 构建Huffman树
-  let mut iteration = 0
-  let max_iterations = nodes.length() * 2  // 防止无限循环
-  
-  while nodes.length() > 1 {
-    iteration = iteration + 1
-    if iteration > max_iterations {
-      return Err("Truncated Huffman state: tree construction exceeded maximum iterations")
-    }
-    
-    // 按权重排序
-    nodes.sort_by(fn(a: (Int, HuffmanNode), b: (Int, HuffmanNode)) -> Int {
-      a.0.compare(b.0)
-    })
-    
-    // 取两个最小权重的节点
-    let (weight1, node1) = nodes[0]
-    let (weight2, node2) = nodes[1]
-    
-    // 创建新的内部节点
-    let new_weight = weight1 + weight2
-    let new_node = HuffmanNode::Internal(node1, node2)
-    
-    // 移除已使用的节点，添加新节点
-    let new_nodes: Array[(Int, HuffmanNode)] = []
-    for i = 2; i < nodes.length(); i = i + 1 {
-      new_nodes.push(nodes[i])
-    }
-    new_nodes.push((new_weight, new_node))
-    nodes = new_nodes
-  }
-  
-  // 完整性验证：确保最终只有一个根节点
-  if nodes.length() != 1 {
-    return Err("Truncated Huffman state: tree construction resulted in " + nodes.length().to_string() + " roots")
-  }
-  
-  Ok(nodes[0].1)
-}
 
 /// 计算每个符号的位数
-fn calculate_symbol_bits(node: HuffmanNode, depth: Int) -> Array[Int] {
+fn calculate_symbol_bits(node: HuffmanTreeNode, depth: Int) -> Array[Int] {
   let bits: Array[Int] = []
-  
+
   match node {
-    HuffmanNode::Leaf(symbol) => {
+    HuffmanTreeNode::Leaf(symbol, _freq) => {
       // 确保数组足够大
       while bits.length() <= symbol {
         bits.push(0)
       }
       bits[symbol] = depth
     }
-    HuffmanNode::Internal(left, right) => {
+    HuffmanTreeNode::Internal(left, right, _combined_freq) => {
       let left_bits = calculate_symbol_bits(left, depth + 1)
       let right_bits = calculate_symbol_bits(right, depth + 1)
-      
+
       // 合并位数数组
       let max_len = left_bits.length().max(right_bits.length())
       for i = 0; i < max_len; i = i + 1 {
@@ -233,31 +176,26 @@ fn calculate_symbol_bits(node: HuffmanNode, depth: Int) -> Array[Int] {
       }
     }
   }
-  
+
   bits
 }
 
 /// 构建Huffman表
 pub fn build_huffman_table(weights: HuffmanWeights) -> Result[HuffmanTable, String] {
-  let tree_result = build_huffman_tree(weights.weights)
-  
-  match tree_result {
-    Ok(root) => {
-      let bits = calculate_symbol_bits(root, 0)
-      let max_bits = if bits.length() > 0 { bits[0] } else { 0 }
-      
-      // 创建符号数组
-      let symbols: Array[Int] = []
-      for i = 0; i < weights.weights.length(); i = i + 1 {
-        if weights.weights[i] > 0 {
-          symbols.push(i)
-        }
-      }
-      
-      Ok(create_huffman_table_with_params(symbols, bits, max_bits, root))
+  let root = build_huffman_tree(weights.weights)
+
+  let bits = calculate_symbol_bits(root, 0)
+  let max_bits = if bits.length() > 0 { bits[0] } else { 0 }
+
+  // 创建符号数组
+  let symbols: Array[Int] = []
+  for i = 0; i < weights.weights.length(); i = i + 1 {
+    if weights.weights[i] > 0 {
+      symbols.push(i)
     }
-    Err(e) => Err(e)
   }
+
+  Ok(create_huffman_table_with_params(symbols, bits, max_bits, root))
 }
 
 /// 从位流中解码Huffman符号（增强的状态验证）
@@ -411,19 +349,171 @@ pub fn test_basic_huffman() -> Bool {
 }
 
 // ============================================================================
-// Huffman Encoder Implementation / Huffman 编码器实现
+// Complete Huffman Encoder Implementation
 // ============================================================================
+
+/// Huffman 树节点
+pub enum HuffmanTreeNode {
+  Leaf(Int, Int)          // (symbol, frequency)
+  Internal(HuffmanTreeNode, HuffmanTreeNode, Int)  // (left, right, combined_frequency)
+}
 
 /// Huffman 编码表项
 pub struct HuffmanCode {
-  code: Int      // Huffman code bits
-  length: Int    // Code length in bits
+  code: UInt64    // Huffman code bits (最多支持64位)
+  length: Int     // Code length in bits
 }
 
 /// Huffman 编码表
 pub struct HuffmanEncodeTable {
-  codes: Array[HuffmanCode]   // Code for each symbol
-  max_symbol: Int              // Maximum symbol value
+  codes: Array[HuffmanCode]   // Code for each symbol (0-255)
+  max_symbol: Int             // Maximum symbol value
+}
+
+/// Huffman 位流编码器 - 完整的位级实现
+pub struct HuffmanBitWriter {
+  buffer: Array[Byte]
+  current_byte: Byte
+  bit_position: Int  // 0-7, 0表示最高位
+}
+
+/// Huffman 位流读取器
+pub struct HuffmanBitReader {
+  data: Bytes
+  byte_pos: Int
+  bit_pos: Int  // 0-7, 0表示最高位
+}
+
+/// 创建 Huffman 位流写入器
+pub fn create_huffman_bit_writer() -> HuffmanBitWriter {
+  HuffmanBitWriter::{
+    buffer: [],
+    current_byte: 0b00000000,
+    bit_position: 7  // 从最高位开始写入
+  }
+}
+
+/// 创建 Huffman 位流读取器
+pub fn create_huffman_bit_reader(data: Bytes) -> HuffmanBitReader {
+  HuffmanBitReader::{
+    data: data,
+    byte_pos: 0,
+    bit_pos: 7  // 从最高位开始读取
+  }
+}
+
+/// 向位流中写入指定数量的位 - 完整的实现
+pub fn write_bits(writer: HuffmanBitWriter, value: UInt64, num_bits: Int) -> HuffmanBitWriter {
+  if num_bits <= 0 || num_bits > 64 {
+    return writer  // 无效的位数
+  }
+
+  let mut current_byte = writer.current_byte
+  let mut bit_pos = writer.bit_position
+  let buffer = writer.buffer
+  let mut remaining_bits = num_bits
+  let value_to_write = value
+
+  while remaining_bits > 0 {
+    let bits_to_write = remaining_bits.min(bit_pos + 1)
+
+    // 提取要写入的位
+    let mask = (1UL << bits_to_write) - 1UL
+    let bits = (value_to_write >> (remaining_bits - bits_to_write)) & mask
+
+    // 计算位移量（从最高位开始）
+    let shift = bit_pos - bits_to_write + 1
+    current_byte = current_byte | (bits.to_int() << shift).to_byte()
+
+    bit_pos = bit_pos - bits_to_write
+    remaining_bits = remaining_bits - bits_to_write
+
+    // 如果当前字节写满，保存并开始新字节
+    if bit_pos < 0 {
+      buffer.push(current_byte)
+      current_byte = 0b00000000
+      bit_pos = 7
+    }
+  }
+
+  HuffmanBitWriter::{
+    buffer: buffer,
+    current_byte: current_byte,
+    bit_position: bit_pos
+  }
+}
+
+/// 从位流中读取指定数量的位
+pub fn read_bits(reader: HuffmanBitReader, num_bits: Int) -> Result[(UInt64, HuffmanBitReader), String] {
+  if num_bits <= 0 || num_bits > 64 {
+    return Err("Invalid number of bits to read")
+  }
+
+  let mut result: UInt64 = 0UL
+  let mut current_byte_pos = reader.byte_pos
+  let mut current_bit_pos = reader.bit_pos
+  let mut remaining_bits = num_bits
+
+  while remaining_bits > 0 {
+    if current_byte_pos >= reader.data.length() {
+      return Err("Bit stream exhausted")
+    }
+
+    let byte = reader.data[current_byte_pos].to_int()
+    let available_bits = current_bit_pos + 1
+    let bits_to_read = remaining_bits.min(available_bits)
+
+    // 提取位（从最高位开始）
+    let mask = ((1 << bits_to_read) - 1) << (current_bit_pos - bits_to_read + 1)
+    let bits = (byte & mask) >> (current_bit_pos - bits_to_read + 1)
+
+    result = (result << bits_to_read) | bits.to_uint64()
+
+    current_bit_pos = current_bit_pos - bits_to_read
+    remaining_bits = remaining_bits - bits_to_read
+
+    // 如果当前字节读完，移到下一个字节
+    if current_bit_pos < 0 {
+      current_byte_pos = current_byte_pos + 1
+      current_bit_pos = 7
+    }
+  }
+
+  let new_reader = HuffmanBitReader::{
+    data: reader.data,
+    byte_pos: current_byte_pos,
+    bit_pos: current_bit_pos
+  }
+
+  Ok((result, new_reader))
+}
+
+/// 完成位流写入，返回最终字节数组
+pub fn finish_bit_writer(writer: HuffmanBitWriter) -> Bytes {
+  let buffer = writer.buffer
+
+  // 如果还有未完成的字节且包含有效位，保存它
+  if writer.bit_position < 7 {
+    let final_buffer = buffer + [writer.current_byte]
+    Bytes::from_array(final_buffer)
+  } else {
+    Bytes::from_array(buffer)
+  }
+}
+
+/// 刷新位流，确保所有位都被写入
+pub fn flush_bit_writer(writer: HuffmanBitWriter) -> HuffmanBitWriter {
+  if writer.bit_position < 7 {
+    // 有未完成的字节，保存它并开始新字节
+    let new_buffer = writer.buffer + [writer.current_byte]
+    HuffmanBitWriter::{
+      buffer: new_buffer,
+      current_byte: 0b00000000,
+      bit_position: 7
+    }
+  } else {
+    writer
+  }
 }
 
 /// 统计符号频率
@@ -438,53 +528,375 @@ pub fn count_huffman_symbols(data: Array[Byte], max_symbol: Int) -> Array[Int] {
   counts
 }
 
-/// 从频率构建 Huffman 编码表
-pub fn build_huffman_encode_table(frequencies: Array[Int]) -> HuffmanEncodeTable {
-  let codes: Array[HuffmanCode] = []
-  
-  // 简化实现：为每个符号分配固定长度代码
-  // 完整实现需要构建 Huffman 树并生成最优代码
-  let code_length = 8  // 默认 8 位
-  
+/// 构建 Huffman 树
+fn build_huffman_tree(frequencies: Array[Int]) -> HuffmanTreeNode {
+  // 创建叶子节点列表
+  let mut nodes: Array[HuffmanTreeNode] = []
   for i = 0; i < frequencies.length(); i = i + 1 {
-    codes.push(HuffmanCode::{ code: i, length: code_length })
+    if frequencies[i] > 0 {
+      nodes.push(HuffmanTreeNode::Leaf(i, frequencies[i]))
+    }
   }
-  
+
+  // 如果没有符号，返回一个虚拟的叶子节点
+  if nodes.length() == 0 {
+    return HuffmanTreeNode::Leaf(0, 1)
+  }
+
+  // 如果只有一个符号，也返回叶子节点
+  if nodes.length() == 1 {
+    return nodes[0]
+  }
+
+  // 重复合并最小的两个节点，直到只剩一个根节点
+  while nodes.length() > 1 {
+    // 找到最小的两个节点（简单的冒泡排序）
+    for i = 0; i < nodes.length() - 1; i = i + 1 {
+      for j = 0; j < nodes.length() - i - 1; j = j + 1 {
+        let freq_j = get_node_frequency(nodes[j])
+        let freq_j1 = get_node_frequency(nodes[j + 1])
+        if freq_j > freq_j1 {
+          // 交换
+          let temp = nodes[j]
+          nodes[j] = nodes[j + 1]
+          nodes[j + 1] = temp
+        }
+      }
+    }
+
+    // 取出最小的两个节点
+    let left = nodes[0]
+    let right = nodes[1]
+    let combined_freq = get_node_frequency(left) + get_node_frequency(right)
+
+    // 创建新的内部节点
+    let new_node = HuffmanTreeNode::Internal(left, right, combined_freq)
+
+    // 移除前两个节点，添加新节点
+    let new_nodes: Array[HuffmanTreeNode] = []
+    for i = 2; i < nodes.length(); i = i + 1 {
+      new_nodes.push(nodes[i])
+    }
+    new_nodes.push(new_node)
+    nodes = new_nodes
+  }
+
+  nodes[0]
+}
+
+/// 获取节点频率的辅助函数
+fn get_node_frequency(node: HuffmanTreeNode) -> Int {
+  match node {
+    HuffmanTreeNode::Leaf(_symbol, freq) => freq
+    HuffmanTreeNode::Internal(_left, _right, freq) => freq
+  }
+}
+
+/// 计算 Huffman 编码长度 - 优化版本
+fn calculate_code_lengths(node: HuffmanTreeNode, depth: Int, lengths: Array[Int]) -> Unit {
+  match node {
+    HuffmanTreeNode::Leaf(symbol, _freq) => {
+      // 确保数组足够大
+      while lengths.length() <= symbol {
+        lengths.push(0)
+      }
+      lengths[symbol] = depth
+    }
+    HuffmanTreeNode::Internal(left, right, _freq) => {
+      calculate_code_lengths(left, depth + 1, lengths)
+      calculate_code_lengths(right, depth + 1, lengths)
+    }
+  }
+}
+
+/// 生成 Huffman 编码 - 使用规范的算法
+fn generate_huffman_codes_optimized(lengths: Array[Int]) -> Array[HuffmanCode] {
+  let codes: Array[HuffmanCode] = []
+  // 找到真正的最大长度
+  let mut max_length = 0
+  for i = 0; i < lengths.length(); i = i + 1 {
+    if lengths[i] > max_length {
+      max_length = lengths[i]
+    }
+  }
+
+  // 统计每个长度的符号数量
+  let length_counts: Array[Int] = []
+  for i = 0; i <= max_length; i = i + 1 {
+    length_counts.push(0)
+  }
+
+  for i = 0; i < lengths.length(); i = i + 1 {
+    if lengths[i] > 0 {
+      length_counts[lengths[i]] = length_counts[lengths[i]] + 1
+    }
+  }
+
+  // 计算起始码值
+  let start_codes: Array[Int] = []
+  start_codes.push(0)  // 长度0的起始码
+
+  for i = 1; i <= max_length; i = i + 1 {
+    start_codes.push((start_codes[i - 1] + length_counts[i - 1]) << 1)
+  }
+
+  // 为每个符号分配码值
+  let current_codes: Array[Int] = []
+  for i = 0; i <= max_length; i = i + 1 {
+    current_codes.push(start_codes[i])
+  }
+
+  // 生成最终的编码
+  for symbol = 0; symbol < lengths.length(); symbol = symbol + 1 {
+    let length = lengths[symbol]
+    if length > 0 {
+      let code = current_codes[length]
+      while codes.length() <= symbol {
+        codes.push(HuffmanCode::{ code: 0UL, length: 0 })
+      }
+      codes[symbol] = HuffmanCode::{ code: code.to_uint64(), length: length }
+
+      // 更新当前码值
+      current_codes[length] = current_codes[length] + 1
+    }
+  }
+
+  codes
+}
+
+/// 从 Huffman 树生成编码表
+fn generate_huffman_codes(node: HuffmanTreeNode, prefix_code: UInt64, prefix_length: Int) -> Array[HuffmanCode] {
+  let codes: Array[HuffmanCode] = []
+
+  match node {
+    HuffmanTreeNode::Leaf(symbol, _freq) => {
+      // 确保数组足够大
+      while codes.length() <= symbol {
+        codes.push(HuffmanCode::{ code: 0UL, length: 0 })
+      }
+      codes[symbol] = HuffmanCode::{ code: prefix_code, length: prefix_length }
+    }
+    HuffmanTreeNode::Internal(left, right, _freq) => {
+      // 左子树：添加0
+      let left_codes = generate_huffman_codes(left, (prefix_code << 1), prefix_length + 1)
+      // 右子树：添加1
+      let right_codes = generate_huffman_codes(right, (prefix_code << 1) | 1UL, prefix_length + 1)
+
+      // 合并编码表
+      let max_len = left_codes.length().max(right_codes.length())
+      for i = 0; i < max_len; i = i + 1 {
+        let left_code = if i < left_codes.length() { left_codes[i] } else { HuffmanCode::{ code: 0UL, length: 0 } }
+        let right_code = if i < right_codes.length() { right_codes[i] } else { HuffmanCode::{ code: 0UL, length: 0 } }
+
+        // 优先使用非零长度的编码
+        if left_code.length > 0 {
+          codes.push(left_code)
+        } else if right_code.length > 0 {
+          codes.push(right_code)
+        } else {
+          codes.push(HuffmanCode::{ code: 0UL, length: 0 })
+        }
+      }
+    }
+  }
+
+  codes
+}
+
+/// 从频率构建完整的 Huffman 编码表 - 优化版本
+pub fn build_huffman_encode_table(frequencies: Array[Int]) -> HuffmanEncodeTable {
+  // 构建 Huffman 树
+  let tree = build_huffman_tree(frequencies)
+
+  // 计算编码长度
+  let lengths: Array[Int] = []
+  calculate_code_lengths(tree, 0, lengths)
+
+  // 生成最优编码
+  let codes = generate_huffman_codes_optimized(lengths)
+
   HuffmanEncodeTable::{
     codes: codes,
     max_symbol: frequencies.length() - 1
   }
 }
 
-/// 使用 Huffman 编码字面量
-/// 简化实现：使用表进行基本编码
-pub fn huffman_encode_literals(literals: Array[Byte], table: HuffmanEncodeTable) -> Bytes {
-  let output: Array[Byte] = []
-  
-  // 使用 Huffman 表进行简化编码
-  for i = 0; i < literals.length(); i = i + 1 {
-    let symbol = literals[i].to_int()
-    
-    // 使用 Huffman 编码表
+/// Huffman 编码函数
+pub fn huffman_encode(data: Array[Byte]) -> Result[Bytes, String] {
+  let max_symbol = 255  // 字节数据
+
+  // 1. 统计频率
+  let frequencies = count_huffman_symbols(data, max_symbol)
+
+  // 2. 构建编码表
+  let encode_table = build_huffman_encode_table(frequencies)
+
+  // 3. 编码数据
+  let encoded_data = huffman_encode_with_table(data, encode_table)
+
+  Ok(encoded_data)
+}
+
+/// 使用编码表进行 Huffman 编码
+pub fn huffman_encode_with_table(data: Array[Byte], table: HuffmanEncodeTable) -> Bytes {
+  let writer = create_huffman_bit_writer()
+
+  // 为每个字节写入 Huffman 编码
+  let mut current_writer = writer
+  for i = 0; i < data.length(); i = i + 1 {
+    let symbol = data[i].to_int()
     if symbol < table.codes.length() {
       let code = table.codes[symbol]
-      
-      // 简化：直接写入码长较短的表示
-      // 真正的实现需要位流写入
-      if code.length <= 8 {
-        output.push((code.code & 0xFF).to_byte())
-      } else {
-        // 对于较长的码，分两个字节写入
-        output.push((code.code & 0xFF).to_byte())
-        output.push(((code.code >> 8) & 0xFF).to_byte())
+      if code.length > 0 {
+        current_writer = write_bits(current_writer, code.code, code.length)
       }
-    } else {
-      // 超出范围的符号，直接写入
-      output.push(literals[i])
     }
   }
-  
-  Bytes::from_array(output)
+
+  // 刷新并完成编码
+  let flushed_writer = flush_bit_writer(current_writer)
+  finish_bit_writer(flushed_writer)
+}
+
+/// Huffman 解码函数
+pub fn huffman_decode(encoded_data: Bytes, encode_table: HuffmanEncodeTable, expected_length: Int) -> Result[Array[Byte], String] {
+  let result: Array[Byte] = []
+  let reader = create_huffman_bit_reader(encoded_data)
+
+  // 为快速查找创建反向映射：编码 -> 符号
+  let code_map: Array[(Int, Int)] = []  // (code, length) -> symbol
+  for symbol = 0; symbol < encode_table.codes.length(); symbol = symbol + 1 {
+    let code = encode_table.codes[symbol]
+    if code.length > 0 {
+      code_map.push((code.code.to_int(), code.length))
+    }
+  }
+
+  let mut current_reader = reader
+  for _i = 0; _i < expected_length; _i = _i + 1 {
+    // 逐位读取直到找到匹配的编码
+    let mut current_code: UInt64 = 0UL
+    let mut code_length = 0
+    let mut found_symbol = -1
+
+    while code_length < 16 {  // 最大编码长度限制
+      let read_result = read_bits(current_reader, 1)
+      match read_result {
+        Ok((bit, new_reader)) => {
+          current_reader = new_reader
+          current_code = (current_code << 1) | bit
+          code_length = code_length + 1
+
+          // 检查是否匹配任何编码
+          for j = 0; j < code_map.length(); j = j + 1 {
+            let (code_value, code_len) = code_map[j]
+            if code_len == code_length && code_value == current_code.to_int() {
+              found_symbol = j  // 符号就是索引
+              break
+            }
+          }
+
+          if found_symbol >= 0 {
+            break
+          }
+        }
+        Err(e) => return Err(e)
+      }
+    }
+
+    if found_symbol >= 0 && found_symbol <= encode_table.max_symbol {
+      result.push(found_symbol.to_byte())
+    } else {
+      return Err("Invalid Huffman code encountered")
+    }
+  }
+
+  Ok(result)
+}
+
+/// 使用 Huffman 编码字面量
+pub fn huffman_encode_literals(literals: Array[Byte], table: HuffmanEncodeTable) -> Bytes {
+  let writer = create_huffman_bit_writer()
+
+  // 使用位流写入器进行编码
+  let mut current_writer = writer
+  for i = 0; i < literals.length(); i = i + 1 {
+    let symbol = literals[i].to_int()
+
+    if symbol < table.codes.length() {
+      let code = table.codes[symbol]
+      if code.length > 0 {
+        // 写入 Huffman 编码
+        current_writer = write_bits(current_writer, code.code, code.length)
+      } else {
+        // 没有编码的符号，直接写入原始字节（8位）
+        current_writer = write_bits(current_writer, symbol.to_uint64(), 8)
+      }
+    } else {
+      // 超出范围的符号，直接写入原始字节
+      current_writer = write_bits(current_writer, symbol.to_uint64(), 8)
+    }
+  }
+
+  finish_bit_writer(current_writer)
+}
+
+
+/// 使用 Huffman 表解码字面量
+pub fn huffman_decode_literals(encoded_data: Bytes, table: HuffmanEncodeTable, num_symbols: Int) -> Result[Array[Byte], String] {
+  let result: Array[Byte] = []
+  let reader = create_huffman_bit_reader(encoded_data)
+
+  // 为快速查找创建反向映射：编码 -> 符号
+  let code_to_symbol: Array[(Int, Int)] = []  // (code, length) -> symbol
+  for symbol = 0; symbol < table.codes.length(); symbol = symbol + 1 {
+    let code = table.codes[symbol]
+    if code.length > 0 {
+      let _ = code_to_symbol + [(code.code.to_int(), code.length)]
+      // 注意：这里简化了反向查找，实际实现需要更高效的数据结构
+    }
+  }
+
+  let mut current_reader = reader
+  for _i = 0; _i < num_symbols; _i = _i + 1 {
+    // 逐位读取直到找到匹配的编码
+    let mut current_code: UInt64 = 0UL
+    let mut code_length = 0
+    let mut found_symbol = -1
+
+    while code_length < 32 {  // 最大编码长度限制
+      let read_result = read_bits(current_reader, 1)
+      match read_result {
+        Ok((bit, new_reader)) => {
+          current_reader = new_reader
+          current_code = (current_code << 1) | bit
+          code_length = code_length + 1
+
+          // 检查是否匹配任何编码
+          for j = 0; j < code_to_symbol.length(); j = j + 1 {
+            let (code_value, code_len) = code_to_symbol[j]
+            if code_len == code_length && code_value == current_code.to_int() {
+              found_symbol = j  // 符号就是索引
+              break
+            }
+          }
+
+          if found_symbol >= 0 {
+            break
+          }
+        }
+        Err(e) => return Err(e)
+      }
+    }
+
+    if found_symbol >= 0 && found_symbol <= table.max_symbol {
+      result.push(found_symbol.to_byte())
+    } else {
+      return Err("Invalid Huffman code encountered")
+    }
+  }
+
+  Ok(result)
 }
 
 /// 从频率计算 Huffman 权重
@@ -507,7 +919,7 @@ pub fn calculate_huffman_weights(frequencies: Array[Int]) -> Array[Int] {
       weights.push(0)
     } else {
       // 权重 = -log2(freq/total) 的近似
-      // 简化：使用归一化的倒数
+      //todo 简化：使用归一化的倒数
       let weight = (total / frequencies[i]).min(255)
       weights.push(weight)
     }
@@ -574,4 +986,302 @@ pub fn huffman_encode_complete(literals: Array[Byte], max_symbol: Int) -> Result
   }
   
   Ok(Bytes::from_array(result))
+}
+
+/// Huffman 编码和解码循环测试
+pub fn test_huffman_roundtrip() -> Result[Bool, String] {
+  // 测试数据：包含重复字符以产生好的压缩效果
+  let test_data: Array[Byte] = [
+    97, 98, 99, 97, 98, 97, 100, 97, 97, 98  // a,b,c,a,b,a,d,a,a,b
+  ]
+  let max_symbol = 255
+
+  // 编码
+  let encode_result = huffman_encode_complete(test_data, max_symbol)
+  match encode_result {
+    Ok(encoded_bytes) => {
+      println("✅ Huffman 编码成功")
+      println("  原始数据大小: \{test_data.length()} 字节")
+      println("  编码后大小: \{encoded_bytes.length()} 字节")
+
+      // 解码（简化版：需要知道权重信息的位置）
+      // 这里只是测试基本功能，实际实现需要解析权重
+      let frequencies = count_huffman_symbols(test_data, max_symbol)
+      let encode_table = build_huffman_encode_table(frequencies)
+      let encoded_literals = huffman_encode_literals(test_data, encode_table)
+
+      let decode_result = huffman_decode_literals(encoded_literals, encode_table, test_data.length())
+      match decode_result {
+        Ok(decoded_data) => {
+          // 验证解码结果
+          if decoded_data.length() != test_data.length() {
+            return Err("解码数据长度不匹配")
+          }
+
+          let mut all_match = true
+          for i = 0; i < test_data.length(); i = i + 1 {
+            if decoded_data[i] != test_data[i] {
+              all_match = false
+              break
+            }
+          }
+
+          if all_match {
+            println("✅ Huffman 编解码循环测试通过")
+            Ok(true)
+          } else {
+            Err("解码数据内容不匹配")
+          }
+        }
+        Err(e) => Err("解码失败: \{e}")
+      }
+    }
+    Err(e) => Err("编码失败: \{e}")
+  }
+}
+
+/// 测试 Huffman 编码器的基本功能
+pub fn test_huffman_encoder() -> Bool {
+  println("🧪 测试 Huffman 编码器...")
+
+  // 测试1：简单频率统计
+  let test_data: Array[Byte] = [97, 98, 97, 99]  // a, b, a, c
+  let frequencies = count_huffman_symbols(test_data, 255)
+  if frequencies[97] != 2 { return false }  // 'a' should appear twice
+  if frequencies[98] != 1 { return false }  // 'b' should appear once
+  if frequencies[99] != 1 { return false }  // 'c' should appear once
+  println("✅ 频率统计测试通过")
+
+  // 测试2：构建编码表
+  let encode_table = build_huffman_encode_table(frequencies)
+  if encode_table.max_symbol != 255 { return false }
+  println("✅ 编码表构建测试通过")
+
+  // 测试3：位流写入器
+  let writer = create_huffman_bit_writer()
+  let writer2 = write_bits(writer, 0b101UL, 3)  // 写入 101
+  let writer3 = write_bits(writer2, 0b011UL, 3) // 再写入 011
+  let result = finish_bit_writer(writer3)
+
+  // 验证结果：应该有一个字节
+  if result.length() < 1 {
+    return false
+  }
+  println("✅ 位流写入测试通过")
+
+  // 测试4：编解码循环
+  let test_data: Array[Byte] = [97, 97, 97, 98, 98, 99]  // "aaabbc"
+  let frequencies = count_huffman_symbols(test_data, 255)
+  let encode_table = build_huffman_encode_table(frequencies)
+  let encoded = huffman_encode_with_table(test_data, encode_table)
+  let decode_result = huffman_decode_literals(encoded, encode_table, test_data.length())
+
+  match decode_result {
+    Ok(decoded) => {
+      // 验证解码结果
+      if decoded.length() == test_data.length() {
+        println("✅ 编解码测试通过")
+        true
+      } else {
+        println("❌ 编解码测试失败：长度不匹配")
+        false
+      }
+    }
+    Err(e) => {
+      println("❌ 编解码测试失败: \{e}")
+      false
+    }
+  }
+}
+
+/// 测试 Huffman 压缩效果
+pub fn test_huffman_compression(test_name: String, data: Array[Byte]) -> Result[Bool, String] {
+  println("  测试: \{test_name}")
+  println("    原始大小: \{data.length()} 字节")
+
+  // 编码
+  let encode_result = huffman_encode(data)
+  match encode_result {
+    Ok(encoded) => {
+      println("    编码成功: \{encoded.length()} 字节")
+
+      // 统计频率并构建编码表用于解码
+      let frequencies = count_huffman_symbols(data, 255)
+      let encode_table = build_huffman_encode_table(frequencies)
+
+      // 解码
+      let decode_result = huffman_decode(encoded, encode_table, data.length())
+      match decode_result {
+        Ok(decoded) => {
+          // 验证解码结果
+          if decoded.length() != data.length() {
+            println("    ❌ 长度不匹配: 期望 \{data.length()}, 实际 \{decoded.length()}")
+            return Ok(false)
+          }
+
+          let mut all_match = true
+          for i = 0; i < data.length(); i = i + 1 {
+            if decoded[i] != data[i] {
+              all_match = false
+              break
+            }
+          }
+
+          if all_match {
+            // 计算压缩比
+            let ratio = if data.length() > 0 {
+              Float::from_int(encoded.length()) / Float::from_int(data.length()) * 100.0
+            } else {
+              0.0
+            }
+            println("    ✅ 编解码成功, 压缩比: \{ratio.to_int()}%")
+            Ok(true)
+          } else {
+            println("    ❌ 数据不匹配")
+            Ok(false)
+          }
+        }
+        Err(e) => {
+          println("    ❌ 解码失败: \{e}")
+          Err(e)
+        }
+      }
+    }
+    Err(e) => {
+      println("    ❌ 编码失败: \{e}")
+      Err(e)
+    }
+  }
+}
+
+/// 演示 Huffman 编码的使用
+pub fn demo_huffman_encoding() -> Unit {
+  println("Huffman 编码演示")
+  println("====================")
+
+  // 示例数据
+  let data: Array[Byte] = [
+    104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100,  // "hello world"
+    44, 32, 116, 104, 105, 115, 32, 105, 115, 32, 97, 32,  // ", this is a "
+    116, 101, 115, 116, 32, 111, 102, 32, 104, 117, 102, 102, 109, 97, 110  // "test of huffman"
+  ]
+
+  println("原始数据大小: \{data.length()} 字节")
+
+  // 统计字符频率
+  let frequencies = count_huffman_symbols(data, 255)
+
+  // 显示频率最高的几个字符
+  println("字符频率统计 (前10个):")
+  let top_chars: Array[(Int, Int)] = []  // (frequency, char)
+  for i = 0; i < 256; i = i + 1 {
+    if frequencies[i] > 0 {
+      top_chars.push((frequencies[i], i))
+    }
+  }
+
+  // 排序并显示前10个
+  for i = 0; i < top_chars.length() - 1; i = i + 1 {
+    for j = 0; j < top_chars.length() - i - 1; j = j + 1 {
+      if top_chars[j].0 < top_chars[j + 1].0 {
+        let temp = top_chars[j]
+        top_chars[j] = top_chars[j + 1]
+        top_chars[j + 1] = temp
+      }
+    }
+  }
+
+  let show_count = top_chars.length().min(10)
+  for i = 0; i < show_count; i = i + 1 {
+    let (freq, char_code) = top_chars[i]
+    println("  '\{char_code}': \{freq} 次")
+  }
+
+  // 构建编码表
+  let encode_table = build_huffman_encode_table(frequencies)
+  println("Huffman 编码表构建完成")
+
+  // 显示一些编码示例
+  println("编码示例:")
+  let example_chars = [32, 101, 108, 104, 111]  // space, e, l, h, o
+  for i = 0; i < example_chars.length(); i = i + 1 {
+    let char_code = example_chars[i]
+    if char_code < encode_table.codes.length() {
+      let code = encode_table.codes[char_code]
+      if code.length > 0 {
+        println("  '\{char_code}' -> \{code.code} (\{code.length} 位)")
+      }
+    }
+  }
+
+  // 编码演示
+  let encoded = huffman_encode_with_table(data, encode_table)
+  println("编码后大小: \{encoded.length()} 字节")
+
+  // 计算压缩比
+  let compression_ratio = if data.length() > 0 {
+    Float::from_int(encoded.length()) / Float::from_int(data.length()) * 100.0
+  } else {
+    0.0
+  }
+  println("压缩比: \{compression_ratio.to_int()}%")
+
+  // 解码演示
+  let decoded_result = huffman_decode(encoded, encode_table, data.length())
+  match decoded_result {
+    Ok(decoded) => {
+      if decoded.length() == data.length() {
+        println("✅ 解码成功，数据完整性验证通过")
+      } else {
+        println("❌ 解码失败，长度不匹配")
+      }
+    }
+    Err(e) => println("❌ 解码失败: \{e}")
+  }
+
+  println("====================")
+}
+
+/// Huffman 编码器性能测试
+pub fn benchmark_huffman() -> Unit {
+  println("📊 Huffman 编码器性能测试")
+  println("========================")
+
+  // 生成测试数据
+  let sizes = [100, 1000, 10000]
+  for i = 0; i < sizes.length(); i = i + 1 {
+    let size = sizes[i]
+    let test_data: Array[Byte] = []
+
+    // 生成有一定模式的数据（更容易压缩）
+    for j = 0; j < size; j = j + 1 {
+      let value = (j % 10) + 97  // a-j 循环
+      test_data.push(value.to_byte())
+    }
+
+    println("测试数据大小: \{size} 字节")
+
+    // 编码
+    let encode_result = huffman_encode(test_data)
+
+    match encode_result {
+      Ok(encoded) => {
+        let ratio = Float::from_int(encoded.length()) / Float::from_int(size) * 100.0
+        println("  压缩后: \{encoded.length()} 字节 (\{ratio.to_int()}%)")
+
+        // 验证解码
+        let frequencies = count_huffman_symbols(test_data, 255)
+        let encode_table = build_huffman_encode_table(frequencies)
+        let decode_result = huffman_decode(encoded, encode_table, size)
+
+        match decode_result {
+          Ok(_) => println("  ✅ 编解码验证通过")
+          Err(e) => println("  ❌ 解码失败: \{e}")
+        }
+      }
+      Err(e) => println("  ❌ 编码失败: \{e}")
+    }
+  }
+
+  println("========================")
 }

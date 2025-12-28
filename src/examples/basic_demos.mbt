@@ -99,6 +99,14 @@ pub fn demo_compression_levels() -> Unit {
   println("     压缩比: \{ratio}")
 }
 
+pub fn demo_huffman_encoding() -> Unit {
+  println("\n6. Huffman 编码演示")
+  println("   " + @zstd_test.repeat_string("-", 30))
+
+  // 调用 Huffman 编码器的演示函数
+  @zstd_entropy.demo_huffman_encoding()
+}
+
 pub fn print_summary() -> Unit {
   println("\nMoonBit ZSTD 库功能总结")
 }

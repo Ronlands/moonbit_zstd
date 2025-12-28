@@ -19,7 +19,7 @@
     },
     {
       "path": "Ronlands/moonbit_zstd/entropy",
-      "alias": "entropy"
+      "alias": "zstd_entropy"
     }
   ]
 }
