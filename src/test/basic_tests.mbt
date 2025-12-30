@@ -254,18 +254,18 @@ fn test_cover_algorithm() -> Bool {
 
 /// 测试位流基本操作
 fn test_fse_bitstream() -> Bool {
-  let bs = @entropy.create_bitstream()
+  let bs = @zstd_entropy.create_bitstream()
   
   // 添加一些位
-  @entropy.add_bits(bs, 0b101UL, 3)
-  @entropy.add_bits(bs, 0b1111UL, 4)
-  @entropy.add_bits(bs, 0xFFUL, 8)
+  @zstd_entropy.add_bits(bs, 0b101UL, 3)
+  @zstd_entropy.add_bits(bs, 0b1111UL, 4)
+  @zstd_entropy.add_bits(bs, 0xFFUL, 8)
   
   // 刷新位流
-  @entropy.flush_bits(bs)
+  @zstd_entropy.flush_bits(bs)
   
   // 获取输出
-  let output = @entropy.get_bytes(bs)
+  let output = @zstd_entropy.get_bytes(bs)
   
   // 验证输出不为空
   output.length() > 0
@@ -277,13 +277,22 @@ fn test_fse_encode_simple() -> Bool {
   let symbols = [0, 1, 2, 3, 0, 1, 0, 2]
   
   // 编码
-  let result = @entropy.fse_encode_complete(symbols, 10, 6)
+  let result = @zstd_entropy.fse_encode_complete(symbols, 10, 6)
   
   match result {
     Ok(encoded) => {
       // 验证编码输出不为空
       encoded.length() > 0
     }
+    Err(_) => false
+  }
+}
+
+/// Test Huffman roundtrip (basic version)
+fn test_huffman_roundtrip_basic() -> Bool {
+  let roundtrip_result = @zstd_entropy.test_huffman_roundtrip()
+  match roundtrip_result {
+    Ok(success) => success
     Err(_) => false
   }
 }

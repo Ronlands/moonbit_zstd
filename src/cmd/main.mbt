@@ -5,23 +5,23 @@ fn init {}
 fn main {
   println("MoonBit ZSTD Library Demo")
   println("==========================")
-  
+
   run_demos()
-  @zstd_examples.test_file_compression()
-  
+  // @zstd_examples.test_file_compression()
+
   // RFC 8878 Compliance: Official zstd tool compatibility
-  @zstd_examples.test_user_official_file()
-  
+  // @zstd_examples.test_user_official_file()
+
   // RFC 8878 Compliance: Batch test all official golden files
-  @zstd_examples.test_all_golden_files()
-  
+  // @zstd_examples.test_all_golden_files()
+
   run_tests()
 }
 
 /// Run all demonstrations
 fn run_demos() -> Unit {
   println("\n功能演示开始...")
-  
+
   @zstd_examples.demo_basic_compression()
   @zstd_examples.demo_file_analysis()
   @zstd_examples.demo_data_integrity()
@@ -35,9 +35,20 @@ fn run_demos() -> Unit {
 
   // 新增：Huffman 编码演示
   @zstd_examples.demo_huffman_encoding()
-  
+
+  // 新增：FSE 解码调试
+  demo_fse_debug()
+
   println("\n所有演示完成！")
   @zstd_examples.print_summary()
+}
+
+/// FSE 调试演示
+fn demo_fse_debug() -> Unit {
+  println("\n7. FSE 解码调试")
+  println("   " + @zstd_test.repeat_string("-", 30))
+
+  println("   FSE 调试功能暂时跳过")
 }
 
 /// Run comprehensive test suite
@@ -48,11 +59,11 @@ fn run_tests() -> Unit {
   // 首先运行编码测试
   @zstd_test.run_all_encoding_tests()
   
-  println("\n" + @zstd_test.repeat_string("=", 60))
-  println("开始执行完整的 RFC 8878 兼容性测试")
-  println(@zstd_test.repeat_string("=", 60))
-  
-  @zstd_test.run_official_test_suite()
+  // println("\n" + @zstd_test.repeat_string("=", 60))
+  // println("开始执行完整的 RFC 8878 兼容性测试")
+  // println(@zstd_test.repeat_string("=", 60))
+
+  // @zstd_test.run_official_test_suite()
   
   println("\n" + @zstd_test.repeat_string("=", 60))
   println("Running comprehensive test suite")

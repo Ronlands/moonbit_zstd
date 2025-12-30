@@ -20,7 +20,9 @@
         "parse_frame_header",
         "parse_frame_header_simple",
         "validate_frame_header",
-        "decompress_block"
+        "decompress_block",
+        "create_decoder_context",
+        "DecoderContext"
       ]
     }
   }

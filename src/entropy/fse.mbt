@@ -221,213 +221,8 @@ pub fn decode_fse_sequences(
   ml_weights: Array[Int],
   of_weights: Array[Int]
 ) -> Result[Array[Sequence], String] {
-  // 禁用过多调试输出
-  // println("🔍 FSE解码开始: num_sequences=\{num_sequences}, offset=\{offset}")
-  
-  if num_sequences == 0 {
-    return Ok([])
-  }
-  
-  // 构建FSE解码表
-  let ll_dtable = build_fse_dtable(ll_weights, 6)
-  let ml_dtable = build_fse_dtable(ml_weights, 6)
-  let of_dtable = build_fse_dtable(of_weights, 5)
-  
-  // 创建位流解码器
-  // ⚠️ 关键：tANS最终状态在位流末尾！
-  // 需要先读取末尾的最终状态（17位：LL 6位 + ML 6位 + OF 5位）
-  // 然后再从前面解码符号数据
-  
-  // 初始化DStream
-  let fse_data_len = data.length() - offset
-  if fse_data_len < 1 {
-    return Err("FSE data too short")
-  }
-  
-  // 初始化 bitstream（参照官方 BIT_initDStream）
-  let bitstream = BitstreamReader::{
-    data: data,
-    offset: 0,
-    bit_container: 0UL,
-    bit_pos: 0,
-    end_offset: offset
-  }
-  
-  let temp_bs = bitstream
-  
-  if fse_data_len >= 8 {
-    // ✅ Normal case: 完全参照官方 bitstream.h:261-266
-    // ptr = srcBuffer + srcSize - sizeof(bitContainer)
-    temp_bs.offset = offset + fse_data_len - 8
-    
-    // bitContainer = MEM_readLEST(ptr) - 读取8字节little-endian
-    let mut container = 0UL
-    for i = 0; i < 8; i = i + 1 {
-      let byte_val = data[temp_bs.offset + i].to_uint64()
-      container = container | (byte_val << (i * 8))
-      if num_sequences == 9 && i < 8 {
-        println("    data[\{temp_bs.offset + i}] = \{data[temp_bs.offset + i].to_int()}")
-      }
-    }
-    temp_bs.bit_container = container
-    
-    if num_sequences == 9 {
-      println("    bit_container低32位 = \{(container & 0xFFFFFFFFUL).to_int()}")
-    }
-    
-    // bitsConsumed = lastByte ? 8 - ZSTD_highbit32(lastByte) : 0
-    let last_byte_idx = offset + fse_data_len - 1
-    let last_byte = data[last_byte_idx].to_int()
-    // ⚠️ 实验性修复：调整offset使其指向最后字节
-    let bits_consumed_raw = if last_byte == 0 { 0 } else { 8 - highbit32(last_byte) }
-    // bits_consumed应该是相对于64位容器的，需要加上偏移
-    let bits_consumed = bits_consumed_raw
-    temp_bs.bit_pos = bits_consumed
-  } else {
-    // ✅ Small data case: 完全参照官方 bitstream.h:268-296
-    temp_bs.offset = offset
-    let mut container = 0UL
-    for i = 0; i < fse_data_len; i = i + 1 {
-      let byte_val = data[offset + i].to_uint64()
-      container = container | (byte_val << (i * 8))
-    }
-    temp_bs.bit_container = container
-    
-    let last_byte_idx = offset + fse_data_len - 1
-    let last_byte = data[last_byte_idx].to_int()
-    let bits_consumed_byte = if last_byte == 0 { 0 } else { 8 - highbit32(last_byte) }
-    
-    // ✅ 官方：bitsConsumed += (sizeof(bitContainer) - srcSize)*8
-    let extra_bits = (8 - fse_data_len) * 8
-    let bits_consumed = bits_consumed_byte + extra_bits
-    temp_bs.bit_pos = bits_consumed
-  }
-  
-  // ✅ 从 bitstream 读取初始状态（参照官方 ZSTD_initFseState）
-  // 编码器写入顺序（从低到高）：ML → OF → LL
-  // Bitstream从高位读取，所以读取顺序：LL (先读) → OF (中) → ML (后读)
-  
-  // Read LL state (6 bits)
-  let (bs1, ll_state_raw) = read_bits_uint64(temp_bs, 6)
-  
-  // Read OF state (5 bits)
-  let (bs2, of_state_raw) = read_bits_uint64(bs1, 5)
-  
-  // Read ML state (6 bits)
-  let (bs3, ml_state_raw) = read_bits_uint64(bs2, 6)
-  let bs_after_ml_reload = bs3
-  
-  // 加上 table_size 得到完整状态
-  let ll_s = ll_state_raw + 64UL  // LL table_log=6
-  let of_s = of_state_raw + 32UL  // OF table_log=5
-  let ml_s = ml_state_raw + 64UL  // ML table_log=6
-  
-  // 解码序列（正向解码）
-  let sequences: Array[Sequence] = []
-  let mut current_bs = bs_after_ml_reload  // ✅ 使用最后一次reload后的 bitstream
-  let mut ll_state = ll_s
-  let mut ml_state = ml_s
-  let mut of_state = of_s
-  
-  // 正向解码（RFC 8878: 读取符号顺序 OF -> ML -> LL，更新状态顺序 LL -> ML -> OF）
-  for i = 0; i < num_sequences; i = i + 1 {
-    let is_last_seq = (i == num_sequences - 1)
-    
-    // 查表获取符号
-    let of_e = get_fse_decode_entry(of_state.to_int(), of_dtable, 5)
-    let ml_e = get_fse_decode_entry(ml_state.to_int(), ml_dtable, 6)
-    let ll_e = get_fse_decode_entry(ll_state.to_int(), ll_dtable, 6)
-
-    let of_code = match of_e {
-      Some(entry) => entry.symbol
-      None => 0
-    }
-    let ml_code = match ml_e {
-      Some(entry) => entry.symbol
-      None => 0
-    }
-    let ll_code = match ll_e {
-      Some(entry) => entry.symbol
-      None => 0
-    }
-    
-    let (of_entry, ml_entry, ll_entry) = if is_last_seq {
-      (None, None, None)
-    } else {
-      (of_e, ml_e, ll_e)
-    }
-    
-    // 读取额外位（参照官方 line 1294, 1326, 1335：OF → ML → LL）
-    let of_nb_bits = get_of_bits(of_code)
-    let ml_nb_bits = get_ml_bits(ml_code)
-    let ll_nb_bits = get_ll_bits(ll_code)
-    
-    // OF extra bits
-    let (bs_tmp1, of_extra_bits) = read_bits_uint64(current_bs, of_nb_bits)
-    
-    // ML extra bits  
-    let (bs_tmp2, ml_extra_bits) = read_bits_uint64(bs_tmp1, ml_nb_bits)
-    
-    // LL extra bits (暂时禁用中间reload测试)
-    let (bs_after_ll, ll_extra_bits) = read_bits_uint64(bs_tmp2, ll_nb_bits)
-    
-    // 步骤3: 如果不是最后一个序列，按 LL -> ML -> OF 的顺序更新状态
-    let final_bs = if !is_last_seq {
-      let (bs1, new_ll_state) = match ll_entry {
-        Some(entry) => {
-          let table_size = 64  // LL table_log = 6
-          let (new_bs, extra) = read_bits_uint64(bs_after_ll, entry.nb_bits)
-          let new_state = entry.new_state_base + extra.to_int() + table_size
-          (new_bs, new_state)
-        }
-        None => (bs_after_ll, 64)
-      }
-      
-      let (bs2, new_ml_state) = match ml_entry {
-        Some(entry) => {
-          let table_size = 64  // ML table_log = 6
-          let (new_bs, extra) = read_bits_uint64(bs1, entry.nb_bits)
-          let new_state = entry.new_state_base + extra.to_int() + table_size
-          (new_bs, new_state)
-        }
-        None => (bs1, 64)
-      }
-      
-      let (bs3, new_of_state) = match of_entry {
-        Some(entry) => {
-          let table_size = 32  // OF table_log = 5
-          let (new_bs, extra) = read_bits_uint64(bs2, entry.nb_bits)
-          let new_state = entry.new_state_base + extra.to_int() + table_size
-          (new_bs, new_state)
-        }
-        None => (bs2, 32)
-      }
-      
-      // 更新状态变量
-      ll_state = new_ll_state.to_uint64()
-      ml_state = new_ml_state.to_uint64()
-      of_state = new_of_state.to_uint64()
-      
-      bs3  // 暂时不reload
-    } else {
-      bs_after_ll
-    }
-    
-    // 将符号代码和额外位转换为实际值
-    let literal_length = decode_ll(ll_code, ll_extra_bits.to_int())
-    let match_length = decode_ml(ml_code, ml_extra_bits.to_int())
-    let offset = decode_of(of_code, of_extra_bits.to_int())
-    
-    if i == 0 && num_sequences == 9 {
-      println("  序列0解码: ll_code=\{ll_code}+\{ll_extra_bits}=\{literal_length}, ml_code=\{ml_code}+\{ml_extra_bits}=\{match_length}, of_code=\{of_code}+\{of_extra_bits}=\{offset}")
-    }
-    
-    sequences.push(make_sequence(literal_length, match_length, offset))
-    current_bs = final_bs
-  }
-  
-  println("  ✅ FSE解码完成: 解码了 \{sequences.length()} 个序列")
-  Ok(sequences)
+  // 直接使用原始实现（build_fse_dtable）
+  decode_fse_sequences_original(data, offset, num_sequences, ll_weights, ml_weights, of_weights)
 }
 
 
@@ -480,17 +275,15 @@ fn read_bits_uint64(bs: BitstreamReader, nb_bits: Int) -> (BitstreamReader, UInt
   if nb_bits <= 0 {
     return (bs, 0UL)
   }
-  
-  // ✅ 简化实现：调用者负责显式reload
-  // 读取位（从高位开始，参照官方 BIT_lookBits + BIT_skipBits）
-  // start = 64 - bitsConsumed - nbBits
-  let start = 64 - bs.bit_pos - nb_bits
+
+  // 🔄 修正：从高位开始读取，符合ZSTD位流方向
   let mask = if nb_bits >= 64 { 0xFFFFFFFFFFFFFFFFUL } else { (1UL << nb_bits) - 1UL }
-  let value = (bs.bit_container >> start) & mask
-  
-  // bitsConsumed += nbBits
+  let value = (bs.bit_container >> (64 - nb_bits)) & mask
+
+  // 参照官方：bits <<= nb_bits，然后更新bit_pos
+  bs.bit_container = bs.bit_container << nb_bits
   bs.bit_pos = bs.bit_pos + nb_bits
-  
+
   (bs, value)
 }
 
@@ -607,6 +400,7 @@ priv struct FSEDecodeEntry {
 /// 构建 FSE 解码表
 /// 为每个状态值 [table_size, 2*table_size) 构建解码项
 fn build_fse_dtable(normalized: Array[Int], table_log: Int) -> Array[FSEDecodeEntry] {
+  let max_symbol = normalized.length() - 1
   let table_size = 1 << table_log
   let dtable: Array[FSEDecodeEntry] = Array::make(table_size, FSEDecodeEntry::{ symbol: 0, nb_bits: 0, new_state_base: 0 })
   
@@ -631,9 +425,9 @@ fn build_fse_dtable(normalized: Array[Int], table_log: Int) -> Array[FSEDecodeEn
   // table_symbol构建完成
   
   // 第二步：计算每个符号的累积位置 (cumul)
-  let cumul: Array[Int] = Array::make(normalized.length() + 1, 0)
-  for s = 0; s < normalized.length(); s = s + 1 {
-    let norm = normalized[s]
+  let cumul: Array[Int] = Array::make(max_symbol + 2, 0)
+  for s = 0; s <= max_symbol; s = s + 1 {
+    let norm = if s < normalized.length() { normalized[s] } else { 0 }
     if norm == -1 {
       cumul[s + 1] = cumul[s] + 1
     } else if norm > 0 {
@@ -646,8 +440,8 @@ fn build_fse_dtable(normalized: Array[Int], table_log: Int) -> Array[FSEDecodeEn
   // 第三步：构建状态表（用于编码的表，我们需要反向使用）
   // 使用与编码器相同的算法构建 state_table
   let state_table: Array[UInt16] = Array::make(table_size, 0)
-  let cumul_copy: Array[Int] = Array::make(normalized.length(), 0)
-  for s = 0; s < normalized.length(); s = s + 1 {
+  let cumul_copy: Array[Int] = Array::make(max_symbol + 1, 0)
+  for s = 0; s <= max_symbol; s = s + 1 {
     cumul_copy[s] = cumul[s]
   }
   
@@ -675,10 +469,9 @@ fn build_fse_dtable(normalized: Array[Int], table_log: Int) -> Array[FSEDecodeEn
     let next_state = symbol_next[symbol]
     symbol_next[symbol] = next_state + 1
     
-    // ZSTD 参考实现的公式:
-    // nbBits = tableLog - BIT_highbit32(nextState)
+    // ZSTD公式：nbBits = MAX(tableLog - highbit32(nextState), 0)
+    let nb_bits = (table_log - highbit32(next_state)).max(0)
     // newStateBaseline = (nextState << nbBits) - tableSize
-    let nb_bits = table_log - highbit32(next_state)
     let new_state_base = (next_state << nb_bits) - table_size
     
     dtable[u] = FSEDecodeEntry::{ 
@@ -700,15 +493,24 @@ fn get_fse_decode_entry(
   state: Int,
   dtable: Array[FSEDecodeEntry],
   table_log: Int
-) -> Option[FSEDecodeEntry] {
+) -> Result[FSEDecodeEntry, String] {
   let table_size = 1 << table_log
-  let u = state - table_size
-  
-  if u < 0 || u >= dtable.length() {
-    println("    ⚠️ 状态越界: state=\{state}, u=\{u}, table_size=\{table_size}")
-    None
+
+  // 规范化状态到 [table_size, 2*table_size) 范围
+  let normalized_state = if state < table_size {
+    state + table_size
+  } else if state >= table_size * 2 {
+    (state % table_size) + table_size
   } else {
-    Some(dtable[u])
+    state
+  }
+
+  let u = normalized_state - table_size
+
+  if u < 0 || u >= dtable.length() {
+    Err("状态越界错误: state=\{state}, normalized=\{normalized_state}, u=\{u}, table_size=\{table_size}")
+  } else {
+    Ok(dtable[u])
   }
 }
 
@@ -919,9 +721,14 @@ pub fn normalize_counts(counts: Array[Int], table_log: Int) -> Array[Int] {
   let table_size = 1 << table_log
   let mut total = 0
   
-  // 计算总频率
+  // 计算总频率（跳过-1，表示低频符号）
   for i = 0; i < counts.length(); i = i + 1 {
-    total = total + counts[i]
+    if counts[i] == -1 {
+      total = total + 1  // -1 表示频率1
+    } else if counts[i] > 0 {
+      total = total + counts[i]
+    }
+    // counts[i] == 0 不计入
   }
   
   if total == 0 {
@@ -931,42 +738,38 @@ pub fn normalize_counts(counts: Array[Int], table_log: Int) -> Array[Int] {
   let normalized: Array[Int] = []
   let mut distributed = 0
   
-  // 归一化每个符号的频率
+  // 归一化每个符号的频率（ZSTD兼容算法）
   for i = 0; i < counts.length(); i = i + 1 {
     if counts[i] == 0 {
       normalized.push(0)
     } else {
-      // 计算归一化后的频率
-      let norm = (counts[i] * table_size) / total
-      let final_norm = if norm == 0 { 1 } else { norm }  // 至少为1
+      // 对于低频符号（标记为-1），当作频率1处理
+      let actual_count = if counts[i] == -1 { 1 } else { counts[i] }
+
+      // ZSTD标准算法：norm = (count * tableSize) / total
+      let norm = (actual_count * table_size) / total
+      let final_norm = if norm == 0 && actual_count > 0 { 1 } else { norm }
+
       normalized.push(final_norm)
       distributed = distributed + final_norm
     }
   }
   
   // 调整以确保总和等于 table_size
-  if distributed < table_size {
-    // 给最频繁的符号添加剩余
-    let mut max_idx = 0
-    let mut max_count = counts[0]
-    for i = 1; i < counts.length(); i = i + 1 {
-      if counts[i] > max_count {
-        max_count = counts[i]
-        max_idx = i
-      }
-    }
-    normalized[max_idx] = normalized[max_idx] + (table_size - distributed)
-  } else if distributed > table_size {
-    // 从最频繁的符号减去多余
-    let mut max_idx = 0
-    let mut max_norm = normalized[0]
-    for i = 1; i < normalized.length(); i = i + 1 {
+  let remaining = table_size - distributed
+  if remaining != 0 {
+    // 找到权重最大的符号来调整
+    let mut max_idx = -1
+    let mut max_norm = 0
+    for i = 0; i < normalized.length(); i = i + 1 {
       if normalized[i] > max_norm {
         max_norm = normalized[i]
         max_idx = i
       }
     }
-    normalized[max_idx] = normalized[max_idx] - (distributed - table_size)
+    if max_idx >= 0 {
+      normalized[max_idx] = normalized[max_idx] + remaining
+    }
   }
   
   normalized
@@ -1207,6 +1010,209 @@ pub fn init_fse_cstate_with_symbol(table: FSECTable, symbol: Int) -> UInt64 {
   state_value.to_uint64()
 }
 
+/// 使用 FSECTable 解码 FSE 序列（与编码器使用相同算法）
+pub fn decode_fse_sequences_with_tables(
+  data: Bytes,
+  offset: Int,
+  num_sequences: Int,
+  ll_table: FSECTable,
+  of_table: FSECTable,
+  ml_table: FSECTable
+) -> Result[Array[Sequence], String] {
+  // println("🔍 使用 FSECTable 解码 \{num_sequences} 个序列")
+
+  if num_sequences == 0 {
+    return Ok([])
+  }
+
+  // 初始化 bitstream
+  let fse_data_len = data.length() - offset
+  if fse_data_len < 1 {
+    return Err("FSE data too short")
+  }
+
+  let bitstream = BitstreamReader::{
+    data: data,
+    offset: 0,
+    bit_container: 0UL,
+    bit_pos: 0,
+    end_offset: offset
+  }
+
+  let temp_bs = bitstream
+
+  if fse_data_len >= 8 {
+    temp_bs.offset = offset + fse_data_len - 8
+
+    // 读取 uint64 LE
+    let mut container = 0UL
+    for i = 0; i < 8; i = i + 1 {
+      let byte_val = data[temp_bs.offset + i].to_uint64()
+      container = container | (byte_val << (i * 8))
+    }
+    temp_bs.bit_container = container
+    temp_bs.bit_pos = 0
+  }
+
+  // 读取最终状态（编码器保存的状态）
+  let (bs1, ll_state_raw) = read_bits_uint64(temp_bs, 6)
+  let mut ll_state = ll_state_raw + 64UL
+
+  let (bs2, of_state_raw) = read_bits_uint64(bs1, 5)
+  let mut of_state = of_state_raw + 32UL
+
+  let (bs3, ml_state_raw) = read_bits_uint64(bs2, 6)
+  let mut ml_state = ml_state_raw + 64UL
+
+  let mut current_bs = bs3
+
+  // println("  读取状态: LL=\{ll_state}, OF=\{of_state}, ML=\{ml_state}")
+
+  // tANS 解码：从最后一个序列开始解码
+  let temp_sequences: Array[Sequence] = Array::make(num_sequences, Sequence::{ literal_length: 0, match_length: 0, offset: 0 })
+  let mut seq_count = 0
+
+  for seq_idx = (num_sequences - 1); seq_idx >= 0; seq_idx = seq_idx - 1 {
+    let is_last_seq = (seq_idx == num_sequences - 1)
+
+    // 1. 从状态解码符号（使用与编码器相同的算法）
+    let (ll_symbol, new_ll_state, ll_nb_bits) = decode_symbol_from_state(ll_state, ll_table)
+    let (of_symbol, new_of_state, of_nb_bits) = decode_symbol_from_state(of_state, of_table)
+    let (ml_symbol, new_ml_state, ml_nb_bits) = decode_symbol_from_state(ml_state, ml_table)
+
+    // 2. 读取额外位
+    let (bs_ll, ll_extra) = if ll_nb_bits > 0 {
+      read_bits_uint64(current_bs, ll_nb_bits)
+    } else {
+      (current_bs, 0UL)
+    }
+
+    let (bs_of, of_extra) = if of_nb_bits > 0 {
+      read_bits_uint64(bs_ll, of_nb_bits)
+    } else {
+      (bs_ll, 0UL)
+    }
+
+    let (bs_ml, ml_extra) = if ml_nb_bits > 0 {
+      read_bits_uint64(bs_of, ml_nb_bits)
+    } else {
+      (bs_of, 0UL)
+    }
+
+    current_bs = bs_ml
+
+    // 3. 计算最终值
+    let final_ll = decode_ll(ll_symbol, ll_extra.to_int())
+    let final_of = decode_of(of_symbol, of_extra.to_int())
+    let final_ml = decode_ml(ml_symbol, ml_extra.to_int())
+
+    // 4. 创建序列
+    let seq = make_sequence(final_ll, final_ml, final_of)
+    temp_sequences[num_sequences - 1 - seq_idx] = seq
+
+    // 5. 更新状态用于下一个序列
+    ll_state = new_ll_state
+    of_state = new_of_state
+    ml_state = new_ml_state
+
+    seq_count = seq_count + 1
+  }
+
+  // println("  ✅ FSECTable 解码完成: 解码了 \{seq_count} 个序列")
+  Ok(temp_sequences)
+}
+
+/// 从状态解码单个符号（与编码器使用相同算法的反向操作）
+fn decode_symbol_from_state(state: UInt64, table: FSECTable) -> (Int, UInt64, Int) {
+  let state_int = state.to_int()
+
+  // 找到对应的符号
+  let mut symbol = 0
+  let mut found = false
+  let mut nb_bits = 0
+
+  // 查找符号（简化实现：遍历所有符号）
+  for s = 0; s <= table.max_symbol; s = s + 1 {
+    if s >= table.symbol_tt.length() {
+      break
+    }
+
+    let transform = table.symbol_tt[s]
+
+    // 计算 nb_bits_out = (state + delta_nb_bits) >> 16
+    let sum = state_int + transform.delta_nb_bits
+    let nb_bits_out = sum >> 16
+
+    // 计算 state_idx = (state >> nb_bits_out) + delta_find_state
+    let base_state = state_int >> nb_bits_out
+    let state_idx = base_state + transform.delta_find_state
+
+    if state_idx >= 0 && state_idx < table.state_table.length() {
+      let expected_state = table.state_table[state_idx].to_int()
+      if expected_state == state_int {
+        symbol = s
+        nb_bits = nb_bits_out
+        found = true
+        break
+      }
+    }
+  }
+
+  if !found {
+    // 回退：返回默认符号
+    symbol = 0
+    nb_bits = 0
+  }
+
+  // 计算新状态（模拟编码器的状态更新）
+  let transform = table.symbol_tt[symbol]
+  let sum = state_int + transform.delta_nb_bits
+  let nb_bits_out = sum >> 16
+  let base_state = state_int >> nb_bits_out
+  let state_idx = base_state + transform.delta_find_state
+
+  let new_state = if state_idx >= 0 && state_idx < table.state_table.length() {
+    table.state_table[state_idx].to_int()
+  } else {
+    1 << table.table_log
+  }
+
+  (symbol, new_state.to_uint64(), nb_bits)
+}
+
+/// 更新 FSE 状态 (不输出 bits，用于解码)
+pub fn update_fse_state(
+  state: UInt64,
+  symbol: Int,
+  table: FSECTable
+) -> UInt64 {
+  if symbol < 0 || symbol > table.max_symbol {
+    return state
+  }
+
+  let transform = table.symbol_tt[symbol]
+
+  // 计算输出位数：nb_bits_out = (state + delta_nb_bits) >> 16
+  let state_int = state.to_int()
+  let sum = state_int + transform.delta_nb_bits
+  let nb_bits_out = sum >> 16
+
+  // 计算新状态（ZSTD标准tANS算法）：
+  // new_state = stateTable[(state >> nbBitsOut) + deltaFindState]
+  let base_state = state_int >> nb_bits_out
+  let state_idx = base_state + transform.delta_find_state
+
+  // 从stateTable查找新状态
+  let new_state = if state_idx >= 0 && state_idx < table.state_table.length() {
+    table.state_table[state_idx].to_int()
+  } else {
+    // 边界保护：如果索引越界，返回初始状态
+    1 << table.table_log
+  }
+
+  new_state.to_uint64()
+}
+
 /// 编码单个符号 (tANS 核心算法)
 /// 返回新状态
 pub fn encode_symbol_fse(
@@ -1339,4 +1345,283 @@ pub fn fse_encode_complete_tans(symbols: Array[Int], max_symbol: Int, table_log:
 /// 统计频率、归一化、构建表、编码符号
 pub fn fse_encode_complete(symbols: Array[Int], max_symbol: Int, table_log: Int) -> Result[Bytes, String] {
   fse_encode_complete_tans(symbols, max_symbol, table_log)
+}
+
+/// 调试函数：测试 FSE 解码序列
+pub fn debug_fse_decode_sequences(
+  data: Bytes,
+  offset: Int,
+  num_sequences: Int,
+  ll_weights: Array[Int],
+  ml_weights: Array[Int],
+  of_weights: Array[Int]
+) -> Unit {
+  println("🔍 FSE 调试: num_sequences=\{num_sequences}, offset=\{offset}")
+
+  // 调试：打印权重
+  let ll_sample = if ll_weights.length() >= 6 { [ll_weights[0], ll_weights[1], ll_weights[2], ll_weights[3], ll_weights[4], ll_weights[5]] } else { [] }
+  let of_sample = if of_weights.length() >= 6 { [of_weights[0], of_weights[1], of_weights[2], of_weights[3], of_weights[4], of_weights[5]] } else { [] }
+  let ml_sample = if ml_weights.length() >= 6 { [ml_weights[0], ml_weights[1], ml_weights[2], ml_weights[3], ml_weights[4], ml_weights[5]] } else { [] }
+  println("  LL权重 (前6): \{ll_sample}")
+  println("  OF权重 (前6): \{of_sample}")
+  println("  ML权重 (前6): \{ml_sample}")
+
+  match decode_fse_sequences(data, offset, num_sequences, ll_weights, ml_weights, of_weights) {
+    Ok(sequences) => {
+      println("✅ FSE 解码成功: \{sequences.length()} 个序列")
+      for i = 0; i < sequences.length(); i = i + 1 {
+        let seq = sequences[i]
+        println("  序列\{i}: LL=\{seq.literal_length}, ML=\{seq.match_length}, OF=\{seq.offset}")
+      }
+    }
+    Err(e) => {
+      println("❌ FSE 解码失败: \{e}")
+    }
+  }
+}
+
+/// 原始的 FSE 解码实现（回退用）
+fn decode_fse_sequences_original(
+  data: Bytes,
+  offset: Int,
+  num_sequences: Int,
+  ll_weights: Array[Int],
+  ml_weights: Array[Int],
+  of_weights: Array[Int]
+) -> Result[Array[Sequence], String] {
+  if num_sequences == 0 {
+    return Ok([])
+  }
+
+  // 构建FSE解码表
+  let ll_dtable = build_fse_dtable(ll_weights, 6)
+  let ml_dtable = build_fse_dtable(ml_weights, 6)
+  let of_dtable = build_fse_dtable(of_weights, 5)
+
+  // 创建位流解码器
+  // ⚠️ 关键：tANS最终状态在位流末尾！
+  // 需要先读取末尾的最终状态（17位：LL 6位 + ML 6位 + OF 5位）
+  // 然后再从前面解码符号数据
+
+  // 初始化DStream
+  let fse_data_len = data.length() - offset
+  if fse_data_len < 1 {
+    return Err("FSE data too short")
+  }
+
+  // 初始化 bitstream（修正：从低位开始读取）
+  let bitstream = BitstreamReader::{
+    data: data,
+    offset: 0,
+    bit_container: 0UL,
+    bit_pos: 0,
+    end_offset: offset
+  }
+
+  let temp_bs = bitstream
+
+  if fse_data_len >= 8 {
+    // ptr = srcBuffer + srcSize - sizeof(bitContainer)
+    temp_bs.offset = offset + fse_data_len - 8
+
+    // bitContainer = MEM_readLEST(ptr)
+    let mut container = 0UL
+    for i = 0; i < 8; i = i + 1 {
+      let byte_val = data[temp_bs.offset + i].to_uint64()
+      container = container | (byte_val << (i * 8))
+    }
+    temp_bs.bit_container = container
+
+    // bitsConsumed = lastByte ? 8 - ZSTD_highbit32(lastByte) : 0
+    let last_byte_idx = offset + fse_data_len - 1
+    let last_byte = data[last_byte_idx].to_int()
+    let bits_consumed_raw = if last_byte == 0 { 0 } else { 8 - highbit32(last_byte) }
+    temp_bs.bit_pos = bits_consumed_raw
+  } else {
+    // Small data case
+    temp_bs.offset = offset
+    let mut container = 0UL
+    for i = 0; i < fse_data_len; i = i + 1 {
+      let byte_val = data[offset + i].to_uint64()
+      container = container | (byte_val << (i * 8))
+    }
+    temp_bs.bit_container = container
+
+    let last_byte_idx = offset + fse_data_len - 1
+    let last_byte = data[last_byte_idx].to_int()
+    let bits_consumed_byte = if last_byte == 0 { 0 } else { 8 - highbit32(last_byte) }
+
+    let extra_bits = (8 - fse_data_len) * 8
+    let bits_consumed = bits_consumed_byte + extra_bits
+    temp_bs.bit_pos = bits_consumed
+  }
+
+  // 从 bitstream 读取初始状态（修正：从低位读取）
+  // Read LL state (6 bits)
+  let (bs1, ll_state_raw) = read_bits_uint64(temp_bs, 6)
+
+  // Read OF state (5 bits)
+  let (bs2, of_state_raw) = read_bits_uint64(bs1, 5)
+
+  // Read ML state (6 bits)
+  let (bs3, ml_state_raw) = read_bits_uint64(bs2, 6)
+  let bs_after_ml_reload = bs3
+
+  // 加上 table_size 得到完整状态
+  let ll_s = ll_state_raw + 64UL  // LL table_log=6
+  let of_s = of_state_raw + 32UL  // OF table_log=5
+  let ml_s = ml_state_raw + 64UL  // ML table_log=6
+
+  // 解码序列
+  let sequences: Array[Sequence] = []
+  let mut current_bs = bs_after_ml_reload  // 使用最后一次reload后的 bitstream
+  // 状态变量顺序：严格按照官方 LL -> OF -> ML
+  let mut ll_state = ll_s  // LL state (first)
+  let mut of_state = of_s  // OF state (second)
+  let mut ml_state = ml_s  // ML state (third)
+
+  // ⚠️ tANS 解码：从最后一个序列开始解码，但结果需要反转
+  // 因为编码是正序的，解码状态是倒序的
+  let temp_sequences: Array[Sequence] = Array::make(num_sequences, Sequence::{ literal_length: 0, match_length: 0, offset: 0 })
+  let mut seq_count = 0
+  for seq_idx = (num_sequences - 1); seq_idx >= 0; seq_idx = seq_idx - 1 {
+    let is_last_seq = (seq_idx == num_sequences - 1)
+
+    // 调试：打印当前状态
+    if seq_idx == num_sequences - 1 {
+      println("  初始状态: LL=\{ll_state}, OF=\{of_state}, ML=\{ml_state}")
+    }
+
+    // 调试：打印每个序列的解码过程
+    if seq_idx == 6 {
+      println("  序列\{seq_idx}解码前状态: LL=\{ll_state}, OF=\{of_state}, ML=\{ml_state}")
+    }
+
+    // println("🔄 解码序列 \{seq_idx}, 当前状态: LL=\{ll_state}, OF=\{of_state}, ML=\{ml_state}")
+
+    // 1. 查表获取符号（参照ZSTD：LL, ML, OF顺序）
+    let ll_entry_result = get_fse_decode_entry(ll_state.to_int(), ll_dtable, 6)
+    let ml_entry_result = get_fse_decode_entry(ml_state.to_int(), ml_dtable, 6)
+    let of_entry_result = get_fse_decode_entry(of_state.to_int(), of_dtable, 5)
+
+
+    let (ll_entry, ml_entry, of_entry, ll_code, ml_code, of_code) = match (ll_entry_result, ml_entry_result, of_entry_result) {
+      (Ok(ll_entry), Ok(ml_entry), Ok(of_entry)) => {
+        (ll_entry, ml_entry, of_entry, ll_entry.symbol, ml_entry.symbol, of_entry.symbol)
+      }
+      _ => {
+        return Err("FSE状态越界错误")
+      }
+    }
+
+    if seq_idx == 6 {
+      println("  序列\{seq_idx}解码: LL_code=\{ll_code}, ML_code=\{ml_code}, OF_code=\{of_code}")
+    }
+
+    // 2. 设置基础值（参照官方：seq.matchLength = mlDInfo->baseValue; seq.litLength = llDInfo->baseValue）
+    let base_match_length = decode_ml(ml_code, 0)
+    let base_literal_length = decode_ll(ll_code, 0)
+    let base_offset = decode_of(of_code, 0)
+
+    // 初始化最终值变量
+    let mut final_match_length = base_match_length
+    let mut final_literal_length = base_literal_length
+    let mut final_offset = base_offset
+
+    if seq_idx == num_sequences - 1 {
+      println("  基础值: LL_code=\{ll_code}->\{base_literal_length}, ML_code=\{ml_code}->\{base_match_length}, OF_code=\{of_code}->\{base_offset}")
+    }
+
+    // 3. 处理offset额外位（参照官方offset处理逻辑）
+    let of_nb_bits = get_of_bits(of_code)
+    let (bs_after_of, of_extra) = if of_nb_bits > 0 {
+      // 参照官方：offset = ofBase + BIT_readBitsFast(&seqState->DStream, ofBits)
+      read_bits_uint64(current_bs, of_nb_bits)
+    } else {
+      (current_bs, 0UL)
+    }
+    final_offset = base_offset + of_extra.to_int()
+
+    // 4. 处理ML额外位（参照官方：if (mlBits > 0) seq.matchLength += BIT_readBitsFast(...)）
+    let ml_nb_bits = get_ml_bits(ml_code)
+    let (bs_after_ml, ml_extra) = if ml_nb_bits > 0 {
+      read_bits_uint64(bs_after_of, ml_nb_bits)
+    } else {
+      (bs_after_of, 0UL)
+    }
+    final_match_length = base_match_length + ml_extra.to_int()
+
+    // 5. 处理LL额外位（参照官方：if (llBits > 0) seq.litLength += BIT_readBitsFast(...)）
+    let ll_nb_bits = get_ll_bits(ll_code)
+    let (bs_after_ll, ll_extra) = if ll_nb_bits > 0 {
+      read_bits_uint64(bs_after_ml, ll_nb_bits)
+    } else {
+      (bs_after_ml, 0UL)
+    }
+    final_literal_length = base_literal_length + ll_extra.to_int()
+
+    if seq_idx == 6 {
+      println("  额外位: LL_extra=\{ll_extra}, ML_extra=\{ml_extra}, OF_extra=\{of_extra}")
+      println("  最终值: LL=\{final_literal_length}, ML=\{final_match_length}, OF=\{final_offset}")
+    }
+
+    // 6. 状态更新（参照官方 ZSTD：LL -> ML -> OF，与编码顺序匹配）
+    let final_bs = if !is_last_seq {
+      let (bs1, new_ll_state) = {
+        let table_size = 64
+        let (new_bs, extra) = read_bits_uint64(bs_after_ll, ll_entry.nb_bits)
+        let raw_state = ll_entry.new_state_base + extra.to_int()
+        let new_state = if raw_state >= table_size { raw_state } else { raw_state + table_size }
+        // 规范化状态到有效范围
+        let normalized_state = table_size + (new_state % table_size)
+
+        (new_bs, normalized_state)
+      }
+
+      let (bs2, new_of_state) = {
+        let table_size = 32
+        let (new_bs, extra) = read_bits_uint64(bs1, of_entry.nb_bits)
+        let raw_state = of_entry.new_state_base + extra.to_int()
+        let new_state = if raw_state >= table_size { raw_state } else { raw_state + table_size }
+        // 规范化状态到有效范围
+        let normalized_state = table_size + (new_state % table_size)
+
+        (new_bs, normalized_state)
+      }
+
+      let (bs3, new_ml_state) = {
+        let table_size = 64
+        let (new_bs, extra) = read_bits_uint64(bs2, ml_entry.nb_bits)
+        let raw_state = ml_entry.new_state_base + extra.to_int()
+        let new_state = if raw_state >= table_size { raw_state } else { raw_state + table_size }
+        // 规范化状态到有效范围
+        let normalized_state = table_size + (new_state % table_size)
+
+        (new_bs, normalized_state)
+      }
+
+      // 更新状态用于下一个序列（ZSTD顺序：LL, ML, OF）
+      ll_state = new_ll_state.to_uint64()
+      ml_state = new_ml_state.to_uint64()
+      of_state = new_of_state.to_uint64()
+
+      // 调试：只打印关键信息
+
+      bs3
+    } else {
+      bs_after_ll
+    }
+
+    // 存储到临时数组（倒序解码，需要反转存储）
+    let seq = make_sequence(final_literal_length, final_match_length, final_offset)
+    // tANS解码是倒序的，最后解码的序列（seq_idx=0）应该是结果中的第一个（索引0）
+    temp_sequences[num_sequences - 1 - seq_idx] = seq
+    current_bs = final_bs
+  }
+
+  // 临时序列已经是正确顺序（我们按索引0到num_sequences-1赋值）
+  let sequences = temp_sequences
+
+  println("  ✅ FSE解码完成: 解码了 \{sequences.length()} 个序列")
+  Ok(sequences)
 }
