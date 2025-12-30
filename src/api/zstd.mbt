@@ -31,6 +31,12 @@ pub struct DataIntegrityAnalysis {
   entropy_level: Double
 }
 
+/// 滑动窗口解码上下文
+pub struct SlidingWindowDecoder {
+  mut context: @zstd_decoder.DecoderContext
+  window_size: Int
+}
+
 /// 使用指定级别压缩（自动选择压缩方法）
 /// 
 /// 参数:
@@ -871,5 +877,55 @@ fn test_rle_optimization() -> Bool {
   
   // Should compress and decompress repeated data correctly
   decompressed.length() == test_data.length()
+}
+
+// ============================================================================
+// Sliding Window Decoder API
+// ============================================================================
+
+/// 创建滑动窗口解码器
+pub fn create_sliding_window_decoder(window_size: Int) -> SlidingWindowDecoder {
+  let context = @zstd_decoder.create_decoder_context(window_size)
+  SlidingWindowDecoder::{
+    context: context,
+    window_size: window_size
+  }
+}
+
+/// 使用滑动窗口解码器解码数据块
+pub fn decompress_with_sliding_window(
+  decoder: SlidingWindowDecoder,
+  data: Bytes
+) -> Result[Bytes, String] {
+  // 解析帧头
+  let frame_result = @zstd_decoder.parse_frame_header(data)
+  match frame_result {
+    Ok((frame_header, header_size)) => {
+      let current_offset = header_size
+      let output: Array[Byte] = []
+
+      // 逐块解码，使用滑动窗口上下文
+      let block_result = @zstd_decoder.decompress_block_with_context(decoder.context, data, current_offset)
+      match block_result {
+        Ok((block_data, block_size, is_last)) => {
+          // 将块数据添加到输出
+          for i = 0; i < block_data.length(); i = i + 1 {
+            output.push(block_data[i])
+          }
+
+          Ok(Bytes::from_array(output))
+        }
+        Err(e) => Err("Block decompression failed: " + e)
+      }
+    }
+    Err(e) => Err("Frame header parsing failed")
+  }
+}
+
+/// 重置滑动窗口解码器
+pub fn reset_sliding_window_decoder(decoder: SlidingWindowDecoder) -> Unit {
+  // 重新创建上下文来重置状态
+  let new_context = @zstd_decoder.create_decoder_context(decoder.window_size)
+  decoder.context = new_context
 }
 
