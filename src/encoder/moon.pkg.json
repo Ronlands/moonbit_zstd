@@ -5,10 +5,6 @@
       "alias": "zstd_core"
     },
     {
-      "path": "Ronlands/moonbit_zstd/decoder",
-      "alias": "zstd_decoder"
-    },
-    {
       "path": "Ronlands/moonbit_zstd/entropy",
       "alias": "zstd_entropy"
     }
@@ -16,11 +12,7 @@
   "test-import": [],
   "link": {
     "wasm": {
-      "exports": [
-        "new_compressor",
-        "compress",
-        "compress_with_context"
-      ]
+      "exports": ["new_compressor", "compress", "compress_with_context"]
     }
   }
 }

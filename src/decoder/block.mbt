@@ -1068,25 +1068,16 @@ fn execute_sequences(
     }
     literal_pos = literal_pos + literal_length
     
-    // Handle match
-    if match_length > 0 {
-      if offset == 0 {
-        // 跳过offset=0的匹配（这通常表示FSE解码错误）
-        println("    ⚠️ 跳过offset=0的匹配 (LL=\{literal_length}, ML=\{match_length})")
-      } else {
-        let match_result = copy_from_window(window, offset, match_length)
+    // Handle match — byte-by-byte to support overlapping copies (match_length > offset)
+    if match_length > 0 && offset > 0 {
+      for _i = 0; _i < match_length; _i = _i + 1 {
+        let match_result = copy_single_byte_from_window(window, offset)
         match match_result {
-          Ok(match_bytes) => {
-            for i = 0; i < match_bytes.length(); i = i + 1 {
-              let byte = match_bytes[i]
-              output.push(byte)
-              add_to_window(window, byte)
-            }
+          Ok(byte) => {
+            output.push(byte)
+            add_to_window(window, byte)
           }
-          Err(e) => {
-            println("    ⚠️ 匹配复制失败: \{e} (LL=\{literal_length}, ML=\{match_length}, OF=\{offset})")
-            // 继续处理，不失败
-          }
+          Err(_) => break
         }
       }
     }
@@ -1115,6 +1106,23 @@ fn add_to_window(window: @zstd_core.WindowBuffer, byte: Byte) -> Unit {
   buffer[position] = byte
   @zstd_core.increment_window_position(window, capacity)
   @zstd_core.increment_window_size(window)
+}
+
+/// Copy a single byte from window at given offset (for byte-by-byte overlapping match support)
+fn copy_single_byte_from_window(window: @zstd_core.WindowBuffer, offset: Int) -> Result[Byte, String] {
+  let capacity = @zstd_core.get_window_capacity(window)
+  let position = @zstd_core.get_window_position(window)
+  let buffer = @zstd_core.get_window_buffer(window)
+
+  let mut src_pos = (position - offset) % capacity
+  if src_pos < 0 {
+    src_pos = src_pos + capacity
+  }
+  if src_pos >= 0 && src_pos < buffer.length() {
+    Ok(buffer[src_pos])
+  } else {
+    Err("Invalid window position")
+  }
 }
 
 /// Copy match data from window with validation
