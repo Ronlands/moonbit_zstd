@@ -900,14 +900,14 @@ pub fn decompress_with_sliding_window(
   // 解析帧头
   let frame_result = @zstd_decoder.parse_frame_header(data)
   match frame_result {
-    Ok((frame_header, header_size)) => {
+    Ok((_, header_size)) => {
       let current_offset = header_size
       let output: Array[Byte] = []
 
       // 逐块解码，使用滑动窗口上下文
       let block_result = @zstd_decoder.decompress_block_with_context(decoder.context, data, current_offset)
       match block_result {
-        Ok((block_data, block_size, is_last)) => {
+        Ok((block_data, _, _)) => {
           // 将块数据添加到输出
           for i = 0; i < block_data.length(); i = i + 1 {
             output.push(block_data[i])
@@ -918,7 +918,7 @@ pub fn decompress_with_sliding_window(
         Err(e) => Err("Block decompression failed: " + e)
       }
     }
-    Err(e) => Err("Frame header parsing failed")
+    Err(_) => Err("Frame header parsing failed")
   }
 }
 

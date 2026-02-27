@@ -2,9 +2,9 @@
 /// 实现字典加载、窗口缓冲区管理和历史数据访问
 
 // Use types from core module
-pub typealias @zstd_core.Dictionary as Dictionary
-pub typealias @zstd_core.DictionaryType as DictionaryType  
-pub typealias @zstd_core.WindowBuffer as WindowBuffer
+pub type Dictionary = @zstd_core.Dictionary
+pub type DictionaryType = @zstd_core.DictionaryType  
+pub type WindowBuffer = @zstd_core.WindowBuffer
 
 /// 解析格式化字典
 /// 格式化字典包含魔数、字典ID和压缩数据

@@ -288,11 +288,3 @@ fn test_fse_encode_simple() -> Bool {
   }
 }
 
-/// Test Huffman roundtrip (basic version)
-fn test_huffman_roundtrip_basic() -> Bool {
-  let roundtrip_result = @zstd_entropy.test_huffman_roundtrip()
-  match roundtrip_result {
-    Ok(success) => success
-    Err(_) => false
-  }
-}

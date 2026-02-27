@@ -228,46 +228,9 @@ pub fn decode_fse_sequences(
 
 /// 位流读取器（用于解码，支持反向读取）
 priv struct BitstreamReader {
-  data: Bytes
   mut offset: Int  // 当前读取位置（反向读取时从高地址往低地址）
   mut bit_container: UInt64
   mut bit_pos: Int  // 当前容器中已使用的位数
-  end_offset: Int  // 结束位置（不包含）
-}
-
-/// Reload bitstream（完全参照官方 BIT_reloadDStream_internal）
-fn reload_bitstream(bs: BitstreamReader) -> BitstreamReader {
-  // 检查溢出
-  if bs.bit_pos > 64 {
-    return bs  // overflow
-  }
-  
-  // ✅ 无条件执行（官方没有检查bytes_consumed==0）
-  // ptr -= bitsConsumed >> 3
-  let bytes_consumed = bs.bit_pos / 8
-  let new_offset = bs.offset - bytes_consumed
-  
-  // 检查边界
-  if new_offset < bs.end_offset {
-    return bs  // 无法往前移动
-  }
-  
-  bs.offset = new_offset
-  
-  // bitsConsumed &= 7
-  bs.bit_pos = bs.bit_pos % 8
-  
-  // bitContainer = MEM_readLEST(ptr) - 重新加载8字节
-  let mut container = 0UL
-  for i = 0; i < 8; i = i + 1 {
-    if bs.offset + i < bs.data.length() {
-      let byte_val = bs.data[bs.offset + i].to_uint64()
-      container = container | (byte_val << (i * 8))
-    }
-  }
-  bs.bit_container = container
-  
-  bs
 }
 
 /// 从位流读取指定位数
@@ -524,40 +487,6 @@ fn get_fse_decode_entry(
   } else {
     Ok(dtable[u])
   }
-}
-
-/// 返回: (new_bitstream, new_state, symbol)
-fn decode_fse_symbol_dtable(
-  bs: BitstreamReader,
-  state: Int,
-  dtable: Array[FSEDecodeEntry],
-  table_log: Int
-) -> (BitstreamReader, Int, Int) {
-  let table_size = 1 << table_log
-  
-  // 将状态映射到表索引: u = state - table_size
-  let u = state - table_size
-  
-  // 边界检查
-  if u < 0 || u >= dtable.length() {
-    println("    ⚠️ 状态越界: state=\{state}, u=\{u}, table_size=\{table_size}")
-    return (bs, table_size, 0)  // 返回默认状态和符号
-  }
-  
-  // 查找解码表项
-  let entry = dtable[u]
-  
-  // 读取额外位
-  let (new_bs, extra_bits) = read_bits_uint64(bs, entry.nb_bits)
-  
-  // ZSTD 参考实现的解码公式:
-  // new_state = newState + extra_bits + tableSize
-  // 其中 newState = (nextState << nbBits) - tableSize (已存储在表中)
-  //
-  // 所以: new_state = entry.new_state_base + extra_bits + tableSize
-  let new_state = entry.new_state_base + extra_bits.to_int() + table_size
-  
-  (new_bs, new_state, entry.symbol)
 }
 
 /// 旧的 FSE 编码表（兼容性）
@@ -1044,11 +973,9 @@ pub fn decode_fse_sequences_with_tables(
   }
 
   let bitstream = BitstreamReader::{
-    data: data,
     offset: 0,
     bit_container: 0UL,
     bit_pos: 0,
-    end_offset: offset
   }
 
   let temp_bs = bitstream
@@ -1419,11 +1346,9 @@ fn decode_fse_sequences_original(
 
   // 初始化 bitstream（修正：从低位开始读取）
   let bitstream = BitstreamReader::{
-    data: data,
     offset: 0,
     bit_container: 0UL,
     bit_pos: 0,
-    end_offset: offset
   }
 
   let temp_bs = bitstream

@@ -28,7 +28,7 @@ pub fn parse_error(msg: String) -> ZSTDError { ParseError(msg) }
 pub fn validation_error(msg: String) -> ZSTDError { ValidationError(msg) }
 
 /// ZSTD result type
-pub typealias Result[T, ZSTDError] as ZSTDResult[T]
+pub type ZSTDResult[T] = Result[T, ZSTDError]
 
 /// Frame type enumeration
 pub enum FrameType {

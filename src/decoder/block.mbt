@@ -49,7 +49,7 @@ pub fn create_decoder_context(window_size: Int) -> DecoderContext {
 
 /// Add decoded data to sliding window
 fn add_decoded_data_to_window(ctx: DecoderContext, data: Bytes) -> Unit {
-  let buffer = @zstd_core.get_window_buffer(ctx.window)
+  let _ = @zstd_core.get_window_buffer(ctx.window)
 
   for i = 0; i < data.length(); i = i + 1 {
     add_to_window(ctx.window, data[i])
@@ -1034,13 +1034,6 @@ fn create_window(capacity: Int) -> @zstd_core.WindowBuffer {
   @zstd_core.create_window_buffer(capacity, empty_dict)
 }
 
-/// Create window buffer with previous data (for multi-block decompression)
-fn create_window_with_previous(capacity: Int, previous_data: Bytes) -> @zstd_core.WindowBuffer {
-  // 创建包含之前数据的字典
-  let previous_dict = @zstd_core.create_raw_dictionary_from_data(previous_data, 0U)
-  @zstd_core.create_window_buffer(capacity, previous_dict)
-}
-
 /// Execute sequences
 fn execute_sequences(
   literals: Bytes,
@@ -1124,87 +1117,6 @@ fn copy_single_byte_from_window(window: @zstd_core.WindowBuffer, offset: Int) ->
     Err("Invalid window position")
   }
 }
-
-/// Copy match data from window with validation
-fn copy_from_window(window: @zstd_core.WindowBuffer, offset: Int, length: Int) -> Result[Bytes, String] {
-  let capacity = @zstd_core.get_window_capacity(window)
-  let position = @zstd_core.get_window_position(window)
-  let size = @zstd_core.get_window_size(window)
-  let buffer = @zstd_core.get_window_buffer(window)
-  
-  // 运行时验证：检测零偏移错误
-  if offset == 0 {
-    return Err("Invalid offset: offset cannot be zero (off0 error)")
-  }
-  
-  // 获取字典信息
-  let dictionary = @zstd_core.get_window_dictionary(window)
-
-  // 验证偏移是否合理
-  // 在ZSTD中，偏移量可能引用：
-  // 1. 当前块已解码的数据 (size)
-  // 2. 之前块的数据 (如果窗口更大)
-  // 3. 字典数据 (如果有字典)
-
-  // 验证匹配长度是否合理
-  if length <= 0 {
-    return Err("Invalid match length: length must be positive")
-  }
-
-  if length > @zstd_core.ZSTD_MAX_BLOCK_SIZE {  // ZSTD 最大块大小
-    return Err("Invalid match length: length exceeds maximum block size")
-  }
-
-  let result: Array[Byte] = []
-
-  // ZSTD 滑动窗口逻辑：
-  // 窗口是一个循环缓冲区，position 指向下一个写入位置
-  // LZ77 offset 总是向后引用已解码的数据
-
-  // 计算引用位置：从当前位置向后 offset 字节
-  let raw_pos = position - offset
-  let mut current_pos = raw_pos % capacity
-  if current_pos < 0 {
-    current_pos = current_pos + capacity
-  }
-
-  // 检查数据是否仍然在窗口中（没有被覆盖）
-  // 如果窗口满了并且 offset 超过了窗口容量，数据可能已经被覆盖
-  if size >= capacity && offset > capacity {
-    // 数据可能已经被覆盖，检查字典
-    if dictionary.size > 0 {
-      let dict_pos = offset - capacity  // 引用超出窗口的数据，应该在字典中
-      if dict_pos > 0 && dict_pos <= dictionary.size {
-        // 从字典复制数据
-        for i = 0; i < length; i = i + 1 {
-          let pos = dict_pos + i - 1
-          if pos < dictionary.data.length() {
-            result.push(dictionary.data[pos])
-          } else {
-            return Err("Dictionary data insufficient for match at offset " + offset.to_string())
-          }
-        }
-        return Ok(Bytes::from_array(result))
-      }
-    }
-    return Err("Invalid offset: data may have been overwritten in circular buffer")
-  }
-
-  // 从窗口复制数据
-  for i = 0; i < length; i = i + 1 {
-    if current_pos >= 0 && current_pos < buffer.length() {
-      let byte = buffer[current_pos]
-      result.push(byte)
-    } else {
-      // 无效位置，返回错误
-      return Err("Invalid window position: \{current_pos}, capacity=\{capacity}")
-    }
-    current_pos = (current_pos + 1) % capacity
-  }
-
-  Ok(Bytes::from_array(result))
-}
-
 
 // ============================================================================
 // Main Block Decompression Function

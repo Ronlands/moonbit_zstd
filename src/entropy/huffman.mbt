@@ -664,45 +664,6 @@ fn generate_huffman_codes_optimized(lengths: Array[Int]) -> Array[HuffmanCode] {
   codes
 }
 
-/// 从 Huffman 树生成编码表
-fn generate_huffman_codes(node: HuffmanTreeNode, prefix_code: UInt64, prefix_length: Int) -> Array[HuffmanCode] {
-  let codes: Array[HuffmanCode] = []
-
-  match node {
-    HuffmanTreeNode::Leaf(symbol, _freq) => {
-      // 确保数组足够大
-      while codes.length() <= symbol {
-        codes.push(HuffmanCode::{ code: 0UL, length: 0 })
-      }
-      codes[symbol] = HuffmanCode::{ code: prefix_code, length: prefix_length }
-    }
-    HuffmanTreeNode::Internal(left, right, _freq) => {
-      // 左子树：添加0
-      let left_codes = generate_huffman_codes(left, (prefix_code << 1), prefix_length + 1)
-      // 右子树：添加1
-      let right_codes = generate_huffman_codes(right, (prefix_code << 1) | 1UL, prefix_length + 1)
-
-      // 合并编码表
-      let max_len = left_codes.length().max(right_codes.length())
-      for i = 0; i < max_len; i = i + 1 {
-        let left_code = if i < left_codes.length() { left_codes[i] } else { HuffmanCode::{ code: 0UL, length: 0 } }
-        let right_code = if i < right_codes.length() { right_codes[i] } else { HuffmanCode::{ code: 0UL, length: 0 } }
-
-        // 优先使用非零长度的编码
-        if left_code.length > 0 {
-          codes.push(left_code)
-        } else if right_code.length > 0 {
-          codes.push(right_code)
-        } else {
-          codes.push(HuffmanCode::{ code: 0UL, length: 0 })
-        }
-      }
-    }
-  }
-
-  codes
-}
-
 /// 从频率构建完整的 Huffman 编码表 - 优化版本
 pub fn build_huffman_encode_table(frequencies: Array[Int]) -> HuffmanEncodeTable {
   // 构建 Huffman 树

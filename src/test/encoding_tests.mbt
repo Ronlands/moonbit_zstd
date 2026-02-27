@@ -9,7 +9,7 @@ fn to_hex(value: Int) -> String {
   let mut n = value
   while n > 0 {
     let digit = n % 16
-    result = hex_chars[digit].to_string() + result
+    result = hex_chars.code_unit_at(digit).to_int().unsafe_to_char().to_string() + result
     n = n / 16
   }
   result
@@ -193,7 +193,7 @@ pub fn save_compressed_for_official_tool() -> Unit {
   let data_bytes : Array[Byte] = []
   for _i = 0; _i < 10; _i = _i + 1 {
     for j = 0; j < text.length(); j = j + 1 {
-      data_bytes.push(text[j].to_byte())
+      data_bytes.push(text.code_unit_at(j).to_byte())
     }
   }
   let data = Bytes::from_array(data_bytes)
