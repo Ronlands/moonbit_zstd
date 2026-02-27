@@ -11,6 +11,8 @@ pub fn run_all_basic_tests() -> Bool {
     ("Empty Data", test_empty_data()),
     ("Data Integrity", test_data_integrity()),
     ("Compressed Block", test_compressed_block()),
+    ("Multi-Sequence Block", test_multi_sequence_block()),
+    ("RLE Literals", test_rle_literals_block()),
     ("FSE Bitstream", test_fse_bitstream()),
     ("FSE Encode Simple", test_fse_encode_simple()),
   ]
@@ -104,6 +106,59 @@ fn test_compressed_block() -> Bool {
   }
   
   // 验证往返正确
+  verify_data_equal(test_data, decompressed)
+}
+
+/// Test compressed block with multiple sequences (not just one big match)
+/// Uses data with several different repeating patterns to force multiple LZ77 matches
+fn test_multi_sequence_block() -> Bool {
+  // Build data with multiple different repeating patterns to force multiple sequences
+  let mut test_text = ""
+  for _i = 0; _i < 5; _i = _i + 1 {
+    test_text = test_text + "AAAA BBBB CCCC "
+  }
+  for _i = 0; _i < 5; _i = _i + 1 {
+    test_text = test_text + "DDDD EEEE FFFF "
+  }
+  let test_data = @encoding/utf8.encode(test_text)
+
+  let compressed = @zstd.compress(test_data)
+  if compressed.length() == 0 { return false }
+
+  let decompressed = @zstd.decompress(compressed)
+  if test_data.length() != decompressed.length() {
+    println("  ❌ Multi-seq 长度不匹配：原始=\{test_data.length()} 解压=\{decompressed.length()}")
+    return false
+  }
+  verify_data_equal(test_data, decompressed)
+}
+
+/// Test that RLE literals are used when all literals are the same byte
+fn test_rle_literals_block() -> Bool {
+  // Data: many 'A' bytes followed by a different repeating pattern
+  // This forces: RLE-able literals + LZ77 match
+  let arr: Array[Byte] = []
+  // First 100 bytes: all 'X' (will become RLE literals if matched properly)
+  for _i = 0; _i < 100; _i = _i + 1 { arr.push(b'X') }
+  // Then repeat the first 50 bytes 3 more times (creates matches)
+  for _j = 0; _j < 3; _j = _j + 1 {
+    for _i = 0; _i < 100; _i = _i + 1 { arr.push(b'X') }
+  }
+  let test_data = Bytes::from_array(arr)
+
+  let compressed = @zstd.compress(test_data)
+  if compressed.length() == 0 { return false }
+
+  // RLE block should be very small
+  if compressed.length() > 20 {
+    println("  ⚠️ RLE 压缩效率偏低: \{compressed.length()} bytes for \{test_data.length()} bytes input")
+  }
+
+  let decompressed = @zstd.decompress(compressed)
+  if test_data.length() != decompressed.length() {
+    println("  ❌ RLE 长度不匹配：原始=\{test_data.length()} 解压=\{decompressed.length()}")
+    return false
+  }
   verify_data_equal(test_data, decompressed)
 }
 

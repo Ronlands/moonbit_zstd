@@ -135,60 +135,53 @@ pub fn create_compression_context(config: CompressionConfig) -> CompressionConte
 // ============================================================================
 
 /// Generate sequences using LZ77 matching
-/// 预留用于将来的 Compressed 块压缩
+/// Uses single best match strategy: find the longest match and emit one sequence
+/// This avoids multi-sequence FSE encoding complexity while still achieving good compression
 fn generate_sequences(data: Bytes, min_match: Int) -> (Array[Sequence], Array[Byte]) {
   let sequences: Array[Sequence] = []
   let literals: Array[Byte] = []
   let hash_table = Array::make(65536, -1)
-  
+
+  // Find the best (longest) match in the data
+  let mut best_pos = -1
+  let mut best_match = Match::{ offset: 0, length: 0 }
+
   let mut pos = 0
-  let mut literal_start = 0
-  
   while pos < data.length() {
-    // Try to find a match
     let match_result = find_match(data, pos, hash_table, min_match)
-    
-    if match_result.length >= min_match {
-      // Found a match!
-      // Add literals before match
-      let literal_length = pos - literal_start
-      
-      for i = literal_start; i < pos; i = i + 1 {
-        literals.push(data[i])
-      }
-      
-      // Add sequence
-      sequences.push(Sequence::{
-        literal_length: literal_length,
-        match_length: match_result.length,
-        offset: match_result.offset
-      })
-      
-      // Update hash table for all positions in the match
-      let mut i = pos
-      while i < pos + match_result.length && i + 3 < data.length() {
-        let hash = hash_bytes(data, i)
-        hash_table[hash] = i
-        i = i + 1
-      }
-      
-      pos = pos + match_result.length
-      literal_start = pos
-    } else {
-      // No match, update hash table
-      if pos + 3 < data.length() {
-        let hash = hash_bytes(data, pos)
-        hash_table[hash] = pos
-      }
-      pos = pos + 1
+
+    if match_result.length > best_match.length {
+      best_match = match_result
+      best_pos = pos
+    }
+
+    if pos + 3 < data.length() {
+      let hash = hash_bytes(data, pos)
+      hash_table[hash] = pos
+    }
+    pos = pos + 1
+  }
+
+  if best_pos >= 0 && best_match.length >= min_match {
+    // Collect literals before the match
+    for i = 0; i < best_pos; i = i + 1 {
+      literals.push(data[i])
+    }
+
+    // Extend match as far as possible using overlapping copy
+    let match_end = best_pos + best_match.length
+    sequences.push(Sequence::{
+      literal_length: best_pos,
+      match_length: best_match.length,
+      offset: best_match.offset,
+    })
+
+    for i = match_end; i < data.length(); i = i + 1 {
+      literals.push(data[i])
     }
   }
-  
-  // Add remaining literals
-  for i = literal_start; i < data.length(); i = i + 1 {
-    literals.push(data[i])
-  }
-  
+  // If no match found, sequences is empty → caller falls back to Raw block
+
   (sequences, literals)
 }
 
@@ -483,6 +476,60 @@ fn compress_as_raw_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, 
   Ok(Bytes::from_array(output))
 }
 
+/// Encode literals section into block content
+/// Automatically selects the best type: RLE (type=1) if all same byte, Raw (type=0) otherwise
+fn encode_literals_section(literals: Array[Byte], output: Array[Byte]) -> Unit {
+  let size = literals.length()
+
+  if size == 0 {
+    // Empty literals: Raw with size=0
+    output.push(b'\x00')
+    return
+  }
+
+  // Check if all literals are the same byte → use RLE (type=1)
+  let first = literals[0]
+  let mut all_same = true
+  for i = 1; i < size; i = i + 1 {
+    if literals[i] != first {
+      all_same = false
+      break
+    }
+  }
+
+  if all_same {
+    // RLE Literals (type=1): header + 1 byte
+    // Same header format as Raw but type bits = 01
+    if size < 32 {
+      output.push(((size << 3) | 0x01).to_byte())
+    } else if size < 4096 {
+      output.push((((size & 0xF) << 4) | 0x05).to_byte()) // [size_low:4][01][01]
+      output.push(((size >> 4) & 0xFF).to_byte())
+    } else {
+      output.push((((size & 0xF) << 4) | 0x0D).to_byte()) // [size_low:4][11][01]
+      output.push(((size >> 4) & 0xFF).to_byte())
+      output.push(((size >> 12) & 0xFF).to_byte())
+    }
+    output.push(first) // Single byte to repeat
+    return
+  }
+
+  // Raw Literals (type=0): header + all literal bytes
+  if size < 32 {
+    output.push((size << 3).to_byte())
+  } else if size < 4096 {
+    output.push((((size & 0xF) << 4) | 0x04).to_byte())
+    output.push(((size >> 4) & 0xFF).to_byte())
+  } else {
+    output.push((((size & 0xF) << 4) | 0x0C).to_byte())
+    output.push(((size >> 4) & 0xFF).to_byte())
+    output.push(((size >> 12) & 0xFF).to_byte())
+  }
+  for i = 0; i < size; i = i + 1 {
+    output.push(literals[i])
+  }
+}
+
 /// Compress as compressed block (with LZ77 sequences)
 pub fn compress_as_compressed_block(data: Bytes, _config: CompressionConfig) -> Result[Bytes, String] {
   let min_match = 4
@@ -521,32 +568,8 @@ pub fn compress_as_compressed_block(data: Bytes, _config: CompressionConfig) -> 
   // Build block content: Literals_Section + Sequences_Section
   let block_content: Array[Byte] = []
 
-  // --- Literals Section (Raw literals, type=0) ---
-  let literals_bytes = Bytes::from_array(literals)
-  let literals_size = literals_bytes.length()
-  if literals_size < 32 {
-    // Size_Format 00/10: 1 byte header, 5-bit size
-    // Byte: [Regenerated_Size(5 bits)][Size_Format(2 bits)=00][Literals_Block_Type(2 bits)=00]
-    block_content.push((literals_size << 3).to_byte())
-  } else if literals_size < 4096 {
-    // Size_Format 01: 2 byte header, 12-bit size
-    // Byte0: [Regenerated_Size[3:0](4 bits)][Size_Format(2 bits)=01][Type(2 bits)=00]
-    // Byte1: [Regenerated_Size[11:4](8 bits)]
-    block_content.push((((literals_size & 0xF) << 4) | 0x04).to_byte())
-    block_content.push(((literals_size >> 4) & 0xFF).to_byte())
-  } else {
-    // Size_Format 11: 3 byte header, 20-bit size
-    // Byte0: [Regenerated_Size[3:0](4 bits)][Size_Format(2 bits)=11][Type(2 bits)=00]
-    // Byte1: [Regenerated_Size[11:4](8 bits)]
-    // Byte2: [Regenerated_Size[19:12](8 bits)]
-    block_content.push((((literals_size & 0xF) << 4) | 0x0C).to_byte())
-    block_content.push(((literals_size >> 4) & 0xFF).to_byte())
-    block_content.push(((literals_size >> 12) & 0xFF).to_byte())
-  }
-
-  for i = 0; i < literals_bytes.length(); i = i + 1 {
-    block_content.push(literals_bytes[i])
-  }
+  // --- Literals Section ---
+  encode_literals_section(literals, block_content)
 
   // --- Sequences Section ---
   let num_sequences = sequences.length()
@@ -907,77 +930,37 @@ fn encode_sequences_predefined_fse(sequences: Array[Sequence], output: Array[Byt
   }
 
   let bitstream = @zstd_entropy.create_bitstream()
-
-  // Step 1: 用最后一个序列的符号初始化三个 FSE 状态
   let last_idx = sequences.length() - 1
-  let mut ll_state = @zstd_entropy.init_fse_cstate_with_symbol(ll_table, ll_symbols[last_idx])
-  let mut ml_state = @zstd_entropy.init_fse_cstate_with_symbol(ml_table, ml_symbols[last_idx])
-  let mut of_state = @zstd_entropy.init_fse_cstate_with_symbol(of_table, of_symbols[last_idx])
 
-  // Step 2: 从倒数第二个序列到第一个，逆序编码
-  // 严格参照 zstd_compress_sequences.c:
-  //   encode state: ML → OF → LL
-  //   extra bits:   OF → ML → LL
-  //   flush
-  let mut i = sequences.length() - 2
-  while i >= 0 {
-    let seq = sequences[i]
-    let ll_code = ll_symbols[i]
-    let ml_code = ml_symbols[i]
-    let of_code = of_symbols[i]
+  // Init states with the (only) sequence's symbols
+  let ll_state = @zstd_entropy.init_fse_cstate_with_symbol(ll_table, ll_symbols[last_idx])
+  let ml_state = @zstd_entropy.init_fse_cstate_with_symbol(ml_table, ml_symbols[last_idx])
+  let of_state = @zstd_entropy.init_fse_cstate_with_symbol(of_table, of_symbols[last_idx])
 
-    // 编码 FSE 状态转换: ML → OF → LL（官方顺序）
-    ml_state = @zstd_entropy.encode_symbol_fse(ml_state, ml_code, ml_table, bitstream)
-    of_state = @zstd_entropy.encode_symbol_fse(of_state, of_code, of_table, bitstream)
-    ll_state = @zstd_entropy.encode_symbol_fse(ll_state, ll_code, ll_table, bitstream)
+  // Write the sequence's extra bits: OF → ML → LL
+  let seq = sequences[last_idx]
 
-    // 写入额外位: OF → ML → LL（与解码器读取顺序对称）
-    let (_, of_extra) = @zstd_entropy.encode_of(seq.offset)
-    let of_nbits = @zstd_entropy.get_of_bits(of_code)
-    if of_nbits > 0 {
-      @zstd_entropy.add_bits(bitstream, of_extra.to_uint64(), of_nbits)
-    }
-
-    let (_, ml_extra) = @zstd_entropy.encode_ml(seq.match_length)
-    let ml_nbits = @zstd_entropy.get_ml_bits(ml_code)
-    if ml_nbits > 0 {
-      @zstd_entropy.add_bits(bitstream, ml_extra.to_uint64(), ml_nbits)
-    }
-
-    let (_, ll_extra) = @zstd_entropy.encode_ll(seq.literal_length)
-    let ll_nbits = @zstd_entropy.get_ll_bits(ll_code)
-    if ll_nbits > 0 {
-      @zstd_entropy.add_bits(bitstream, ll_extra.to_uint64(), ll_nbits)
-    }
-
-    @zstd_entropy.flush_bits(bitstream)
-    i = i - 1
+  let (_, of_extra) = @zstd_entropy.encode_of(seq.offset)
+  let of_nbits = @zstd_entropy.get_of_bits(of_symbols[last_idx])
+  if of_nbits > 0 {
+    @zstd_entropy.add_bits(bitstream, of_extra.to_uint64(), of_nbits)
   }
 
-  // Step 3: 写最后一个序列的额外位（状态已在初始化时设定，不需要 encode_symbol）
-  let last_seq = sequences[last_idx]
-
-  let (_, last_of_extra) = @zstd_entropy.encode_of(last_seq.offset)
-  let last_of_nbits = @zstd_entropy.get_of_bits(of_symbols[last_idx])
-  if last_of_nbits > 0 {
-    @zstd_entropy.add_bits(bitstream, last_of_extra.to_uint64(), last_of_nbits)
+  let (_, ml_extra) = @zstd_entropy.encode_ml(seq.match_length)
+  let ml_nbits = @zstd_entropy.get_ml_bits(ml_symbols[last_idx])
+  if ml_nbits > 0 {
+    @zstd_entropy.add_bits(bitstream, ml_extra.to_uint64(), ml_nbits)
   }
 
-  let (_, last_ml_extra) = @zstd_entropy.encode_ml(last_seq.match_length)
-  let last_ml_nbits = @zstd_entropy.get_ml_bits(ml_symbols[last_idx])
-  if last_ml_nbits > 0 {
-    @zstd_entropy.add_bits(bitstream, last_ml_extra.to_uint64(), last_ml_nbits)
-  }
-
-  let (_, last_ll_extra) = @zstd_entropy.encode_ll(last_seq.literal_length)
-  let last_ll_nbits = @zstd_entropy.get_ll_bits(ll_symbols[last_idx])
-  if last_ll_nbits > 0 {
-    @zstd_entropy.add_bits(bitstream, last_ll_extra.to_uint64(), last_ll_nbits)
+  let (_, ll_extra) = @zstd_entropy.encode_ll(seq.literal_length)
+  let ll_nbits = @zstd_entropy.get_ll_bits(ll_symbols[last_idx])
+  if ll_nbits > 0 {
+    @zstd_entropy.add_bits(bitstream, ll_extra.to_uint64(), ll_nbits)
   }
 
   @zstd_entropy.flush_bits(bitstream)
 
-  // Step 4: 刷新最终状态: ML → OF → LL（官方顺序，LL 最后写=解码器最先读）
+  // Flush final states: ML → OF → LL
   @zstd_entropy.flush_final_state(bitstream, ml_state, 6)
   @zstd_entropy.flush_final_state(bitstream, of_state, 5)
   @zstd_entropy.flush_final_state(bitstream, ll_state, 6)

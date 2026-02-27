@@ -227,17 +227,17 @@ pub fn decode_fse_sequences(
 
 
 /// 位流读取器（用于解码，支持反向读取）
+/// 参照官方 BIT_DStream_t
 priv struct BitstreamReader {
-  mut offset: Int  // 当前读取位置（反向读取时从高地址往低地址）
+  data: Bytes              // 原始数据引用（用于 reload）
+  mut offset: Int          // 当前指针位置（reload 时向前移动）
   mut bit_container: UInt64
-  mut bit_pos: Int  // 当前容器中已使用的位数
+  mut bit_pos: Int         // bitsConsumed：累积消费量
+  end_offset: Int          // 数据起始边界（不可越过）
 }
 
 /// 从位流读取指定位数
-/// 严格参照官方 BIT_lookBits + BIT_skipBits:
-///   value = (bitContainer << bitsConsumed) >> (64 - nbBits)
-///   bitsConsumed += nbBits
-/// bit_pos 是累积消费量（包含初始 padding 跳过），container 不修改
+/// 参照官方 BIT_lookBits + BIT_skipBits
 fn read_bits_uint64(bs: BitstreamReader, nb_bits: Int) -> (BitstreamReader, UInt64) {
   if nb_bits <= 0 {
     return (bs, 0UL)
@@ -249,6 +249,29 @@ fn read_bits_uint64(bs: BitstreamReader, nb_bits: Int) -> (BitstreamReader, UInt
   bs.bit_pos = bs.bit_pos + nb_bits
 
   (bs, value)
+}
+
+/// Reload bitstream — 参照官方 BIT_reloadDStream
+/// 当 bit_pos 接近 64 时，向前移动指针并重新加载 container
+fn reload_dstream(bs: BitstreamReader) -> Unit {
+  if bs.bit_pos > 64 { return }
+
+  let bytes_consumed = bs.bit_pos / 8
+  let new_offset = bs.offset - bytes_consumed
+
+  if new_offset < bs.end_offset { return }
+
+  bs.offset = new_offset
+  bs.bit_pos = bs.bit_pos % 8
+
+  // 重新加载 8 字节（LE）
+  let mut container = 0UL
+  for i = 0; i < 8; i = i + 1 {
+    if bs.offset + i < bs.data.length() {
+      container = container | (bs.data[bs.offset + i].to_uint64() << (i * 8))
+    }
+  }
+  bs.bit_container = container
 }
 
 
@@ -972,18 +995,17 @@ pub fn decode_fse_sequences_with_tables(
     return Err("FSE data too short")
   }
 
-  let bitstream = BitstreamReader::{
+  let temp_bs = BitstreamReader::{
+    data: data,
     offset: 0,
     bit_container: 0UL,
     bit_pos: 0,
+    end_offset: offset,
   }
-
-  let temp_bs = bitstream
 
   if fse_data_len >= 8 {
     temp_bs.offset = offset + fse_data_len - 8
 
-    // 读取 uint64 LE
     let mut container = 0UL
     for i = 0; i < 8; i = i + 1 {
       let byte_val = data[temp_bs.offset + i].to_uint64()
@@ -1344,20 +1366,18 @@ fn decode_fse_sequences_original(
     return Err("FSE data too short")
   }
 
-  // 初始化 bitstream（修正：从低位开始读取）
-  let bitstream = BitstreamReader::{
+  // 初始化 DStream（参照官方 BIT_initDStream）
+  let temp_bs = BitstreamReader::{
+    data: data,
     offset: 0,
     bit_container: 0UL,
     bit_pos: 0,
+    end_offset: offset,
   }
 
-  let temp_bs = bitstream
-
   if fse_data_len >= 8 {
-    // ptr = srcBuffer + srcSize - sizeof(bitContainer)
     temp_bs.offset = offset + fse_data_len - 8
 
-    // bitContainer = MEM_readLEST(ptr)
     let mut container = 0UL
     for i = 0; i < 8; i = i + 1 {
       let byte_val = data[temp_bs.offset + i].to_uint64()
@@ -1365,13 +1385,11 @@ fn decode_fse_sequences_original(
     }
     temp_bs.bit_container = container
 
-    // bitsConsumed = lastByte ? 8 - ZSTD_highbit32(lastByte) : 0
     let last_byte_idx = offset + fse_data_len - 1
     let last_byte = data[last_byte_idx].to_int()
     let bits_consumed_raw = if last_byte == 0 { 0 } else { 8 - highbit32(last_byte) }
     temp_bs.bit_pos = bits_consumed_raw
   } else {
-    // Small data case
     temp_bs.offset = offset
     let mut container = 0UL
     for i = 0; i < fse_data_len; i = i + 1 {
@@ -1404,84 +1422,56 @@ fn decode_fse_sequences_original(
   let mut of_state = of_s
   let mut ml_state = ml_s
 
-  let temp_sequences: Array[Sequence] = Array::make(num_sequences, Sequence::{ literal_length: 0, match_length: 0, offset: 0 })
-  for seq_idx = (num_sequences - 1); seq_idx >= 0; seq_idx = seq_idx - 1 {
-    let is_last_seq = (seq_idx == num_sequences - 1)
-
-    // 1. 查表获取符号
+  // Decode sequences (forward iteration)
+  let sequences: Array[Sequence] = []
+  for seq_idx = 0; seq_idx < num_sequences; seq_idx = seq_idx + 1 {
+    // 1. Peek symbols from current states
     let ll_entry_result = get_fse_decode_entry(ll_state.to_int(), ll_dtable, 6)
     let ml_entry_result = get_fse_decode_entry(ml_state.to_int(), ml_dtable, 6)
     let of_entry_result = get_fse_decode_entry(of_state.to_int(), of_dtable, 5)
 
     let (ll_entry, ml_entry, of_entry, ll_code, ml_code, of_code) = match (ll_entry_result, ml_entry_result, of_entry_result) {
-      (Ok(ll_entry), Ok(ml_entry), Ok(of_entry)) => {
-        (ll_entry, ml_entry, of_entry, ll_entry.symbol, ml_entry.symbol, of_entry.symbol)
+      (Ok(ll_e), Ok(ml_e), Ok(of_e)) => {
+        (ll_e, ml_e, of_e, ll_e.symbol, ml_e.symbol, of_e.symbol)
       }
-      _ => {
-        return Err("FSE状态越界错误")
-      }
+      _ => return Err("FSE状态越界错误")
     }
 
-    // 2. 基础值
-    let mut final_match_length = decode_ml(ml_code, 0)
-    let mut final_literal_length = decode_ll(ll_code, 0)
-    let mut final_offset = decode_of(of_code, 0)
+    // 2. Base values + extra bits: LL → ML → OF (reverse of encoder's OF→ML→LL)
+    let mut final_ll = decode_ll(ll_code, 0)
+    let mut final_ml = decode_ml(ml_code, 0)
+    let mut final_of = decode_of(of_code, 0)
 
-    // 3. 读取额外位: LL → ML → OF
-    // 编码器从 LSB 写入 OF→ML→LL，解码器从 MSB 读取，所以读取顺序反转
-    let ll_nb_bits = get_ll_bits(ll_code)
-    let (bs_after_ll, ll_extra) = if ll_nb_bits > 0 {
-      read_bits_uint64(current_bs, ll_nb_bits)
-    } else {
-      (current_bs, 0UL)
+    let ll_nb = get_ll_bits(ll_code)
+    let (bs_a, ll_ex) = if ll_nb > 0 { read_bits_uint64(current_bs, ll_nb) } else { (current_bs, 0UL) }
+    final_ll = final_ll + ll_ex.to_int()
+
+    let ml_nb = get_ml_bits(ml_code)
+    let (bs_b, ml_ex) = if ml_nb > 0 { read_bits_uint64(bs_a, ml_nb) } else { (bs_a, 0UL) }
+    final_ml = final_ml + ml_ex.to_int()
+
+    let of_nb = get_of_bits(of_code)
+    let (bs_c, of_ex) = if of_nb > 0 { read_bits_uint64(bs_b, of_nb) } else { (bs_b, 0UL) }
+    final_of = final_of + of_ex.to_int()
+
+    sequences.push(make_sequence(final_ll, final_ml, final_of))
+
+    // 3. State updates (not needed for last sequence)
+    if seq_idx < num_sequences - 1 {
+      reload_dstream(bs_c)
+
+      let (bs1, ll_st) = read_bits_uint64(bs_c, ll_entry.nb_bits)
+      ll_state = (ll_entry.new_state_base + ll_st.to_int() + 64).to_uint64()
+
+      let (bs2, ml_st) = read_bits_uint64(bs1, ml_entry.nb_bits)
+      ml_state = (ml_entry.new_state_base + ml_st.to_int() + 64).to_uint64()
+
+      let (bs3, of_st) = read_bits_uint64(bs2, of_entry.nb_bits)
+      of_state = (of_entry.new_state_base + of_st.to_int() + 32).to_uint64()
+
+      current_bs = bs3
     }
-    final_literal_length = final_literal_length + ll_extra.to_int()
-
-    let ml_nb_bits = get_ml_bits(ml_code)
-    let (bs_after_ml, ml_extra) = if ml_nb_bits > 0 {
-      read_bits_uint64(bs_after_ll, ml_nb_bits)
-    } else {
-      (bs_after_ll, 0UL)
-    }
-    final_match_length = final_match_length + ml_extra.to_int()
-
-    let of_nb_bits = get_of_bits(of_code)
-    let (bs_after_of, of_extra) = if of_nb_bits > 0 {
-      read_bits_uint64(bs_after_ml, of_nb_bits)
-    } else {
-      (bs_after_ml, 0UL)
-    }
-    final_offset = final_offset + of_extra.to_int()
-
-    // 4. 状态更新: LL → ML → OF（与编码器 ML→OF→LL 反向对称）
-    let final_bs = if !is_last_seq {
-      let (bs1, ll_state_bits) = read_bits_uint64(bs_after_of, ll_entry.nb_bits)
-      let new_ll = ll_entry.new_state_base + ll_state_bits.to_int() + 64
-      ll_state = new_ll.to_uint64()
-
-      let (bs2, ml_state_bits) = read_bits_uint64(bs1, ml_entry.nb_bits)
-      let new_ml = ml_entry.new_state_base + ml_state_bits.to_int() + 64
-      ml_state = new_ml.to_uint64()
-
-      let (bs3, of_state_bits) = read_bits_uint64(bs2, of_entry.nb_bits)
-      let new_of = of_entry.new_state_base + of_state_bits.to_int() + 32
-      of_state = new_of.to_uint64()
-
-      bs3
-    } else {
-      bs_after_of
-    }
-
-    // 存储到临时数组（倒序解码，需要反转存储）
-    let seq = make_sequence(final_literal_length, final_match_length, final_offset)
-    // tANS解码是倒序的，最后解码的序列（seq_idx=0）应该是结果中的第一个（索引0）
-    temp_sequences[num_sequences - 1 - seq_idx] = seq
-    current_bs = final_bs
   }
 
-  // 临时序列已经是正确顺序（我们按索引0到num_sequences-1赋值）
-  let sequences = temp_sequences
-
-  println("  ✅ FSE解码完成: 解码了 \{sequences.length()} 个序列")
   Ok(sequences)
 }
