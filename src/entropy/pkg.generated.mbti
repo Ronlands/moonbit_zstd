@@ -2,80 +2,195 @@
 package "Ronlands/moonbit_zstd/entropy"
 
 // Values
-fn build_fse_encode_table(Array[Int], Int) -> FSEEncodeTable
+pub fn add_bits(BitStream, UInt64, Int) -> Unit
 
-fn build_fse_table_from_weights(Array[Int], Int) -> Result[FSETable, String]
+pub fn benchmark_huffman() -> Unit
 
-fn build_huffman_encode_table(Array[Int]) -> HuffmanEncodeTable
+pub fn build_fse_ctable(Array[Int], Int, Int) -> Result[FSECTable, String]
 
-fn build_huffman_table(HuffmanWeights) -> Result[HuffmanTable, String]
+pub fn build_fse_encode_table(Array[Int], Int) -> FSEEncodeTable
 
-fn build_huffman_table_from_weights(HuffmanWeights) -> Result[HuffmanTable, String]
+pub fn build_fse_table_from_weights(Array[Int], Int) -> Result[FSETable, String]
 
-fn count_huffman_symbols(Array[Byte], Int) -> Array[Int]
+pub fn build_huffman_encode_table(Array[Int]) -> HuffmanEncodeTable
 
-fn count_symbols(Array[Int], Int) -> Array[Int]
+pub fn build_huffman_table(HuffmanWeights) -> Result[HuffmanTable, String]
 
-fn create_default_huffman_weights() -> HuffmanWeights
+pub fn build_huffman_table_from_weights(HuffmanWeights) -> Result[HuffmanTable, String]
 
-fn create_fse_state(FSETable) -> FSEState
+pub fn build_symbol_transform_table(Array[Int], Int, Int) -> Array[SymbolTransform]
 
-fn create_fse_table() -> FSETable
+pub fn calculate_huffman_weights(Array[Int]) -> Array[Int]
 
-fn create_fse_table_with_params(Array[Int], Array[Int], Int, Int, Int) -> FSETable
+pub fn close_bitstream(BitStream) -> Unit
 
-fn create_huffman_table() -> HuffmanTable
+pub fn count_huffman_symbols(Array[Byte], Int) -> Array[Int]
 
-fn create_huffman_table_with_params(Array[Int], Array[Int], Int, HuffmanNode) -> HuffmanTable
+pub fn count_symbols(Array[Int], Int) -> Array[Int]
 
-fn create_huffman_weights(Array[Int]) -> HuffmanWeights
+pub fn create_bitstream() -> BitStream
 
-fn decode_fse_sequences(Bytes, Int, Int, Array[Int], Array[Int], Array[Int]) -> Result[Array[Sequence], String]
+pub fn create_default_huffman_weights() -> HuffmanWeights
 
-fn decode_huffman_literals(Bytes, Int, Int, Array[Int]) -> Result[Array[Byte], String]
+pub fn create_fse_state(FSETable) -> FSEState
 
-fn fse_decode_multiple(FSETable, Bytes, Int, Int) -> Result[(Array[Int], Int), String]
+pub fn create_fse_table() -> FSETable
 
-fn fse_decode_symbol(FSEState, Bytes, Int) -> Result[(Int, Int, Int), String]
+pub fn create_fse_table_with_params(Array[Int], Array[Int], Int, Int, Int) -> FSETable
 
-fn fse_encode_symbols(Array[Int], FSEEncodeTable) -> Bytes
+pub fn create_huffman_bit_reader(Bytes) -> HuffmanBitReader
 
-fn huffman_decode_multiple(HuffmanTable, Bytes, Int, Int) -> Result[(Array[Int], Int), String]
+pub fn create_huffman_bit_writer() -> HuffmanBitWriter
 
-fn huffman_decode_symbol(HuffmanTable, Bytes, Int) -> Result[(Int, Int), String]
+pub fn create_huffman_table() -> HuffmanTable
 
-fn huffman_encode_literals(Array[Byte], HuffmanEncodeTable) -> Bytes
+pub fn create_huffman_table_with_params(Array[Int], Array[Int], Int, HuffmanTreeNode) -> HuffmanTable
 
-fn init_fse_state(FSEState, Int) -> FSEState
+pub fn create_huffman_weights(Array[Int]) -> HuffmanWeights
 
-fn make_sequence(Int, Int, Int) -> Sequence
+pub fn debug_fse_decode_sequences(Bytes, Int, Int, Array[Int], Array[Int], Array[Int]) -> Unit
 
-fn normalize_counts(Array[Int], Int) -> Array[Int]
+pub fn decode_fse_sequences(Bytes, Int, Int, Array[Int], Array[Int], Array[Int]) -> Result[Array[Sequence], String]
 
-fn parse_fse_table_header(Bytes, Int) -> Result[(Array[Int], Int, Int), String]
+pub fn decode_fse_sequences_with_tables(Bytes, Int, Int, FSECTable, FSECTable, FSECTable) -> Result[Array[Sequence], String]
 
-fn parse_huffman_weights(Bytes, Int, Int) -> Result[(HuffmanWeights, Int), String]
+pub fn decode_huffman_literals(Bytes, Int, Int, Array[Int]) -> Result[Array[Byte], String]
 
-fn test_basic_fse() -> Bool
+pub fn decode_ll(Int, Int) -> Int
 
-fn test_basic_huffman() -> Bool
+pub fn decode_ml(Int, Int) -> Int
+
+pub fn decode_of(Int, Int) -> Int
+
+pub fn demo_huffman_encoding() -> Unit
+
+pub fn encode_ll(Int) -> (Int, Int)
+
+pub fn encode_ml(Int) -> (Int, Int)
+
+pub fn encode_of(Int) -> (Int, Int)
+
+pub fn encode_symbol_fse(UInt64, Int, FSECTable, BitStream) -> UInt64
+
+pub fn finish_bit_writer(HuffmanBitWriter) -> Bytes
+
+pub fn flush_bit_writer(HuffmanBitWriter) -> HuffmanBitWriter
+
+pub fn flush_bits(BitStream) -> Unit
+
+pub fn flush_final_state(BitStream, UInt64, Int) -> Unit
+
+pub fn fse_decode_multiple(FSETable, Bytes, Int, Int) -> Result[(Array[Int], Int), String]
+
+pub fn fse_decode_symbol(FSEState, Bytes, Int) -> Result[(Int, Int, Int), String]
+
+pub fn fse_encode_complete(Array[Int], Int, Int) -> Result[Bytes, String]
+
+pub fn fse_encode_complete_tans(Array[Int], Int, Int) -> Result[Bytes, String]
+
+pub fn fse_encode_sequence(Array[Int], FSECTable, BitStream) -> Result[UInt64, String]
+
+pub fn fse_encode_symbols(Array[Int], FSEEncodeTable) -> Bytes
+
+pub fn get_bitstream_pos(BitStream) -> Int
+
+pub fn get_buffer_length(BitStream) -> Int
+
+pub fn get_bytes(BitStream) -> Bytes
+
+pub fn get_ll_bits(Int) -> Int
+
+pub fn get_ml_bits(Int) -> Int
+
+pub fn get_of_bits(Int) -> Int
+
+pub fn huffman_decode(Bytes, HuffmanEncodeTable, Int) -> Result[Array[Byte], String]
+
+pub fn huffman_decode_literals(Bytes, HuffmanEncodeTable, Int) -> Result[Array[Byte], String]
+
+pub fn huffman_decode_multiple(HuffmanTable, Bytes, Int, Int) -> Result[(Array[Int], Int), String]
+
+pub fn huffman_decode_symbol(HuffmanTable, Bytes, Int) -> Result[(Int, Int), String]
+
+pub fn huffman_encode(Array[Byte]) -> Result[Bytes, String]
+
+pub fn huffman_encode_complete(Array[Byte], Int) -> Result[Bytes, String]
+
+pub fn huffman_encode_literals(Array[Byte], HuffmanEncodeTable) -> Bytes
+
+pub fn huffman_encode_with_table(Array[Byte], HuffmanEncodeTable) -> Bytes
+
+pub fn init_fse_cstate(FSECTable) -> UInt64
+
+pub fn init_fse_cstate_with_symbol(FSECTable, Int) -> UInt64
+
+pub fn init_fse_state(FSEState, Int) -> FSEState
+
+pub fn make_sequence(Int, Int, Int) -> Sequence
+
+pub fn normalize_counts(Array[Int], Int) -> Array[Int]
+
+pub let of_base : Array[Int]
+
+pub let of_bits : Array[Int]
+
+pub fn parse_fse_table_header(Bytes, Int) -> Result[(Array[Int], Int, Int), String]
+
+pub fn parse_huffman_weights(Bytes, Int, Int) -> Result[(HuffmanWeights, Int), String]
+
+pub fn read_bits(HuffmanBitReader, Int) -> Result[(UInt64, HuffmanBitReader), String]
+
+pub fn serialize_fse_table(Array[Int], Int) -> Bytes
+
+pub fn serialize_huffman_weights(Array[Int]) -> Bytes
+
+pub fn test_basic_fse() -> Bool
+
+pub fn test_basic_huffman() -> Bool
+
+pub fn test_huffman_compression(String, Array[Byte]) -> Result[Bool, String]
+
+pub fn test_huffman_encoder() -> Bool
+
+pub fn test_huffman_roundtrip() -> Result[Bool, String]
+
+pub fn update_fse_state(UInt64, Int, FSECTable) -> UInt64
+
+pub fn write_bits(HuffmanBitWriter, UInt64, Int) -> HuffmanBitWriter
 
 // Errors
 
 // Types and methods
+pub struct BitStream {
+  buffer : Array[Byte]
+  mut bit_container : UInt64
+  mut bit_pos : Int
+}
+
+pub struct FSECTable {
+  symbol_tt : Array[SymbolTransform]
+  state_table : Array[UInt16]
+  symbol_table : Array[Int]
+  table_log : Int
+  normalized : Array[Int]
+  max_symbol : Int
+}
+
 pub struct FSEEncodeTable {
   state_table : Array[Int]
   symbol_table : Array[Int]
+  num_bits_table : Array[Int]
+  next_state_table : Array[Array[Int]]
   table_log : Int
   normalized_counts : Array[Int]
+  max_symbol : Int
 }
 
 pub struct FSEState {
   state : Int
   table : FSETable
 }
-fn FSEState::default() -> Self // from trait `Default`
-impl Default for FSEState
+pub impl Default for FSEState
 
 pub struct FSETable {
   symbols : Array[Int]
@@ -84,11 +199,22 @@ pub struct FSETable {
   max_symbol : Int
   total_count : Int
 }
-fn FSETable::default() -> Self // from trait `Default`
-impl Default for FSETable
+pub impl Default for FSETable
+
+pub struct HuffmanBitReader {
+  data : Bytes
+  byte_pos : Int
+  bit_pos : Int
+}
+
+pub struct HuffmanBitWriter {
+  buffer : Array[Byte]
+  current_byte : Byte
+  bit_position : Int
+}
 
 pub struct HuffmanCode {
-  code : Int
+  code : UInt64
   length : Int
 }
 
@@ -109,21 +235,28 @@ pub struct HuffmanTable {
   root : HuffmanNode
 }
 
+pub enum HuffmanTreeNode {
+  Leaf(Int, Int)
+  Internal(HuffmanTreeNode, HuffmanTreeNode, Int)
+}
+
 pub struct HuffmanWeights {
   weights : Array[Int]
   count : Int
 }
-fn HuffmanWeights::output(Self, &Logger) -> Unit // from trait `Show`
-fn HuffmanWeights::to_string(Self) -> String // from trait `Show`
-impl Show for HuffmanWeights
+pub impl Show for HuffmanWeights
 
 pub struct Sequence {
   literal_length : Int
   match_length : Int
   offset : Int
 }
-fn Sequence::default() -> Self // from trait `Default`
-impl Default for Sequence
+pub impl Default for Sequence
+
+pub struct SymbolTransform {
+  delta_nb_bits : Int
+  delta_find_state : Int
+}
 
 // Type aliases
 

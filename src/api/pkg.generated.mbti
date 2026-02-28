@@ -1,34 +1,44 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "Ronlands/moonbit_zstd/api"
 
+import(
+  "Ronlands/moonbit_zstd/decoder"
+)
+
 // Values
-fn analyze_data_integrity(Bytes) -> DataIntegrityAnalysis
+pub fn analyze_data_integrity(Bytes) -> DataIntegrityAnalysis
 
-fn analyze_file(Bytes) -> ZSTDFileAnalysis
+pub fn analyze_file(Bytes) -> ZSTDFileAnalysis
 
-fn compress(Bytes) -> Bytes
+pub fn compress(Bytes) -> Bytes
 
-fn compress_advanced(Bytes, CompressionMethod, Int) -> Bytes
+pub fn compress_advanced(Bytes, CompressionMethod, Int) -> Bytes
 
-fn compress_as_compressed(Bytes, Int) -> Bytes
+pub fn compress_as_compressed(Bytes, Int) -> Bytes
 
-fn compress_as_raw(Bytes, Int) -> Bytes
+pub fn compress_as_raw(Bytes, Int) -> Bytes
 
-fn compress_as_rle(Bytes, Int) -> Bytes
+pub fn compress_as_rle(Bytes, Int) -> Bytes
 
-fn compress_with_level(Bytes, CompressionLevel) -> Bytes
+pub fn compress_with_level(Bytes, CompressionLevel) -> Bytes
 
-fn compress_with_level_int(Bytes, Int) -> Bytes
+pub fn compress_with_level_int(Bytes, Int) -> Bytes
 
-fn decompress(Bytes) -> Bytes
+pub fn create_sliding_window_decoder(Int) -> SlidingWindowDecoder
 
-fn estimate_compressed_size(Bytes, CompressionLevel) -> Int
+pub fn decompress(Bytes) -> Bytes
 
-fn is_zstd_format(Bytes) -> Bool
+pub fn decompress_with_sliding_window(SlidingWindowDecoder, Bytes) -> Result[Bytes, String]
 
-fn run_all_basic_tests() -> Bool
+pub fn estimate_compressed_size(Bytes, CompressionLevel) -> Int
 
-fn run_all_compatibility_tests() -> Bool
+pub fn is_zstd_format(Bytes) -> Bool
+
+pub fn reset_sliding_window_decoder(SlidingWindowDecoder) -> Unit
+
+pub fn run_all_basic_tests() -> Bool
+
+pub fn run_all_compatibility_tests() -> Bool
 
 // Errors
 
@@ -46,15 +56,18 @@ pub enum CompressionMethod {
   RLE
   Compressed
 }
-fn CompressionMethod::output(Self, &Logger) -> Unit // from trait `Show`
-fn CompressionMethod::to_string(Self) -> String // from trait `Show`
-impl Show for CompressionMethod
+pub impl Show for CompressionMethod
 
 pub struct DataIntegrityAnalysis {
   truncation_indicators : Int
   data_density : Double
   structure_consistency : Double
   entropy_level : Double
+}
+
+pub struct SlidingWindowDecoder {
+  mut context : @decoder.DecoderContext
+  window_size : Int
 }
 
 pub struct ZSTDFileAnalysis {

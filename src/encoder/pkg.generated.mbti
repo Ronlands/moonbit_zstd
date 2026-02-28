@@ -6,29 +6,29 @@ import(
 )
 
 // Values
-fn compress(Bytes) -> Result[Bytes, @core.ZSTDError]
+pub fn compress(Bytes) -> Result[Bytes, @core.ZSTDError]
 
-fn compress_as_compressed_block(Bytes, CompressionConfig) -> Result[Bytes, String]
+pub fn compress_as_compressed_block(Bytes, CompressionConfig) -> Result[Bytes, String]
 
-fn compress_as_raw_block(Bytes, CompressionConfig) -> Result[Bytes, String]
+pub fn compress_as_raw_block(Bytes, CompressionConfig) -> Result[Bytes, String]
 
-fn compress_as_rle_block(Bytes, CompressionConfig) -> Result[Bytes, String]
+pub fn compress_as_rle_block(Bytes, CompressionConfig) -> Result[Bytes, String]
 
-fn compress_data(Bytes, CompressionConfig) -> Result[Bytes, String]
+pub fn compress_data(Bytes, CompressionConfig) -> Result[Bytes, String]
 
-fn compress_data_with_dict(Bytes, CompressionConfig, Bytes, UInt) -> Result[Bytes, String]
+pub fn compress_data_with_dict(Bytes, CompressionConfig, Bytes, UInt) -> Result[Bytes, String]
 
-fn compress_with_context(Compressor, Bytes) -> Result[(Compressor, Bytes), @core.ZSTDError]
+pub fn compress_with_context(Compressor, Bytes) -> Result[(Compressor, Bytes), @core.ZSTDError]
 
-fn create_compression_context(CompressionConfig) -> CompressionContext
+pub fn create_compression_context(CompressionConfig) -> CompressionContext
 
-fn create_config_with_level(Int) -> CompressionConfig
+pub fn create_config_with_level(Int) -> CompressionConfig
 
-fn create_default_config() -> CompressionConfig
+pub fn create_default_config() -> CompressionConfig
 
-fn estimate_compressed_size(Bytes, CompressionConfig) -> Int
+pub fn estimate_compressed_size(Bytes, CompressionConfig) -> Int
 
-fn new_compressor() -> Compressor
+pub fn new_compressor() -> Compressor
 
 // Errors
 

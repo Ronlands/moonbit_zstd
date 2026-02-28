@@ -6,115 +6,125 @@ import(
 )
 
 // Values
-fn analyze_file(Bytes) -> ZSTDFileAnalysis
+pub fn analyze_file(Bytes) -> ZSTDFileAnalysis
 
-fn build_fse_table(Array[Int], Int, Int) -> Result[FSETable, String]
+pub fn build_fse_table(Array[Int], Int, Int) -> Result[FSETable, String]
 
-fn build_huffman_table(Array[Int], Int) -> Result[HuffmanTable, String]
+pub fn build_huffman_table(Array[Int], Int) -> Result[HuffmanTable, String]
 
-fn build_huffman_table_from_weights(HuffmanWeights) -> Result[HuffmanTable, String]
+pub fn build_huffman_table_from_weights(HuffmanWeights) -> Result[HuffmanTable, String]
 
-fn calculate_window_size(Byte) -> Int
+pub fn calculate_window_size(Byte) -> Int
 
-fn copy_match(@core.WindowBuffer, Int, Int) -> Result[Bytes, String]
+pub fn copy_match(@core.WindowBuffer, Int, Int) -> Result[Bytes, String]
 
-fn create_decompressor(Int) -> Decompressor
+pub fn create_decoder_context(Int) -> DecoderContext
 
-fn create_decompressor_with_dict(Int, Bytes) -> Decompressor
+pub fn create_decompressor(Int) -> Decompressor
 
-fn create_fse_decoder(FSETable, Int) -> FSEDecoder
+pub fn create_decompressor_with_dict(Int, Bytes) -> Decompressor
 
-fn create_huffman_decoder(HuffmanTable) -> HuffmanDecoder
+pub fn create_fse_decoder(FSETable, Int) -> FSEDecoder
 
-fn decode_fse_sequence(FSETable, Bytes, Int, Int) -> Result[Array[Int], String]
+pub fn create_huffman_decoder(HuffmanTable) -> HuffmanDecoder
 
-fn decode_fse_symbol(FSEDecoder, Bytes, Int) -> Result[(Int, FSEDecoder, Int), String]
+pub fn decode_fse_sequence(FSETable, Bytes, Int, Int) -> Result[Array[Int], String]
 
-fn decode_huffman_stream(HuffmanTable, Bytes, Int, Int) -> Result[Bytes, String]
+pub fn decode_fse_symbol(FSEDecoder, Bytes, Int) -> Result[(Int, FSEDecoder, Int), String]
 
-fn decode_huffman_symbol(HuffmanDecoder, Bytes, Int) -> Result[(Byte, HuffmanDecoder, Int), String]
+pub fn decode_huffman_stream(HuffmanTable, Bytes, Int, Int) -> Result[Bytes, String]
 
-fn decompress(Bytes) -> Result[Bytes, @core.ZSTDError]
+pub fn decode_huffman_symbol(HuffmanDecoder, Bytes, Int) -> Result[(Byte, HuffmanDecoder, Int), String]
 
-fn decompress_block(Bytes, Int) -> Result[(Bytes, Int, Bool), String]
+pub fn decompress(Bytes) -> Result[Bytes, @core.ZSTDError]
 
-fn decompress_with_decompressor(@core.DecompressionContext, Bytes) -> Result[(@core.DecompressionContext, Bytes), @core.ZSTDError]
+pub fn decompress_block(Bytes, Int) -> Result[(Bytes, Int, Bool), String]
 
-fn decompress_zstd_data(Bytes) -> Result[Bytes, String]
+pub fn decompress_block_with_context(DecoderContext, Bytes, Int) -> Result[(Bytes, Int, Bool), String]
 
-fn decompress_zstd_data_with_dict(Bytes, Bytes) -> Result[Bytes, String]
+pub fn decompress_with_decompressor(@core.DecompressionContext, Bytes) -> Result[(@core.DecompressionContext, Bytes), @core.ZSTDError]
 
-fn get_available_history_size(@core.WindowBuffer) -> Int
+pub fn decompress_zstd_data(Bytes) -> Result[Bytes, String]
 
-fn get_content_checksum(ZSTDFileAnalysis) -> Bool
+pub fn decompress_zstd_data_with_dict(Bytes, Bytes) -> Result[Bytes, String]
 
-fn get_error_message(ZSTDFileAnalysis) -> String
+pub fn get_available_history_size(@core.WindowBuffer) -> Int
 
-fn get_file_size(ZSTDFileAnalysis) -> Int
+pub fn get_content_checksum(ZSTDFileAnalysis) -> Bool
 
-fn get_first_block_size(ZSTDFileAnalysis) -> Int
+pub fn get_error_message(ZSTDFileAnalysis) -> String
 
-fn get_first_block_type(ZSTDFileAnalysis) -> String
+pub fn get_file_size(ZSTDFileAnalysis) -> Int
 
-fn get_frame_content_size(ZSTDFileAnalysis) -> Int
+pub fn get_first_block_size(ZSTDFileAnalysis) -> Int
 
-fn get_is_valid(ZSTDFileAnalysis) -> Bool
+pub fn get_first_block_type(ZSTDFileAnalysis) -> String
 
-fn get_last_block(ZSTDFileAnalysis) -> Bool
+pub fn get_frame_content_size(ZSTDFileAnalysis) -> Int
 
-fn get_magic_number(ZSTDFileAnalysis) -> UInt
+pub fn get_is_valid(ZSTDFileAnalysis) -> Bool
 
-fn get_predefined_fse_table(String) -> Result[FSETable, String]
+pub fn get_last_block(ZSTDFileAnalysis) -> Bool
 
-fn get_single_segment(ZSTDFileAnalysis) -> Bool
+pub fn get_magic_number(ZSTDFileAnalysis) -> UInt
 
-fn get_total_blocks(ZSTDFileAnalysis) -> Int
+pub fn get_predefined_fse_table(String) -> Result[FSETable, String]
 
-fn get_window_info(@core.WindowBuffer) -> String
+pub fn get_single_segment(ZSTDFileAnalysis) -> Bool
 
-fn get_window_size(ZSTDFileAnalysis) -> Int
+pub fn get_total_blocks(ZSTDFileAnalysis) -> Int
 
-fn is_zstd_file(Bytes) -> Bool
+pub fn get_window_info(@core.WindowBuffer) -> String
 
-fn new_decompressor() -> @core.DecompressionContext
+pub fn get_window_size(ZSTDFileAnalysis) -> Int
 
-fn parse_formatted_dictionary(Bytes) -> Result[@core.Dictionary, String]
+pub fn is_zstd_file(Bytes) -> Bool
 
-fn parse_frame_header(Bytes) -> Result[(@core.FrameHeader, Int), @core.ZSTDError]
+pub fn new_decompressor() -> @core.DecompressionContext
 
-fn parse_frame_header_simple(Bytes) -> (Int, Int)
+pub fn parse_formatted_dictionary(Bytes) -> Result[@core.Dictionary, String]
 
-fn parse_fse_header(Bytes, Int) -> Result[(Array[Int], Int, Int), String]
+pub fn parse_frame_header(Bytes) -> Result[(@core.FrameHeader, Int), @core.ZSTDError]
 
-fn parse_huffman_weights(Bytes, Int, Int) -> Result[(HuffmanWeights, Int), String]
+pub fn parse_frame_header_simple(Bytes) -> (Int, Int)
 
-fn preload_dictionary(@core.WindowBuffer) -> Unit
+pub fn parse_fse_header(Bytes, Int) -> Result[(Array[Int], Int, Int), String]
 
-fn print_fse_table_info(FSETable) -> String
+pub fn parse_huffman_weights(Bytes, Int, Int) -> Result[(HuffmanWeights, Int), String]
 
-fn print_huffman_table_info(HuffmanTable) -> String
+pub fn preload_dictionary(@core.WindowBuffer) -> Unit
 
-fn read_from_window(@core.WindowBuffer, Int, Int) -> Result[Bytes, String]
+pub fn print_fse_table_info(FSETable) -> String
 
-fn reset_decompressor(Decompressor) -> Decompressor
+pub fn print_huffman_table_info(HuffmanTable) -> String
 
-fn reset_window(@core.WindowBuffer) -> Unit
+pub fn read_from_window(@core.WindowBuffer, Int, Int) -> Result[Bytes, String]
 
-fn validate_dictionary(@core.Dictionary) -> Bool
+pub fn reset_decompressor(Decompressor) -> Decompressor
 
-fn validate_file(Bytes) -> (Bool, String)
+pub fn reset_window(@core.WindowBuffer) -> Unit
 
-fn validate_frame_header(@core.FrameHeader) -> Bool
+pub fn validate_dictionary(@core.Dictionary) -> Bool
 
-fn validate_fse_table(FSETable) -> Bool
+pub fn validate_file(Bytes) -> (Bool, String)
 
-fn validate_huffman_table(HuffmanTable) -> Bool
+pub fn validate_frame_header(@core.FrameHeader) -> Bool
 
-fn write_to_window(@core.WindowBuffer, Bytes) -> Unit
+pub fn validate_fse_table(FSETable) -> Bool
+
+pub fn validate_huffman_table(HuffmanTable) -> Bool
+
+pub fn write_to_window(@core.WindowBuffer, Bytes) -> Unit
 
 // Errors
 
 // Types and methods
+pub struct DecoderContext {
+  window : @core.WindowBuffer
+  window_size : Int
+  mut total_decoded : Int
+}
+
 pub struct Decompressor {
   window_size : Int
   context : @core.DecompressionContext
@@ -175,11 +185,11 @@ pub struct ZSTDFileAnalysis {
 }
 
 // Type aliases
-pub typealias @core.Dictionary as Dictionary
+pub using @core {type Dictionary}
 
-pub typealias @core.DictionaryType as DictionaryType
+pub using @core {type DictionaryType}
 
-pub typealias @core.WindowBuffer as WindowBuffer
+pub using @core {type WindowBuffer}
 
 // Traits
 

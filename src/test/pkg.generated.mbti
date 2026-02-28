@@ -2,17 +2,37 @@
 package "Ronlands/moonbit_zstd/test"
 
 // Values
-fn repeat_string(String, Int) -> String
+pub fn diagnose_of_base_table() -> Unit
 
-fn run_all_basic_tests() -> Bool
+pub fn repeat_string(String, Int) -> String
 
-fn run_all_compatibility_tests() -> Bool
+pub fn run_all_basic_tests() -> Bool
 
-fn run_official_test_suite() -> Unit
+pub fn run_all_compatibility_tests() -> Bool
 
-fn run_test_suite(String, Array[(String, Bool)]) -> Bool
+pub fn run_all_dictionary_tests() -> Bool
 
-fn verify_data_equal(Bytes, Bytes) -> Bool
+pub fn run_all_encoding_tests() -> Unit
+
+pub fn run_official_test_suite() -> Unit
+
+pub fn run_test_suite(String, Array[(String, Bool)]) -> Bool
+
+pub fn save_bytes_to_file(Bytes, String) -> Unit
+
+pub fn save_compressed_for_official_tool() -> Unit
+
+pub fn test_encode_ll() -> Bool
+
+pub fn test_encode_ml() -> Bool
+
+pub fn test_encode_of() -> Bool
+
+pub fn test_save_and_verify() -> Unit
+
+pub fn test_sequence_roundtrip() -> Bool
+
+pub fn verify_data_equal(Bytes, Bytes) -> Bool
 
 // Errors
 

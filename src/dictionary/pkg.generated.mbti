@@ -2,29 +2,33 @@
 package "Ronlands/moonbit_zstd/dictionary"
 
 // Values
-fn build_dictionary(Array[Bytes], Int) -> Result[Dictionary, String]
+pub fn build_dictionary(Array[Bytes], Int) -> Result[Dictionary, String]
 
-fn build_dictionary_with_cover(Array[Bytes], Int, Int) -> Result[Dictionary, String]
+pub fn build_dictionary_with_cover(Array[Bytes], Int, Int) -> Result[Dictionary, String]
 
-fn build_optimized_dictionary(Array[Bytes], Int) -> Result[Dictionary, String]
+pub fn build_optimized_dictionary(Array[Bytes], Int) -> Result[Dictionary, String]
 
-fn calculate_dictionary_benefit(Bytes, Dictionary) -> Double
+pub fn calculate_dictionary_benefit(Bytes, Dictionary) -> Double
 
-fn compress_with_dictionary(Bytes, Dictionary) -> Result[Bytes, String]
+pub fn calculate_dictionary_benefit_detailed(Bytes, Dictionary) -> Result[DictionaryBenefitStats, String]
 
-fn create_raw_dictionary(Bytes, UInt) -> Dictionary
+pub fn compress_with_dictionary(Bytes, Dictionary) -> Result[Bytes, String]
 
-fn decompress_with_dictionary(Bytes, Dictionary) -> Result[Bytes, String]
+pub fn create_raw_dictionary(Bytes, UInt) -> Dictionary
 
-fn get_dictionary_stats(Dictionary) -> String
+pub fn decompress_with_dictionary(Bytes, Dictionary) -> Result[Bytes, String]
 
-fn merge_dictionaries(Array[Dictionary], Int) -> Result[Dictionary, String]
+pub fn format_benefit_stats(DictionaryBenefitStats) -> String
 
-fn parse_zstd_dictionary(Bytes) -> Result[Dictionary, String]
+pub fn get_dictionary_stats(Dictionary) -> String
 
-fn save_zstd_dictionary(Dictionary) -> Bytes
+pub fn merge_dictionaries(Array[Dictionary], Int) -> Result[Dictionary, String]
 
-fn validate_dictionary(Dictionary) -> Bool
+pub fn parse_zstd_dictionary(Bytes) -> Result[Dictionary, String]
+
+pub fn save_zstd_dictionary(Dictionary) -> Bytes
+
+pub fn validate_dictionary(Dictionary) -> Bool
 
 // Errors
 
@@ -33,6 +37,17 @@ pub struct Dictionary {
   dict_type : DictionaryType
   dict_id : UInt
   content : Bytes
+}
+
+pub struct DictionaryBenefitStats {
+  original_size : Int
+  dict_size : Int
+  compressed_size_without_dict : Int
+  compressed_size_with_dict : Int
+  saved_bytes : Int
+  compression_ratio_without : Double
+  compression_ratio_with : Double
+  benefit_percentage : Double
 }
 
 pub enum DictionaryType {
