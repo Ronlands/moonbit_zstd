@@ -1,38 +1,20 @@
 /// 保存压缩数据到文件，用官方 zstd 工具验证
 
-/// 转换字节到十六进制字符串
-fn byte_to_hex(byte: Int) -> String {
-  let hex_chars = "0123456789abcdef"
-  let high = (byte >> 4) & 0xF
-  let low = byte & 0xF
-  hex_chars.code_unit_at(high).to_string() + hex_chars.code_unit_at(low).to_string()
-}
-
-/// 保存字节数据到文件（生成 PowerShell 脚本到独立的 .ps1 文件）
+/// 保存字节数据到文件（生成 PowerShell 脚本）
 pub fn save_bytes_to_file(data: Bytes, filename: String) -> Unit {
   println("正在生成文件: \{filename}")
   println("数据大小: \{data.length()} bytes")
-  
-  // 生成 PowerShell 脚本内容
-  let mut script = "$bytes = [byte[]]@(\n"
-  
+
+  // Output each byte as a decimal value for PowerShell [byte[]]
+  let mut script = "$bytes = [byte[]]@("
   for i = 0; i < data.length(); i = i + 1 {
-    if i > 0 {
-      script = script + ","
-    }
-    if i % 16 == 0 {
-      script = script + "\n  "
-    }
-    script = script + "0x" + byte_to_hex(data[i].to_int())
+    if i > 0 { script = script + "," }
+    if i % 16 == 0 { script = script + "\n  " }
+    script = script + data[i].to_int().to_string()
   }
-  
   script = script + "\n)\n"
   script = script + "[System.IO.File]::WriteAllBytes('\{filename}', $bytes)\n"
-  script = script + "Write-Host '✓ 文件已创建: \{filename}'\n"
-  
-  // 输出脚本内容，用户可以运行：
-  // moon run src/test -g save_compressed > create_file.ps1
-  // .\create_file.ps1
+  script = script + "Write-Host '文件已创建: \{filename}'\n"
   println(script)
 }
 

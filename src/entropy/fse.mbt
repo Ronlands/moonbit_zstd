@@ -401,22 +401,29 @@ fn build_fse_dtable(normalized: Array[Int], table_log: Int) -> Array[FSEDecodeEn
   let max_symbol = normalized.length() - 1
   let table_size = 1 << table_log
   let dtable: Array[FSEDecodeEntry] = Array::make(table_size, FSEDecodeEntry::{ symbol: 0, nb_bits: 0, new_state_base: 0 })
-  
-  // 第一步：构建 table_symbol (spread algorithm) - 与编码器相同
+
+  // Official ZSTD spread algorithm:
+  // 1. Place -1 (less-than-1) symbols at high threshold positions
+  // 2. Spread remaining symbols using the step algorithm
   let table_symbol: Array[Int] = Array::make(table_size, 0)
-  let mut position = 0
+  let mut high_threshold = table_size - 1
+  for symbol = 0; symbol < normalized.length(); symbol = symbol + 1 {
+    if normalized[symbol] == -1 {
+      table_symbol[high_threshold] = symbol
+      high_threshold = high_threshold - 1
+    }
+  }
+
   let step = (table_size >> 1) + (table_size >> 3) + 3
   let mask = table_size - 1
-  
+  let mut position = 0
   for symbol = 0; symbol < normalized.length(); symbol = symbol + 1 {
     let freq = normalized[symbol]
-    // ✅ 频率 -1 表示低频符号（频率为 1），频率 0 表示未使用符号
-    if freq == 0 { continue }
-    
-    let actual_freq = if freq == -1 { 1 } else { freq }
-    for _i = 0; _i < actual_freq; _i = _i + 1 {
+    if freq <= 0 { continue }
+    for _i = 0; _i < freq; _i = _i + 1 {
       table_symbol[position] = symbol
       position = (position + step) & mask
+      while position > high_threshold { position = (position + step) & mask }
     }
   }
   
@@ -597,22 +604,27 @@ fn build_state_table(normalized: Array[Int], table_log: Int) -> (Array[UInt16], 
   let table_size = 1 << table_log
   let state_table: Array[UInt16] = Array::make(table_size, 0)
   let symbol_table: Array[Int] = Array::make(table_size, 0)
-  
-  // 第一步：构建tableSymbol - 每个位置对应的符号
+
+  // Official ZSTD spread: -1 symbols at high threshold, others via step
   let table_symbol: Array[Int] = Array::make(table_size, 0)
-  let mut position = 0
+  let mut high_threshold = table_size - 1
+  for symbol = 0; symbol < normalized.length(); symbol = symbol + 1 {
+    if normalized[symbol] == -1 {
+      table_symbol[high_threshold] = symbol
+      high_threshold = high_threshold - 1
+    }
+  }
+
   let step = (table_size >> 1) + (table_size >> 3) + 3
   let mask = table_size - 1
-  
+  let mut position = 0
   for symbol = 0; symbol < normalized.length(); symbol = symbol + 1 {
     let freq = normalized[symbol]
-    // ✅ 频率 -1 表示低频符号（频率为 1），频率 0 表示未使用符号
-    if freq == 0 { continue }
-    
-    let actual_freq = if freq == -1 { 1 } else { freq }
-    for _i = 0; _i < actual_freq; _i = _i + 1 {
+    if freq <= 0 { continue }
+    for _i = 0; _i < freq; _i = _i + 1 {
       table_symbol[position] = symbol
       position = (position + step) & mask
+      while position > high_threshold { position = (position + step) & mask }
     }
   }
   
@@ -702,18 +714,16 @@ pub fn normalize_counts(counts: Array[Int], table_log: Int) -> Array[Int] {
   let normalized: Array[Int] = []
   let mut distributed = 0
   
-  // 归一化每个符号的频率（ZSTD兼容算法）
   for i = 0; i < counts.length(); i = i + 1 {
     if counts[i] == 0 {
       normalized.push(0)
+    } else if counts[i] == -1 {
+      // Preserve -1 (less-than-1 probability) — critical for official ZSTD table spread
+      normalized.push(-1)
+      distributed = distributed + 1
     } else {
-      // 对于低频符号（标记为-1），当作频率1处理
-      let actual_count = if counts[i] == -1 { 1 } else { counts[i] }
-
-      // ZSTD标准算法：norm = (count * tableSize) / total
-      let norm = (actual_count * table_size) / total
-      let final_norm = if norm == 0 && actual_count > 0 { 1 } else { norm }
-
+      let norm = (counts[i] * table_size) / total
+      let final_norm = if norm == 0 && counts[i] > 0 { 1 } else { norm }
       normalized.push(final_norm)
       distributed = distributed + final_norm
     }
@@ -1422,7 +1432,7 @@ fn decode_fse_sequences_original(
   let mut of_state = of_s
   let mut ml_state = ml_s
 
-  // Decode sequences (forward iteration)
+  // Decode sequences (forward iteration, matching official ZSTD_decodeSequence_body)
   let sequences: Array[Sequence] = []
   for seq_idx = 0; seq_idx < num_sequences; seq_idx = seq_idx + 1 {
     // 1. Peek symbols from current states
@@ -1437,38 +1447,39 @@ fn decode_fse_sequences_original(
       _ => return Err("FSE状态越界错误")
     }
 
-    // 2. Base values + extra bits: LL → ML → OF (reverse of encoder's OF→ML→LL)
-    let mut final_ll = decode_ll(ll_code, 0)
-    let mut final_ml = decode_ml(ml_code, 0)
+    // 2. Read extra bits: OF, ML, (reload), LL — official order
     let mut final_of = decode_of(of_code, 0)
+    let of_nb = get_of_bits(of_code)
+    let (bs_a, of_ex) = if of_nb > 0 { read_bits_uint64(current_bs, of_nb) } else { (current_bs, 0UL) }
+    final_of = final_of + of_ex.to_int()
 
-    let ll_nb = get_ll_bits(ll_code)
-    let (bs_a, ll_ex) = if ll_nb > 0 { read_bits_uint64(current_bs, ll_nb) } else { (current_bs, 0UL) }
-    final_ll = final_ll + ll_ex.to_int()
-
+    let mut final_ml = decode_ml(ml_code, 0)
     let ml_nb = get_ml_bits(ml_code)
     let (bs_b, ml_ex) = if ml_nb > 0 { read_bits_uint64(bs_a, ml_nb) } else { (bs_a, 0UL) }
     final_ml = final_ml + ml_ex.to_int()
 
-    let of_nb = get_of_bits(of_code)
-    let (bs_c, of_ex) = if of_nb > 0 { read_bits_uint64(bs_b, of_nb) } else { (bs_b, 0UL) }
-    final_of = final_of + of_ex.to_int()
+    // Reload between ML and LL extras (official behavior for 64-bit)
+    reload_dstream(bs_b)
+
+    let mut final_ll = decode_ll(ll_code, 0)
+    let ll_nb = get_ll_bits(ll_code)
+    let (bs_c, ll_ex) = if ll_nb > 0 { read_bits_uint64(bs_b, ll_nb) } else { (bs_b, 0UL) }
+    final_ll = final_ll + ll_ex.to_int()
 
     sequences.push(make_sequence(final_ll, final_ml, final_of))
 
-    // 3. State updates (not needed for last sequence)
+    // 3. State updates: LL, OF, ML — official order (not needed for last sequence)
     if seq_idx < num_sequences - 1 {
-      reload_dstream(bs_c)
-
       let (bs1, ll_st) = read_bits_uint64(bs_c, ll_entry.nb_bits)
       ll_state = (ll_entry.new_state_base + ll_st.to_int() + 64).to_uint64()
 
-      let (bs2, ml_st) = read_bits_uint64(bs1, ml_entry.nb_bits)
-      ml_state = (ml_entry.new_state_base + ml_st.to_int() + 64).to_uint64()
-
-      let (bs3, of_st) = read_bits_uint64(bs2, of_entry.nb_bits)
+      let (bs2, of_st) = read_bits_uint64(bs1, of_entry.nb_bits)
       of_state = (of_entry.new_state_base + of_st.to_int() + 32).to_uint64()
 
+      let (bs3, ml_st) = read_bits_uint64(bs2, ml_entry.nb_bits)
+      ml_state = (ml_entry.new_state_base + ml_st.to_int() + 64).to_uint64()
+
+      reload_dstream(bs3)
       current_bs = bs3
     }
   }

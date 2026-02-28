@@ -134,53 +134,51 @@ pub fn create_compression_context(config: CompressionConfig) -> CompressionConte
 // LZ77 Compression / LZ77 压缩
 // ============================================================================
 
-/// Generate sequences using LZ77 matching
-/// Uses single best match strategy: find the longest match and emit one sequence
-/// This avoids multi-sequence FSE encoding complexity while still achieving good compression
+/// Generate sequences using greedy LZ77 matching (multi-sequence)
 fn generate_sequences(data: Bytes, min_match: Int) -> (Array[Sequence], Array[Byte]) {
   let sequences: Array[Sequence] = []
   let literals: Array[Byte] = []
   let hash_table = Array::make(65536, -1)
 
-  // Find the best (longest) match in the data
-  let mut best_pos = -1
-  let mut best_match = Match::{ offset: 0, length: 0 }
-
   let mut pos = 0
+  let mut literal_start = 0
+
   while pos < data.length() {
     let match_result = find_match(data, pos, hash_table, min_match)
 
-    if match_result.length > best_match.length {
-      best_match = match_result
-      best_pos = pos
-    }
+    if match_result.length >= min_match {
+      let literal_length = pos - literal_start
+      for i = literal_start; i < pos; i = i + 1 {
+        literals.push(data[i])
+      }
 
-    if pos + 3 < data.length() {
-      let hash = hash_bytes(data, pos)
-      hash_table[hash] = pos
+      sequences.push(Sequence::{
+        literal_length,
+        match_length: match_result.length,
+        offset: match_result.offset,
+      })
+
+      let mut i = pos
+      while i < pos + match_result.length && i + 3 < data.length() {
+        let hash = hash_bytes(data, i)
+        hash_table[hash] = i
+        i = i + 1
+      }
+
+      pos = pos + match_result.length
+      literal_start = pos
+    } else {
+      if pos + 3 < data.length() {
+        let hash = hash_bytes(data, pos)
+        hash_table[hash] = pos
+      }
+      pos = pos + 1
     }
-    pos = pos + 1
   }
 
-  if best_pos >= 0 && best_match.length >= min_match {
-    // Collect literals before the match
-    for i = 0; i < best_pos; i = i + 1 {
-      literals.push(data[i])
-    }
-
-    // Extend match as far as possible using overlapping copy
-    let match_end = best_pos + best_match.length
-    sequences.push(Sequence::{
-      literal_length: best_pos,
-      match_length: best_match.length,
-      offset: best_match.offset,
-    })
-
-    for i = match_end; i < data.length(); i = i + 1 {
-      literals.push(data[i])
-    }
+  for i = literal_start; i < data.length(); i = i + 1 {
+    literals.push(data[i])
   }
-  // If no match found, sequences is empty → caller falls back to Raw block
 
   (sequences, literals)
 }
@@ -903,8 +901,8 @@ fn extract_sequence_symbols(sequences: Array[Sequence]) -> (Array[Int], Array[In
   (ll_symbols, ml_symbols, of_symbols)
 }
 
-/// 使用预定义 FSE 表编码序列
-/// 严格遵循 ZSTD 参考实现 (zstd_compress_sequences.c) 的编码顺序
+/// Encode sequences using predefined FSE tables
+/// Matches official ZSTD_encodeSequences_body order exactly
 fn encode_sequences_predefined_fse(sequences: Array[Sequence], output: Array[Byte]) -> Result[Unit, String] {
   if sequences.length() == 0 {
     return Ok(())
@@ -932,40 +930,73 @@ fn encode_sequences_predefined_fse(sequences: Array[Sequence], output: Array[Byt
   let bitstream = @zstd_entropy.create_bitstream()
   let last_idx = sequences.length() - 1
 
-  // Init states with the (only) sequence's symbols
-  let ll_state = @zstd_entropy.init_fse_cstate_with_symbol(ll_table, ll_symbols[last_idx])
-  let ml_state = @zstd_entropy.init_fse_cstate_with_symbol(ml_table, ml_symbols[last_idx])
-  let of_state = @zstd_entropy.init_fse_cstate_with_symbol(of_table, of_symbols[last_idx])
+  // Step 1: Init states with seqN-1 (last sequence) symbols
+  let mut ll_state = @zstd_entropy.init_fse_cstate_with_symbol(ll_table, ll_symbols[last_idx])
+  let mut ml_state = @zstd_entropy.init_fse_cstate_with_symbol(ml_table, ml_symbols[last_idx])
+  let mut of_state = @zstd_entropy.init_fse_cstate_with_symbol(of_table, of_symbols[last_idx])
 
-  // Write the sequence's extra bits: OF → ML → LL
-  let seq = sequences[last_idx]
+  // Step 2: Write seqN-1 (last sequence) extras BEFORE the loop: LL, ML, OF
+  let last_seq = sequences[last_idx]
 
-  let (_, of_extra) = @zstd_entropy.encode_of(seq.offset)
-  let of_nbits = @zstd_entropy.get_of_bits(of_symbols[last_idx])
-  if of_nbits > 0 {
-    @zstd_entropy.add_bits(bitstream, of_extra.to_uint64(), of_nbits)
+  let (_, last_ll_extra) = @zstd_entropy.encode_ll(last_seq.literal_length)
+  let last_ll_nbits = @zstd_entropy.get_ll_bits(ll_symbols[last_idx])
+  if last_ll_nbits > 0 {
+    @zstd_entropy.add_bits(bitstream, last_ll_extra.to_uint64(), last_ll_nbits)
   }
 
-  let (_, ml_extra) = @zstd_entropy.encode_ml(seq.match_length)
-  let ml_nbits = @zstd_entropy.get_ml_bits(ml_symbols[last_idx])
-  if ml_nbits > 0 {
-    @zstd_entropy.add_bits(bitstream, ml_extra.to_uint64(), ml_nbits)
+  let (_, last_ml_extra) = @zstd_entropy.encode_ml(last_seq.match_length)
+  let last_ml_nbits = @zstd_entropy.get_ml_bits(ml_symbols[last_idx])
+  if last_ml_nbits > 0 {
+    @zstd_entropy.add_bits(bitstream, last_ml_extra.to_uint64(), last_ml_nbits)
   }
 
-  let (_, ll_extra) = @zstd_entropy.encode_ll(seq.literal_length)
-  let ll_nbits = @zstd_entropy.get_ll_bits(ll_symbols[last_idx])
-  if ll_nbits > 0 {
-    @zstd_entropy.add_bits(bitstream, ll_extra.to_uint64(), ll_nbits)
+  let (_, last_of_extra) = @zstd_entropy.encode_of(last_seq.offset)
+  let last_of_nbits = @zstd_entropy.get_of_bits(of_symbols[last_idx])
+  if last_of_nbits > 0 {
+    @zstd_entropy.add_bits(bitstream, last_of_extra.to_uint64(), last_of_nbits)
   }
 
   @zstd_entropy.flush_bits(bitstream)
 
-  // Flush final states: ML → OF → LL
+  // Step 3: Loop from N-2 down to 0 — encode state transitions + extras
+  let mut n = last_idx - 1
+  while n >= 0 {
+    let seq = sequences[n]
+
+    // State transitions: ML → OF → LL (official order)
+    ml_state = @zstd_entropy.encode_symbol_fse(ml_state, ml_symbols[n], ml_table, bitstream)
+    of_state = @zstd_entropy.encode_symbol_fse(of_state, of_symbols[n], of_table, bitstream)
+    ll_state = @zstd_entropy.encode_symbol_fse(ll_state, ll_symbols[n], ll_table, bitstream)
+
+    // Extra bits: LL, ML, OF (official order)
+    let (_, ll_extra) = @zstd_entropy.encode_ll(seq.literal_length)
+    let ll_nbits = @zstd_entropy.get_ll_bits(ll_symbols[n])
+    if ll_nbits > 0 {
+      @zstd_entropy.add_bits(bitstream, ll_extra.to_uint64(), ll_nbits)
+    }
+
+    let (_, ml_extra) = @zstd_entropy.encode_ml(seq.match_length)
+    let ml_nbits = @zstd_entropy.get_ml_bits(ml_symbols[n])
+    if ml_nbits > 0 {
+      @zstd_entropy.add_bits(bitstream, ml_extra.to_uint64(), ml_nbits)
+    }
+
+    let (_, of_extra) = @zstd_entropy.encode_of(seq.offset)
+    let of_nbits = @zstd_entropy.get_of_bits(of_symbols[n])
+    if of_nbits > 0 {
+      @zstd_entropy.add_bits(bitstream, of_extra.to_uint64(), of_nbits)
+    }
+
+    @zstd_entropy.flush_bits(bitstream)
+    n = n - 1
+  }
+
+  // Step 4: Flush final states: ML → OF → LL (official order)
   @zstd_entropy.flush_final_state(bitstream, ml_state, 6)
   @zstd_entropy.flush_final_state(bitstream, of_state, 5)
   @zstd_entropy.flush_final_state(bitstream, ll_state, 6)
 
-  // Step 5: 关闭位流（添加 padding bit 并刷新）
+  // Step 5: Close bitstream (padding bit)
   @zstd_entropy.close_bitstream(bitstream)
 
   let encoded = @zstd_entropy.get_bytes(bitstream)
