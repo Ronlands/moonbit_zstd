@@ -1,14 +1,20 @@
-/// ZSTD API Module
-
-/// 压缩级别枚举
+/// Compression level presets.
+///
+/// Maps to internal numeric levels:
+/// - `Fast` → level 1
+/// - `Default` → level 3
+/// - `Better` → level 6
+/// - `Best` → level 9
 pub enum CompressionLevel {
-  Fast      // 快速压缩
-  Default   // 默认压缩
-  Better    // 更好的压缩  
-  Best      // 最佳压缩
+  Fast
+  Default
+  Better
+  Best
 }
 
-/// ZSTD文件分析结果
+/// Result of analyzing a ZSTD compressed file's structure.
+///
+/// Contains frame header information, block metadata, and validation status.
 pub struct ZSTDFileAnalysis {
   is_valid: Bool
   error_message: String
@@ -23,7 +29,7 @@ pub struct ZSTDFileAnalysis {
   last_block: Bool
 }
 
-/// 数据完整性分析结果
+/// Result of data integrity analysis.
 pub struct DataIntegrityAnalysis {
   truncation_indicators: Int
   data_density: Double
@@ -31,37 +37,57 @@ pub struct DataIntegrityAnalysis {
   entropy_level: Double
 }
 
-/// 滑动窗口解码上下文
+/// Sliding window decoder context for streaming decompression.
+///
+/// Maintains internal state across multiple `decompress_with_sliding_window` calls.
 pub struct SlidingWindowDecoder {
   mut context: @zstd_decoder.DecoderContext
   window_size: Int
 }
 
-/// 使用指定级别压缩（自动选择压缩方法）
-/// 
-/// 参数:
-/// - data: 要压缩的数据
-/// - level: 压缩级别 (1-22)，默认为2
+/// Compress data with a numeric compression level (1-22).
+///
+/// Higher levels produce smaller output at the cost of speed.
+/// Level is clamped to `[1, 22]`.
+///
+/// # Example
+///
+/// ```moonbit no-check
+/// let compressed = @zstd.compress_with_level_int(data, 9)
+/// ```
 pub fn compress_with_level_int(data: Bytes, level: Int) -> Bytes {
   compress_advanced(data, CompressionMethod::Auto, level)
 }
 
-/// 使用 Raw 块压缩（无压缩，仅添加 ZSTD 帧头）
+/// Compress using a Raw block (no compression, just ZSTD frame wrapping).
 pub fn compress_as_raw(data: Bytes, level: Int) -> Bytes {
   compress_advanced(data, CompressionMethod::Raw, level)
 }
 
-/// 使用 RLE 块压缩（适合重复数据）
+/// Compress using an RLE block (ideal for highly repetitive data).
 pub fn compress_as_rle(data: Bytes, level: Int) -> Bytes {
   compress_advanced(data, CompressionMethod::RLE, level)
 }
 
-/// 使用 Compressed 块压缩（LZ77 + 熵编码）
+/// Compress using a Compressed block (LZ77 + FSE entropy coding).
+///
+/// Produces the best compression ratio for most data.
 pub fn compress_as_compressed(data: Bytes, level: Int) -> Bytes {
   compress_advanced(data, CompressionMethod::Compressed, level)
 }
 
-/// 基本压缩函数 - 使用默认设置（级别2）
+/// Compress data using default settings (level 2, auto block type selection).
+///
+/// This is the simplest entry point. For more control, use
+/// `compress_with_level_int` or `compress_advanced`.
+///
+/// # Example
+///
+/// ```moonbit no-check
+/// let original = @encoding/utf8.encode("Hello, ZSTD!")
+/// let compressed = @zstd.compress(original)
+/// let decompressed = @zstd.decompress(compressed)
+/// ```
 pub fn compress(data: Bytes) -> Bytes {
   let result = @zstd_encoder.compress(data)
   match result {
@@ -70,7 +96,13 @@ pub fn compress(data: Bytes) -> Bytes {
   }
 }
 
-/// 带压缩级别的压缩函数
+/// Compress data with a `CompressionLevel` preset.
+///
+/// # Example
+///
+/// ```moonbit no-check
+/// let compressed = @zstd.compress_with_level(data, CompressionLevel::Better)
+/// ```
 pub fn compress_with_level(data: Bytes, level: CompressionLevel) -> Bytes {
   // 将 API 级别映射到压缩器级别
   let compression_level = match level {
@@ -92,12 +124,17 @@ pub fn compress_with_level(data: Bytes, level: CompressionLevel) -> Bytes {
   }
 }
 
-/// 压缩方法
+/// Compression method selection.
+///
+/// - `Auto` — automatically selects the best method based on data characteristics
+/// - `Raw` — no compression, just ZSTD frame wrapping
+/// - `RLE` — run-length encoding for highly repetitive data
+/// - `Compressed` — LZ77 + FSE entropy coding for best ratio
 pub enum CompressionMethod {
-  Auto       // Auto-select best method
-  Raw        // Uncompressed
-  RLE        // Run-Length Encoding  
-  Compressed // LZ77 + Entropy coding
+  Auto
+  Raw
+  RLE
+  Compressed
 } derive(Show)
 
 fn choose_compression_method(data: Bytes) -> (String, Byte, Int) {
@@ -116,17 +153,18 @@ fn is_suitable_for_rle(data: Bytes) -> Bool {
   same_count.to_double() / data.length().to_double() > 0.75
 }
 
-/// 高级压缩函数 - 允许选择压缩方法和级别
-/// 
-/// 参数:
-/// - data: 要压缩的数据
-/// - mode: 压缩方法 (Auto/Raw/RLE/Compressed)
-/// - level: 压缩级别 (1-22)，默认为2
-/// 
-/// 示例:
+/// Compress with full control over method and level.
+///
+/// # Parameters
+///
+/// - `data` — bytes to compress
+/// - `mode` — compression method (`Auto`, `Raw`, `RLE`, or `Compressed`)
+/// - `level` — numeric compression level (1-22, clamped)
+///
+/// # Example
+///
 /// ```moonbit no-check
-/// let data = "Hello, World!".to_bytes()
-/// let compressed = compress_advanced(data, CompressionMethod::Auto, 5)
+/// let compressed = @zstd.compress_advanced(data, Compressed, 5)
 /// ```
 pub fn compress_advanced(data: Bytes, mode: CompressionMethod, level: Int) -> Bytes {
   let actual_level = if level < 1 { 2 } else if level > 22 { 22 } else { level }
@@ -197,7 +235,16 @@ pub fn compress_advanced(data: Bytes, mode: CompressionMethod, level: Int) -> By
   }
 }
 
-/// 基本解压缩函数
+/// Decompress a ZSTD-compressed frame.
+///
+/// Supports all block types (Raw, RLE, Compressed) and multi-block frames.
+/// Returns empty `Bytes` if the input is not valid ZSTD data.
+///
+/// # Example
+///
+/// ```moonbit no-check
+/// let original = @zstd.decompress(compressed)
+/// ```
 pub fn decompress(data: Bytes) -> Bytes {
   if data.length() < 4 {
     return Bytes::from_array([])
@@ -308,7 +355,10 @@ fn decompress_advanced(data: Bytes) -> Bytes {
   Bytes::from_array(result)
 }
 
-/// 分析ZSTD文件结构
+/// Analyze the structure of a ZSTD compressed file.
+///
+/// Returns frame header info, block type, block size, and validation status
+/// without performing full decompression.
 pub fn analyze_file(data: Bytes) -> ZSTDFileAnalysis {
   analyze_file_detailed(data)
 }
@@ -643,7 +693,7 @@ fn detect_error_patterns(data: Bytes, block_offset: Int) -> String {
   ""
 }
 
-/// 分析数据完整性
+/// Analyze data integrity metrics (density, structure consistency, entropy).
 pub fn analyze_data_integrity(data: Bytes) -> DataIntegrityAnalysis {
   let data_density = if data.length() == 0 { 0.0 } else { 0.8 }
   let structure_consistency = if data.length() >= 4 { 0.9 } else { 0.1 }
@@ -658,7 +708,7 @@ pub fn analyze_data_integrity(data: Bytes) -> DataIntegrityAnalysis {
   }
 }
 
-/// 检查数据是否为有效的ZSTD格式
+/// Check whether the data starts with a valid ZSTD magic number (0xFD2FB528).
 pub fn is_zstd_format(data: Bytes) -> Bool {
   if data.length() < 4 {
     return false
@@ -668,7 +718,9 @@ pub fn is_zstd_format(data: Bytes) -> Bool {
   magic == @zstd_core.ZSTD_MAGIC_NUMBER_INT
 }
 
-/// 估算压缩后的大小
+/// Estimate compressed output size for a given compression level.
+///
+/// This is a rough heuristic, not an exact prediction.
 pub fn estimate_compressed_size(data: Bytes, level: CompressionLevel) -> Int {
   let overhead = 9
   
@@ -883,7 +935,10 @@ fn test_rle_optimization() -> Bool {
 // Sliding Window Decoder API
 // ============================================================================
 
-/// 创建滑动窗口解码器
+/// Create a sliding window decoder with the given window size.
+///
+/// The decoder maintains state for streaming decompression across
+/// multiple calls to `decompress_with_sliding_window`.
 pub fn create_sliding_window_decoder(window_size: Int) -> SlidingWindowDecoder {
   let context = @zstd_decoder.create_decoder_context(window_size)
   SlidingWindowDecoder::{
@@ -892,7 +947,10 @@ pub fn create_sliding_window_decoder(window_size: Int) -> SlidingWindowDecoder {
   }
 }
 
-/// 使用滑动窗口解码器解码数据块
+/// Decompress a ZSTD frame using a sliding window decoder.
+///
+/// The decoder context is updated in place, allowing match references
+/// to span across multiple decompression calls.
 pub fn decompress_with_sliding_window(
   decoder: SlidingWindowDecoder,
   data: Bytes
@@ -922,7 +980,7 @@ pub fn decompress_with_sliding_window(
   }
 }
 
-/// 重置滑动窗口解码器
+/// Reset the sliding window decoder, clearing all internal state.
 pub fn reset_sliding_window_decoder(decoder: SlidingWindowDecoder) -> Unit {
   // 重新创建上下文来重置状态
   let new_context = @zstd_decoder.create_decoder_context(decoder.window_size)
