@@ -1246,3 +1246,135 @@ pub fn benchmark_huffman() -> Unit {
 
   println("========================")
 }
+
+// ============================================================================
+// Backward Huffman Stream Decoder (ZSTD-compatible, RFC 8878 §3.1.1.1)
+// ============================================================================
+
+/// Backward bitstream reader for Huffman decoding.
+/// Mirrors BitstreamReader in fse.mbt: bytes are loaded LE from the END of
+/// the stream and bits are extracted MSB-first as bit_pos advances.
+priv struct HuffBackStream {
+  data: Bytes
+  mut byte_offset: Int    // pointer into data; moves backward on reload
+  mut bit_container: UInt64
+  mut bit_pos: Int        // bits consumed from the MSB side
+  end_offset: Int         // start boundary of the stream (cannot reload below)
+}
+
+/// Reload bit_container when more bits are needed (same logic as fse.mbt reload_dstream)
+fn huff_reload_stream(bs: HuffBackStream) -> Unit {
+  if bs.bit_pos > 64 { return }
+  let bytes_consumed = bs.bit_pos / 8
+  let new_offset = bs.byte_offset - bytes_consumed
+  if new_offset < bs.end_offset { return }
+  bs.byte_offset = new_offset
+  bs.bit_pos = bs.bit_pos % 8
+  let mut container = 0UL
+  for i = 0; i < 8; i = i + 1 {
+    let idx = bs.byte_offset + i
+    if idx < bs.data.length() {
+      container = container | (bs.data[idx].to_uint64() << (i * 8))
+    }
+  }
+  bs.bit_container = container
+}
+
+/// Decode one symbol by traversing the Huffman tree MSB-first from bs.
+fn decode_one_huff_symbol(bs: HuffBackStream, root: HuffmanNode, max_bits: Int) -> Result[Int, String] {
+  let mut current = root
+  let mut bits_read = 0
+  while bits_read <= max_bits {
+    match current {
+      HuffmanNode::Leaf(sym) => return Ok(sym)
+      HuffmanNode::Internal(left, right) => {
+        // Extract 1 bit from MSB side of bit_container
+        let bit = if bs.bit_pos < 64 {
+          ((bs.bit_container << bs.bit_pos) >> 63).to_int()
+        } else {
+          0
+        }
+        bs.bit_pos = bs.bit_pos + 1
+        bits_read = bits_read + 1
+        if bs.bit_pos >= 32 {
+          huff_reload_stream(bs)
+        }
+        current = if bit == 0 { left } else { right }
+      }
+    }
+  }
+  match current {
+    HuffmanNode::Leaf(sym) => Ok(sym)
+    HuffmanNode::Internal(_, _) => Err("Huffman decode: exceeded max depth without finding symbol")
+  }
+}
+
+/// Decode `count` symbols from a ZSTD backward Huffman stream occupying
+/// data[start, end).  The same padding format as FSE: last byte ends with
+/// a 1-bit marker followed by 0-7 zero padding bits.
+pub fn decode_huffman_stream_backward(
+  table: HuffmanTable,
+  data: Bytes,
+  start: Int,
+  end: Int,
+  count: Int
+) -> Result[Array[Byte], String] {
+  let output: Array[Byte] = []
+  if count == 0 { return Ok(output) }
+
+  let stream_len = end - start
+  if stream_len == 0 {
+    return Err("Empty Huffman stream")
+  }
+  if end > data.length() {
+    return Err("Huffman stream end out of bounds")
+  }
+
+  let last_byte = data[end - 1].to_int()
+  if last_byte == 0 {
+    return Err("Invalid Huffman stream: last byte is 0")
+  }
+
+  // Number of bits to skip at the MSB of the last byte (padding + 1-bit marker)
+  let padding = 8 - highbit32(last_byte)
+
+  let bs = HuffBackStream::{
+    data: data,
+    byte_offset: 0,
+    bit_container: 0UL,
+    bit_pos: 0,
+    end_offset: start,
+  }
+
+  if stream_len >= 8 {
+    bs.byte_offset = end - 8
+    let mut container = 0UL
+    for i = 0; i < 8; i = i + 1 {
+      container = container | (data[bs.byte_offset + i].to_uint64() << (i * 8))
+    }
+    bs.bit_container = container
+    bs.bit_pos = padding
+  } else {
+    // Short stream: load bytes at low end of container, zero-pad high end
+    bs.byte_offset = start
+    let mut container = 0UL
+    for i = 0; i < stream_len; i = i + 1 {
+      container = container | (data[start + i].to_uint64() << (i * 8))
+    }
+    bs.bit_container = container
+    // The actual data occupies the low stream_len bytes of the 8-byte container.
+    // The high (8 - stream_len) bytes are zero, so we skip past them too.
+    let extra_zero_bits = (8 - stream_len) * 8
+    bs.bit_pos = padding + extra_zero_bits
+  }
+
+  let max_bits = table.max_bits.max(1)
+  for _i = 0; _i < count; _i = _i + 1 {
+    match decode_one_huff_symbol(bs, table.root, max_bits) {
+      Ok(sym) => output.push(sym.to_byte())
+      Err(e) => return Err(e)
+    }
+  }
+
+  Ok(output)
+}

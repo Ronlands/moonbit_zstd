@@ -49,8 +49,7 @@ pub fn test_save_and_verify() -> Unit {
   save_bytes_to_file(compressed, filename)
   
   println("\n验证步骤:")
-  println("1. 将上面的脚本保存到文件:")
-  println("   moon run src/test -g save_compressed > create_file.ps1")
+  println("1. 将上面输出的 PowerShell 脚本内容保存为 create_file.ps1")
   println("2. 运行脚本生成二进制文件:")
   println("   .\\create_file.ps1")
   println("3. 运行官方工具解压:")
@@ -59,8 +58,5 @@ pub fn test_save_and_verify() -> Unit {
   println("   cat moonbit_output.txt")
   println("5. 应该看到: \{text} (重复 10 次)")
   println("\n" + "=".repeat(60))
-  println("\n提示：请运行以下命令生成文件：")
-  println("moon run src/test -g save_compressed > create_file.ps1")
-  println(".\\create_file.ps1")
 }
 

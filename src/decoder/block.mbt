@@ -368,26 +368,56 @@ fn decompress_literals_section(
           // 检查是否有保存的 Huffman 树
           match context.last_huffman_weights {
             Some(saved_weights) => {
-              // 使用保存的权重构建表并解码
+              // 使用保存的权重构建表并解码（backward bitstream, same as Compressed mode）
               let table_result = @zstd_entropy.build_huffman_table_from_weights(saved_weights)
               match table_result {
                 Ok(table) => {
-                  // 使用 Huffman 解码
-                  let decode_result = @zstd_entropy.huffman_decode_multiple(
-                    table,
-                    data,
-                    data_offset * 8,
-                    info.regenerated_size
-                  )
-                  
-                  match decode_result {
-                    Ok((decoded_symbols, _)) => {
-                      let literals: Array[Byte] = []
-                      for i = 0; i < decoded_symbols.length(); i = i + 1 {
-                        literals.push(decoded_symbols[i].to_byte())
-                      }
-                      Ok((Bytes::from_array(literals), header_size + info.compressed_size))
+                  let streams_start = data_offset
+                  let streams_end = data_offset + info.compressed_size
+                  let regen = info.regenerated_size
+                  let decode_result = if info.num_streams == 4 {
+                    if info.compressed_size < 6 {
+                      return Err("Truncated treeless Huffman: 4-stream too small for jump table")
                     }
+                    let len1 = data[streams_start].to_int() | (data[streams_start + 1].to_int() << 8)
+                    let len2 = data[streams_start + 2].to_int() | (data[streams_start + 3].to_int() << 8)
+                    let len3 = data[streams_start + 4].to_int() | (data[streams_start + 5].to_int() << 8)
+                    let len4 = info.compressed_size - 6 - len1 - len2 - len3
+                    if len4 < 1 || len1 < 1 || len2 < 1 || len3 < 1 {
+                      return Err("Invalid treeless Huffman 4-stream jump table")
+                    }
+                    let s1_start = streams_start + 6
+                    let s2_start = s1_start + len1
+                    let s3_start = s2_start + len2
+                    let s4_start = s3_start + len3
+                    let s4_end   = s4_start + len4
+                    let c1 = (regen + 3) / 4
+                    let c2 = (regen + 2) / 4
+                    let c3 = (regen + 1) / 4
+                    let c4 = regen - c1 - c2 - c3
+                    let r1 = @zstd_entropy.decode_huffman_stream_backward(table, data, s1_start, s2_start, c1)
+                    let r2 = @zstd_entropy.decode_huffman_stream_backward(table, data, s2_start, s3_start, c2)
+                    let r3 = @zstd_entropy.decode_huffman_stream_backward(table, data, s3_start, s4_start, c3)
+                    let r4 = @zstd_entropy.decode_huffman_stream_backward(table, data, s4_start, s4_end,   c4)
+                    match (r1, r2, r3, r4) {
+                      (Ok(b1), Ok(b2), Ok(b3), Ok(b4)) => {
+                        let all: Array[Byte] = []
+                        for i = 0; i < b1.length(); i = i + 1 { all.push(b1[i]) }
+                        for i = 0; i < b2.length(); i = i + 1 { all.push(b2[i]) }
+                        for i = 0; i < b3.length(); i = i + 1 { all.push(b3[i]) }
+                        for i = 0; i < b4.length(); i = i + 1 { all.push(b4[i]) }
+                        Ok(all)
+                      }
+                      (Err(e), _, _, _) => Err("Treeless stream 1: " + e)
+                      (_, Err(e), _, _) => Err("Treeless stream 2: " + e)
+                      (_, _, Err(e), _) => Err("Treeless stream 3: " + e)
+                      (_, _, _, Err(e)) => Err("Treeless stream 4: " + e)
+                    }
+                  } else {
+                    @zstd_entropy.decode_huffman_stream_backward(table, data, streams_start, streams_end, regen)
+                  }
+                  match decode_result {
+                    Ok(decoded_bytes) => Ok((Bytes::from_array(decoded_bytes), header_size + info.compressed_size))
                     Err(e) => Err("Treeless Huffman decoding failed: " + e)
                   }
                 }
@@ -476,41 +506,73 @@ fn decode_huffman_literals(
           if compressed_data_size <= 0 {
             return Err("Truncated Huffman state: no compressed data after weights")
           }
-          
+
           if compressed_data_offset + compressed_data_size > data.length() {
             return Err("Truncated Huffman state: compressed data exceeds buffer")
           }
-          
-          // 使用真正的 Huffman 解码
-          let decode_result = @zstd_entropy.huffman_decode_multiple(
-            table,
-            data,
-            compressed_data_offset * 8,  // 转换为位位置
-            info.regenerated_size
-          )
-          
+
+          // Decode using ZSTD-compatible backward bitstream (1-stream or 4-stream)
+          let streams_start = compressed_data_offset
+          let streams_end = compressed_data_offset + compressed_data_size
+          let regen = info.regenerated_size
+
+          let decode_result = if info.num_streams == 4 {
+            // 4-stream: parse 6-byte jump table then decode each stream
+            if compressed_data_size < 6 {
+              return Err("Truncated Huffman state: 4-stream too small for jump table")
+            }
+            let len1 = data[streams_start].to_int() | (data[streams_start + 1].to_int() << 8)
+            let len2 = data[streams_start + 2].to_int() | (data[streams_start + 3].to_int() << 8)
+            let len3 = data[streams_start + 4].to_int() | (data[streams_start + 5].to_int() << 8)
+            let len4 = compressed_data_size - 6 - len1 - len2 - len3
+            if len4 < 1 || len1 < 1 || len2 < 1 || len3 < 1 {
+              return Err("Invalid Huffman 4-stream jump table: stream size <= 0")
+            }
+            let s1_start = streams_start + 6
+            let s2_start = s1_start + len1
+            let s3_start = s2_start + len2
+            let s4_start = s3_start + len3
+            let s4_end   = s4_start + len4
+            if s4_end > streams_end {
+              return Err("Huffman 4-stream: streams exceed compressed size")
+            }
+            // Each stream decompresses to ceil(regen/4) symbols; last may be smaller
+            let c1 = (regen + 3) / 4
+            let c2 = (regen + 2) / 4
+            let c3 = (regen + 1) / 4
+            let c4 = regen - c1 - c2 - c3
+            let r1 = @zstd_entropy.decode_huffman_stream_backward(table, data, s1_start, s2_start, c1)
+            let r2 = @zstd_entropy.decode_huffman_stream_backward(table, data, s2_start, s3_start, c2)
+            let r3 = @zstd_entropy.decode_huffman_stream_backward(table, data, s3_start, s4_start, c3)
+            let r4 = @zstd_entropy.decode_huffman_stream_backward(table, data, s4_start, s4_end,   c4)
+            match (r1, r2, r3, r4) {
+              (Ok(b1), Ok(b2), Ok(b3), Ok(b4)) => {
+                let all: Array[Byte] = []
+                for i = 0; i < b1.length(); i = i + 1 { all.push(b1[i]) }
+                for i = 0; i < b2.length(); i = i + 1 { all.push(b2[i]) }
+                for i = 0; i < b3.length(); i = i + 1 { all.push(b3[i]) }
+                for i = 0; i < b4.length(); i = i + 1 { all.push(b4[i]) }
+                Ok(all)
+              }
+              (Err(e), _, _, _) => Err("Huffman stream 1 failed: " + e)
+              (_, Err(e), _, _) => Err("Huffman stream 2 failed: " + e)
+              (_, _, Err(e), _) => Err("Huffman stream 3 failed: " + e)
+              (_, _, _, Err(e)) => Err("Huffman stream 4 failed: " + e)
+            }
+          } else {
+            // 1-stream: single backward stream
+            @zstd_entropy.decode_huffman_stream_backward(table, data, streams_start, streams_end, regen)
+          }
+
           match decode_result {
-            Ok((decoded_symbols, _final_bit_pos)) => {
-              // 严格验证：解码的符号数量必须精确匹配
-              if decoded_symbols.length() != info.regenerated_size {
-                return Err("Huffman decoding mismatch: decoded " + decoded_symbols.length().to_string() + 
-                          " symbols, expected " + info.regenerated_size.to_string() + " (possible truncation)")
+            Ok(decoded_bytes) => {
+              if decoded_bytes.length() != regen {
+                return Err("Huffman decoding mismatch: decoded " + decoded_bytes.length().to_string() +
+                          " symbols, expected " + regen.to_string() + " (possible truncation)")
               }
-              
-              // 严格验证：确保没有解码零个符号（除非预期为零）
-              if info.regenerated_size > 0 && decoded_symbols.length() == 0 {
-                return Err("Huffman decoding failed: no symbols decoded despite non-zero expected size (truncated state)")
-              }
-              
-              // 将解码的符号转换为字节
-              let literals: Array[Byte] = []
-              for i = 0; i < decoded_symbols.length(); i = i + 1 {
-                literals.push(decoded_symbols[i].to_byte())
-              }
-              Ok((Bytes::from_array(literals), header_size + info.compressed_size))
+              Ok((Bytes::from_array(decoded_bytes), header_size + info.compressed_size))
             }
             Err(e) => {
-              // 确保错误消息包含"Truncated"以便更容易识别
               let error_msg = if e.contains("Truncated") || e.contains("truncated") {
                 e
               } else {
@@ -650,7 +712,8 @@ fn parse_sequences_section(data: Bytes, offset: Int, size: Int) -> Result[Array[
       }
       
       // Decode sequences (full implementation with FSE)
-      let result = decode_sequences_simple(data, offset + header_size, header)
+      // Pass the sequences section end so the FSE decoder doesn't read beyond the block boundary
+      let result = decode_sequences_simple(data, offset + header_size, header, offset + size)
       match result {
         Ok(seqs) => Ok(seqs)
         Err(e) => Err(e)
@@ -732,7 +795,8 @@ fn parse_sequence_header(data: Bytes, offset: Int) -> Result[(@zstd_core.Sequenc
 fn decode_sequences_simple(
   data: Bytes,
   offset: Int,
-  header: @zstd_core.SequencesSectionInfo
+  header: @zstd_core.SequencesSectionInfo,
+  data_end: Int  // end of the sequences section in `data`
 ) -> Result[Array[@zstd_core.Sequence], String] {
   if header.num_sequences == 0 {
     return Ok([])
@@ -760,14 +824,24 @@ fn decode_sequences_simple(
     Err(_) => (@zstd_entropy.normalize_counts(get_predefined_ml_weights(), 6), current_offset_after_of)
   }
 
-  // 使用 FSE 解码序列
+  // 使用 FSE 解码序列（初始 repeat offsets: [1, 4, 8] per RFC 8878）
+  let prev_offsets = [1, 4, 8]
+  // Limit FSE data to the sequence section boundary so the decoder doesn't
+  // accidentally consume bytes from a trailing checksum or the next frame.
+  let effective_end = data_end.min(data.length())
+  let bounded_arr: Array[Byte] = []
+  for i = 0; i < effective_end; i = i + 1 {
+    bounded_arr.push(data[i])
+  }
+  let bounded_data = Bytes::from_array(bounded_arr)
   let sequences_result = @zstd_entropy.decode_fse_sequences(
-    data,
+    bounded_data,
     final_offset,
     header.num_sequences,
     ll_weights,
     ml_weights,
-    of_weights
+    of_weights,
+    prev_offsets
   )
 
   match sequences_result {

@@ -219,10 +219,11 @@ pub fn decode_fse_sequences(
   num_sequences: Int,
   ll_weights: Array[Int],
   ml_weights: Array[Int],
-  of_weights: Array[Int]
+  of_weights: Array[Int],
+  prev_offsets: Array[Int]
 ) -> Result[Array[Sequence], String] {
   // 直接使用原始实现（build_fse_dtable）
-  decode_fse_sequences_original(data, offset, num_sequences, ll_weights, ml_weights, of_weights)
+  decode_fse_sequences_original(data, offset, num_sequences, ll_weights, ml_weights, of_weights, prev_offsets)
 }
 
 
@@ -1333,7 +1334,7 @@ pub fn debug_fse_decode_sequences(
   println("  OF权重 (前6): \{of_sample}")
   println("  ML权重 (前6): \{ml_sample}")
 
-  match decode_fse_sequences(data, offset, num_sequences, ll_weights, ml_weights, of_weights) {
+  match decode_fse_sequences(data, offset, num_sequences, ll_weights, ml_weights, of_weights, [1, 4, 8]) {
     Ok(sequences) => {
       println("✅ FSE 解码成功: \{sequences.length()} 个序列")
       for i = 0; i < sequences.length(); i = i + 1 {
@@ -1354,7 +1355,8 @@ fn decode_fse_sequences_original(
   num_sequences: Int,
   ll_weights: Array[Int],
   ml_weights: Array[Int],
-  of_weights: Array[Int]
+  of_weights: Array[Int],
+  prev_offsets: Array[Int]
 ) -> Result[Array[Sequence], String] {
   if num_sequences == 0 {
     return Ok([])
@@ -1466,18 +1468,59 @@ fn decode_fse_sequences_original(
     let (bs_c, ll_ex) = if ll_nb > 0 { read_bits_uint64(bs_b, ll_nb) } else { (bs_b, 0UL) }
     final_ll = final_ll + ll_ex.to_int()
 
-    sequences.push(make_sequence(final_ll, final_ml, final_of))
+    // Resolve repeat offsets (RFC 8878 §3.1.1.3.2.1)
+    // of_nb == 0  → of_code=0, raw=0: special repeat sentinel
+    // of_nb == 1  → of_code=1, raw=1..2: repeat codes
+    // of_nb >= 2  → of_code>=2: final_of is already the direct copy distance
+    let resolved_of = if of_nb >= 2 {
+      // Direct offset: final_of is the copy distance
+      let p0 = prev_offsets[0]
+      let p1 = prev_offsets[1]
+      prev_offsets[2] = p1
+      prev_offsets[1] = p0
+      prev_offsets[0] = final_of
+      final_of
+    } else {
+      // Repeat offset: use C's ll0 trick to compute a "combined code" 0..3
+      let ll0 = if final_ll == 0 { 1 } else { 0 }
+      let c_code = final_of + ll0  // 0..3 (of_nb=0 → final_of=0; of_nb=1 → final_of=1 or 2)
+      if c_code == 0 {
+        // use rep[0], no update
+        prev_offsets[0]
+      } else if c_code == 1 {
+        // use rep[1]; update: swap rep[0] and rep[1], keep rep[2]
+        let actual = prev_offsets[1]
+        prev_offsets[1] = prev_offsets[0]
+        prev_offsets[0] = actual
+        actual
+      } else if c_code == 2 {
+        // use rep[2]; update: rotate all (rep[2] to front)
+        let actual = prev_offsets[2]
+        prev_offsets[2] = prev_offsets[1]
+        prev_offsets[1] = prev_offsets[0]
+        prev_offsets[0] = actual
+        actual
+      } else {
+        // c_code == 3: use rep[0]-1; update: shift back
+        let actual = prev_offsets[0] - 1
+        prev_offsets[2] = prev_offsets[1]
+        prev_offsets[1] = prev_offsets[0]
+        prev_offsets[0] = actual
+        actual
+      }
+    }
+    sequences.push(make_sequence(final_ll, final_ml, resolved_of))
 
-    // 3. State updates: LL, OF, ML — official order (not needed for last sequence)
+    // 3. State updates: LL, ML, OF — RFC 8878 order (not needed for last sequence)
     if seq_idx < num_sequences - 1 {
       let (bs1, ll_st) = read_bits_uint64(bs_c, ll_entry.nb_bits)
       ll_state = (ll_entry.new_state_base + ll_st.to_int() + 64).to_uint64()
 
-      let (bs2, of_st) = read_bits_uint64(bs1, of_entry.nb_bits)
-      of_state = (of_entry.new_state_base + of_st.to_int() + 32).to_uint64()
-
-      let (bs3, ml_st) = read_bits_uint64(bs2, ml_entry.nb_bits)
+      let (bs2, ml_st) = read_bits_uint64(bs1, ml_entry.nb_bits)
       ml_state = (ml_entry.new_state_base + ml_st.to_int() + 64).to_uint64()
+
+      let (bs3, of_st) = read_bits_uint64(bs2, of_entry.nb_bits)
+      of_state = (of_entry.new_state_base + of_st.to_int() + 32).to_uint64()
 
       reload_dstream(bs3)
       current_bs = bs3

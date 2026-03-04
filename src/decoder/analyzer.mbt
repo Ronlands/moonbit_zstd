@@ -1293,8 +1293,23 @@ fn detect_block_size_corruption(data: Bytes) -> Array[String] {
   let expected_checksum_size = if frame_header.content_checksum { 4 } else { 0 }
   
   if remaining_bytes > expected_checksum_size {
-    let unexpected_bytes = remaining_bytes - expected_checksum_size
-    errors = errors + ["文件末尾有未消耗的数据: " + unexpected_bytes.to_string() + " 字节"]
+    // Check if trailing bytes are a concatenated ZSTD frame (RFC 8878 §3.1.1 allows
+    // multiple concatenated frames). If so, do not report as error.
+    let next_pos = current_offset + expected_checksum_size
+    if next_pos + 4 <= data.length() {
+      let trailing_magic = data[next_pos].to_int() |
+                          (data[next_pos + 1].to_int() << 8) |
+                          (data[next_pos + 2].to_int() << 16) |
+                          (data[next_pos + 3].to_int() << 24)
+      if trailing_magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT {
+        let unexpected_bytes = remaining_bytes - expected_checksum_size
+        errors = errors + ["文件末尾有未消耗的数据: " + unexpected_bytes.to_string() + " 字节"]
+      }
+      // else: valid concatenated ZSTD frame — not an error
+    } else {
+      let unexpected_bytes = remaining_bytes - expected_checksum_size
+      errors = errors + ["文件末尾有未消耗的数据: " + unexpected_bytes.to_string() + " 字节"]
+    }
   } else if remaining_bytes < expected_checksum_size {
     errors = errors + ["校验和不完整: 期望 " + expected_checksum_size.to_string() + " 字节，实际 " + remaining_bytes.to_string() + " 字节"]
   }

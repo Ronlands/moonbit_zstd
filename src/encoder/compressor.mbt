@@ -996,9 +996,9 @@ fn encode_sequences_predefined_fse(sequences: Array[Sequence], output: Array[Byt
   while n >= 0 {
     let seq = sequences[n]
 
-    // State transitions: ML → OF → LL (official order)
-    ml_state = @zstd_entropy.encode_symbol_fse(ml_state, ml_symbols[n], ml_table, bitstream)
+    // State transitions: OF → ML → LL so decoder reads LL → ML → OF (RFC 8878 order)
     of_state = @zstd_entropy.encode_symbol_fse(of_state, of_symbols[n], of_table, bitstream)
+    ml_state = @zstd_entropy.encode_symbol_fse(ml_state, ml_symbols[n], ml_table, bitstream)
     ll_state = @zstd_entropy.encode_symbol_fse(ll_state, ll_symbols[n], ll_table, bitstream)
 
     // Extra bits: LL, ML, OF (official order)

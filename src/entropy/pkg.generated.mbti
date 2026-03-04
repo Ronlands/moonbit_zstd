@@ -50,11 +50,13 @@ pub fn create_huffman_weights(Array[Int]) -> HuffmanWeights
 
 pub fn debug_fse_decode_sequences(Bytes, Int, Int, Array[Int], Array[Int], Array[Int]) -> Unit
 
-pub fn decode_fse_sequences(Bytes, Int, Int, Array[Int], Array[Int], Array[Int]) -> Result[Array[Sequence], String]
+pub fn decode_fse_sequences(Bytes, Int, Int, Array[Int], Array[Int], Array[Int], Array[Int]) -> Result[Array[Sequence], String]
 
 pub fn decode_fse_sequences_with_tables(Bytes, Int, Int, FSECTable, FSECTable, FSECTable) -> Result[Array[Sequence], String]
 
 pub fn decode_huffman_literals(Bytes, Int, Int, Array[Int]) -> Result[Array[Byte], String]
+
+pub fn decode_huffman_stream_backward(HuffmanTable, Bytes, Int, Int, Int) -> Result[Array[Byte], String]
 
 pub fn decode_ll(Int, Int) -> Int
 

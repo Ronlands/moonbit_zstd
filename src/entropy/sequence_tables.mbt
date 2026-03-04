@@ -95,13 +95,14 @@ pub fn decode_ml(code: Int, extra_bits: Int) -> Int {
   }
 }
 
-/// Decode Offset from code (FSE symbol)
+/// Decode Offset from code (FSE symbol).
+/// Returns the raw offset value: 0 for the special repeat sentinel (of_code=0),
+/// 1 or 2 for repeat codes (of_code=1), or the copy distance for direct offsets (of_code>=2).
 pub fn decode_of(code: Int, extra_bits: Int) -> Int {
   if code < 0 || code >= of_base.length() {
-    1
+    0
   } else {
-    let offset = of_base[code] + extra_bits
-    if offset <= 0 { 1 } else { offset }
+    of_base[code] + extra_bits
   }
 }
 
