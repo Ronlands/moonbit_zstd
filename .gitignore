@@ -5,3 +5,4 @@ target/
 .idea/
 zstd/
 zstd-v1.5.6-win64/
+/.claude/
