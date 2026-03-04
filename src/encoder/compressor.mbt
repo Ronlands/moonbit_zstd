@@ -290,22 +290,33 @@ pub fn compress_as_rle_block(data: Bytes, _config: CompressionConfig) -> Result[
     output.push(((data.length() >> 24) & 0xFF).to_byte())
   }
   
-  // Block Header: Last_Block=1, Block_Type=RLE(1), Block_Size (decompressed size)
-  let block_header = 0x01 | (1 << 1) | (data.length() << 3)
-  output.push((block_header & 0xFF).to_byte())
-  output.push(((block_header >> 8) & 0xFF).to_byte())
-  output.push(((block_header >> 16) & 0xFF).to_byte())
-  
-  // Block Data: single byte to repeat
-  output.push(first_byte)
+  // Block Header: Last_Block=1, Block_Type=RLE(1), Block_Size (decompressed size ≤ 128KB per chunk)
+  // Splits into multiple RLE blocks if data exceeds ZSTD_MAX_BLOCK_SIZE.
+  let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
+  let mut pos = 0
+  while pos < data.length() {
+    let remaining = data.length() - pos
+    let chunk_size = remaining.min(max_block)
+    let is_last = (pos + chunk_size >= data.length())
+    let last_flag = if is_last { 1 } else { 0 }
+    let block_header = last_flag | (1 << 1) | (chunk_size << 3)
+    output.push((block_header & 0xFF).to_byte())
+    output.push(((block_header >> 8) & 0xFF).to_byte())
+    output.push(((block_header >> 16) & 0xFF).to_byte())
+    // RLE block payload: single byte to repeat
+    output.push(first_byte)
+    pos = pos + chunk_size
+  }
   
   Ok(Bytes::from_array(output))
 }
 
-/// Compress as raw (uncompressed) block
+/// Compress as raw (uncompressed) block.
+/// Splits data into multiple blocks when it exceeds 128KB (ZSTD_MAX_BLOCK_SIZE).
 pub fn compress_as_raw_block(data: Bytes, _config: CompressionConfig) -> Result[Bytes, String] {
   let output: Array[Byte] = []
-  
+  let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
+
   // ZSTD Magic Number (0xFD2FB528)
   output.push(0x28)
   output.push(0xB5)
@@ -328,16 +339,24 @@ pub fn compress_as_raw_block(data: Bytes, _config: CompressionConfig) -> Result[
     output.push(((data.length() >> 16) & 0xFF).to_byte())
     output.push(((data.length() >> 24) & 0xFF).to_byte())
   }
-  
-  // Block Header: Last_Block=1, Block_Type=Raw(0), Block_Size
-  let block_header = 0x01 | (0 << 1) | (data.length() << 3)
-  output.push((block_header & 0xFF).to_byte())
-  output.push(((block_header >> 8) & 0xFF).to_byte())
-  output.push(((block_header >> 16) & 0xFF).to_byte())
-  
-  // Block Data
-  for i = 0; i < data.length(); i = i + 1 {
-    output.push(data[i])
+
+  // Emit one or more Raw blocks, each ≤ max_block bytes
+  let mut pos = 0
+  while pos < data.length() {
+    let remaining = data.length() - pos
+    let chunk_size = remaining.min(max_block)
+    let is_last = (pos + chunk_size >= data.length())
+
+    let last_flag = if is_last { 1 } else { 0 }
+    let block_header = last_flag | (0 << 1) | (chunk_size << 3)
+    output.push((block_header & 0xFF).to_byte())
+    output.push(((block_header >> 8) & 0xFF).to_byte())
+    output.push(((block_header >> 16) & 0xFF).to_byte())
+
+    for i = 0; i < chunk_size; i = i + 1 {
+      output.push(data[pos + i])
+    }
+    pos = pos + chunk_size
   }
   
   Ok(Bytes::from_array(output))
@@ -429,9 +448,11 @@ fn compress_with_dict_id(
   compress_as_raw_block_with_dict(data, dict_id)
 }
 
-/// Compress as raw block with dictionary ID
+/// Compress as raw block with dictionary ID.
+/// Splits data into multiple blocks when it exceeds 128KB.
 fn compress_as_raw_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, String] {
   let output: Array[Byte] = []
+  let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
   
   // ZSTD Magic Number
   output.push(0x28)
@@ -449,26 +470,38 @@ fn compress_as_raw_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, 
   output.push(((dict_id >> 16) & 0xFFU).to_byte())
   output.push(((dict_id >> 24) & 0xFFU).to_byte())
   
-  // Frame Content Size
+  // Frame Content Size (FHD at index 4 is updated if fcs_flag changes)
   if data.length() < 256 {
+    // FCS_flag=0: FHD = 0x23, 1-byte FCS
     output.push(data.length().to_byte())
-  } else {
-    // Adjust FHD for 2-byte content size
+  } else if data.length() < 65792 {
+    // FCS_flag=1: FHD = 0x63, 2-byte FCS (value - 256)
     output[4] = 0x63
     let size_minus_256 = data.length() - 256
     output.push((size_minus_256 & 0xFF).to_byte())
     output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
+  } else {
+    // FCS_flag=2: FHD = 0xA3, 4-byte FCS
+    output[4] = 0xA3
+    output.push((data.length() & 0xFF).to_byte())
+    output.push(((data.length() >> 8) & 0xFF).to_byte())
+    output.push(((data.length() >> 16) & 0xFF).to_byte())
+    output.push(((data.length() >> 24) & 0xFF).to_byte())
   }
-  
-  // Block Header
-  let block_header = 0x01 | (0 << 1) | (data.length() << 3)
-  output.push((block_header & 0xFF).to_byte())
-  output.push(((block_header >> 8) & 0xFF).to_byte())
-  output.push(((block_header >> 16) & 0xFF).to_byte())
-  
-  // Block Data
-  for i = 0; i < data.length(); i = i + 1 {
-    output.push(data[i])
+  let mut pos = 0
+  while pos < data.length() {
+    let remaining = data.length() - pos
+    let chunk_size = remaining.min(max_block)
+    let is_last = (pos + chunk_size >= data.length())
+    let last_flag = if is_last { 1 } else { 0 }
+    let block_header = last_flag | (0 << 1) | (chunk_size << 3)
+    output.push((block_header & 0xFF).to_byte())
+    output.push(((block_header >> 8) & 0xFF).to_byte())
+    output.push(((block_header >> 16) & 0xFF).to_byte())
+    for i = 0; i < chunk_size; i = i + 1 {
+      output.push(data[pos + i])
+    }
+    pos = pos + chunk_size
   }
   
   Ok(Bytes::from_array(output))
@@ -1044,24 +1077,40 @@ fn compress_as_rle_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, 
   output.push(((dict_id >> 16) & 0xFFU).to_byte())
   output.push(((dict_id >> 24) & 0xFFU).to_byte())
   
-  // Frame Content Size
+  // Frame Content Size (FHD at index 4 is updated if fcs_flag changes)
   if data.length() < 256 {
+    // FCS_flag=0: FHD = 0x23, 1-byte FCS
     output.push(data.length().to_byte())
-  } else {
+  } else if data.length() < 65792 {
+    // FCS_flag=1: FHD = 0x63, 2-byte FCS (value - 256)
     output[4] = 0x63
     let size_minus_256 = data.length() - 256
     output.push((size_minus_256 & 0xFF).to_byte())
     output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
+  } else {
+    // FCS_flag=2: FHD = 0xA3, 4-byte FCS
+    output[4] = 0xA3
+    output.push((data.length() & 0xFF).to_byte())
+    output.push(((data.length() >> 8) & 0xFF).to_byte())
+    output.push(((data.length() >> 16) & 0xFF).to_byte())
+    output.push(((data.length() >> 24) & 0xFF).to_byte())
   }
-  
-  // Block Header (RLE type)
-  let block_header = 0x01 | (1 << 1) | (data.length() << 3)
-  output.push((block_header & 0xFF).to_byte())
-  output.push(((block_header >> 8) & 0xFF).to_byte())
-  output.push(((block_header >> 16) & 0xFF).to_byte())
-  
-  // Block Data: single byte
-  output.push(first_byte)
+
+  // Emit one or more RLE blocks, each with decompressed size ≤ ZSTD_MAX_BLOCK_SIZE
+  let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
+  let mut pos = 0
+  while pos < data.length() {
+    let remaining = data.length() - pos
+    let chunk_size = remaining.min(max_block)
+    let is_last = (pos + chunk_size >= data.length())
+    let last_flag = if is_last { 1 } else { 0 }
+    let block_header = last_flag | (1 << 1) | (chunk_size << 3)
+    output.push((block_header & 0xFF).to_byte())
+    output.push(((block_header >> 8) & 0xFF).to_byte())
+    output.push(((block_header >> 16) & 0xFF).to_byte())
+    output.push(first_byte)
+    pos = pos + chunk_size
+  }
   
   Ok(Bytes::from_array(output))
 }

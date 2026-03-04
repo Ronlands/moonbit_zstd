@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(moon check:*)",
+      "Bash(moon build:*)",
+      "Bash(moon test:*)",
+      "Bash(moon run:*)"
+    ]
+  }
+}

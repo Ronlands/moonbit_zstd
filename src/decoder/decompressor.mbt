@@ -41,24 +41,96 @@ pub fn create_decompressor_with_dict(window_size : Int, dictionary: Bytes) -> De
 }
 
 /// Decompress ZSTD data - Real implementation
+/// Supports concatenated frames per RFC 8878.
 pub fn decompress(data : Bytes) -> @zstd_core.ZSTDResult[Bytes] {
-  // Basic validation
   if data.length() < 4 {
     return Err(@zstd_core.invalid_data_error())
   }
 
-  // Check file validity using analyzer (detects structural errors)
-  let analysis = analyze_file(data)
-  if !analysis.is_valid {
-    return Err(@zstd_core.decompression_error())
+  let all_output: Array[Byte] = []
+  let mut pos = 0
+
+  while pos < data.length() {
+    // Check for ZSTD magic at current position
+    if pos + 4 > data.length() { break }
+    let magic = (data[pos + 3].to_int() << 24) | (data[pos + 2].to_int() << 16) |
+                (data[pos + 1].to_int() << 8) | data[pos].to_int()
+    if magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT { break }
+
+    // Slice the remaining data from pos
+    let remaining: Array[Byte] = []
+    for i = pos; i < data.length(); i = i + 1 {
+      remaining.push(data[i])
+    }
+    let frame_data = Bytes::from_array(remaining)
+
+    // Validate frame structure
+    let analysis = analyze_file(frame_data)
+    if !analysis.is_valid {
+      return Err(@zstd_core.decompression_error())
+    }
+
+    // Decompress this frame
+    let result = decompress_zstd_data(frame_data)
+    match result {
+      Ok(decompressed) => {
+        for i = 0; i < decompressed.length(); i = i + 1 {
+          all_output.push(decompressed[i])
+        }
+        // Advance past this frame
+        let frame_size = calculate_frame_size(frame_data)
+        if frame_size <= 0 { break }
+        pos = pos + frame_size
+      }
+      Err(e) => return Err(@zstd_core.message_error(e))
+    }
   }
-  
-  // Decompress ZSTD data (detects runtime errors like zero offset)
-  let decompression_result = decompress_zstd_data(data)
-  match decompression_result {
-    Ok(decompressed_data) => Ok(decompressed_data)
-    Err(_error_msg) => Err(@zstd_core.decompression_error())
+
+  Ok(Bytes::from_array(all_output))
+}
+
+/// Calculate the total byte size of one ZSTD frame (header + all blocks + optional checksum).
+fn calculate_frame_size(data: Bytes) -> Int {
+  let mut offset = 4 // skip magic
+
+  // Parse FHD
+  if offset >= data.length() { return -1 }
+  let fhd = data[offset].to_int()
+  let single_segment = (fhd & 0x20) != 0
+  let checksum_flag = (fhd & 0x04) != 0
+  let dict_id_flag = fhd & 0x03
+  let fcs_flag = (fhd >> 6) & 0x03
+  offset = offset + 1
+
+  // Window_Descriptor
+  if !single_segment { offset = offset + 1 }
+
+  // Dictionary_ID
+  if dict_id_flag == 1 { offset = offset + 1 }
+  else if dict_id_flag == 2 { offset = offset + 2 }
+  else if dict_id_flag == 3 { offset = offset + 4 }
+
+  // Frame_Content_Size
+  if single_segment && fcs_flag == 0 { offset = offset + 1 }
+  else if fcs_flag == 1 { offset = offset + 2 }
+  else if fcs_flag == 2 { offset = offset + 4 }
+  else if fcs_flag == 3 { offset = offset + 8 }
+
+  // Walk blocks
+  while offset + 3 <= data.length() {
+    let bh = data[offset].to_int() | (data[offset + 1].to_int() << 8) | (data[offset + 2].to_int() << 16)
+    let is_last = (bh & 1) != 0
+    let block_type = (bh >> 1) & 3
+    let block_size = (bh >> 3) & 0x1FFFFF
+    let compressed_size = if block_type == 1 { 1 } else { block_size }
+    offset = offset + 3 + compressed_size
+    if is_last { break }
   }
+
+  // Optional content checksum (4 bytes)
+  if checksum_flag { offset = offset + 4 }
+
+  offset
 }
 
 /// 真正的 ZSTD 解压缩实现（无字典）
@@ -159,8 +231,14 @@ fn parse_frame_header_for_decompressor(data: Bytes, offset: Int) -> Result[(@zst
   // 解析Frame_Header_Descriptor各个字段
   let frame_content_size_flag = (descriptor >> 6) & 3  // Bits 7-6
   let single_segment = ((descriptor >> 5) & 1) != 0    // Bit 5
+  let reserved_bit = (descriptor >> 3) & 1              // Bit 3
   let content_checksum = ((descriptor >> 2) & 1) != 0  // Bit 2
   let dict_id_flag = descriptor & 3                     // Bits 1-0
+  
+  // RFC 8878: reserved bit must be zero
+  if reserved_bit != 0 {
+    return Err("Unsupported frame parameter: reserved bit is set")
+  }
   
   let mut current_offset = offset + 1
   let mut window_size = 0

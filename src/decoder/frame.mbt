@@ -26,7 +26,27 @@ pub fn parse_frame_header(data : Bytes) -> @zstd_core.ZSTDResult[(@zstd_core.Fra
   let checksum_flag = (fhd & 0x04) != 0
   let dict_id_flag = fhd & 0x03
   let fcs_flag = (fhd >> 6) & 0x03
-  
+  let reserved_bit = (fhd >> 3) & 1
+
+  // RFC 8878: reserved bit must be zero
+  if reserved_bit != 0 {
+    return Err(@zstd_core.invalid_frame_header_error())
+  }
+
+  // RFC 8878 field order: Window_Descriptor, Dictionary_ID, Frame_Content_Size
+  let mut window_size = 0
+  if !single_segment {
+    if offset >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
+    let wd = data[offset].to_int()
+    let exponent = wd >> 3
+    let mantissa = wd & 7
+    let window_log = exponent + 10
+    let window_base = 1 << window_log
+    let window_add = (window_base / 8) * mantissa
+    window_size = window_base + window_add
+    offset = offset + 1
+  }
+
   // Parse dictionary ID if present
   let mut dict_id = 0
   if dict_id_flag == 1 {
@@ -44,29 +64,32 @@ pub fn parse_frame_header(data : Bytes) -> @zstd_core.ZSTDResult[(@zstd_core.Fra
     offset = offset + 4
   }
   
-  // Parse Frame Content Size if present
+  // Parse Frame Content Size
   let mut frame_content_size = 0
-  if !single_segment || fcs_flag > 0 {
-    if fcs_flag == 1 {
-      if offset + 1 >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
-      frame_content_size = data[offset].to_int() | (data[offset + 1].to_int() << 8)
-      offset = offset + 2
-    } else if fcs_flag == 2 {
-      if offset + 3 >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
-      frame_content_size = data[offset].to_int() | (data[offset + 1].to_int() << 8) | 
-                          (data[offset + 2].to_int() << 16) | (data[offset + 3].to_int() << 24)
-      offset = offset + 4
-    } else if fcs_flag == 3 {
-      if offset + 7 >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
-      // 8-byte field, but we'll truncate to Int for simplicity
-      frame_content_size = data[offset].to_int() | (data[offset + 1].to_int() << 8) | 
-                          (data[offset + 2].to_int() << 16) | (data[offset + 3].to_int() << 24)
-      offset = offset + 8
-    }
+  if single_segment && fcs_flag == 0 {
+    // Single_Segment with FCS_Field_Size=0 → 1-byte FCS
+    if offset >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
+    frame_content_size = data[offset].to_int()
+    offset = offset + 1
+  } else if fcs_flag == 1 {
+    if offset + 1 >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
+    frame_content_size = (data[offset].to_int() | (data[offset + 1].to_int() << 8)) + 256
+    offset = offset + 2
+  } else if fcs_flag == 2 {
+    if offset + 3 >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
+    frame_content_size = data[offset].to_int() | (data[offset + 1].to_int() << 8) | 
+                        (data[offset + 2].to_int() << 16) | (data[offset + 3].to_int() << 24)
+    offset = offset + 4
+  } else if fcs_flag == 3 {
+    if offset + 7 >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
+    frame_content_size = data[offset].to_int() | (data[offset + 1].to_int() << 8) | 
+                        (data[offset + 2].to_int() << 16) | (data[offset + 3].to_int() << 24)
+    offset = offset + 8
   }
   
-  // Window Size (only if not single segment)
-  let window_size = if single_segment { frame_content_size } else { 65536 }
+  if single_segment {
+    window_size = frame_content_size
+  }
   
   // Create frame header
   let header = @zstd_core.make_frame_header(

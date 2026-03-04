@@ -538,8 +538,6 @@ fn decompress_compressed_block_with_context(
   offset: Int,
   size: Int
 ) -> Result[Bytes, String] {
-  println("  🔍 decompress_compressed_block_with_context: offset=\{offset}, size=\{size}")
-
   if offset + size > data.length() {
     return Err("Compressed block data out of range")
   }
@@ -559,13 +557,9 @@ fn decompress_compressed_block_with_context(
     Err(e) => return Err("Failed to parse literals: " + e)
   }
 
-  println("  📦 Literals解析: 消耗\{literals_consumed}字节, literals.length=\{literals.length()}")
-
   // 解析序列
   let sequences_offset = offset + literals_consumed
   let sequences_size = size - literals_consumed
-
-  println("  📋 解析序列: offset=\{sequences_offset}, size=\{sequences_size}")
 
   let sequences = if sequences_size > 0 {
     match parse_sequences_section(data, sequences_offset, sequences_size) {
@@ -576,64 +570,44 @@ fn decompress_compressed_block_with_context(
     []
   }
 
-  println("  📋 解析到 \{sequences.length()} 个序列")
-
   // 使用上下文执行序列
-  let result = execute_sequences_with_literals_ctx(ctx, literals, sequences)
-
-  match result {
-    Ok(output) => {
-      println("  ✅ 块解码成功: 输出\{output.length()}字节")
-      Ok(output)
-    }
-    Err(e) => {
-      println("  ❌ 块解码失败: \{e}")
-      Err(e)
-    }
-  }
+  execute_sequences_with_literals_ctx(ctx, literals, sequences)
 }
 
 fn decompress_compressed_block(data: Bytes, offset: Int, size: Int) -> Result[Bytes, String] {
-  println("  🔍 decompress_compressed_block: offset=\{offset}, size=\{size}, data.length()=\{data.length()}")
-  println("  🔍 data[offset]开始的3字节: 0x\{data[offset].to_int().to_string()} 0x\{data[offset+1].to_int().to_string()} 0x\{data[offset+2].to_int().to_string()}")
-  
   if offset + size > data.length() {
     return Err("Compressed block data out of range")
   }
-  
+
   // 深度验证：检查块大小合理性
   if size == 0 {
     return Err("Invalid compressed block: zero size")
   }
-  
+
   if size > @zstd_core.ZSTD_MAX_BLOCK_SIZE {  // ZSTD 最大块大小 128KB
     return Err("Invalid compressed block: size exceeds maximum (128KB)")
   }
-  
+
   // 创建块上下文以保存 Huffman 树
   let context = create_block_context()
-  
+
   // Parse literals section with context
   let literals_result = decompress_literals_section(data, offset, context)
   match literals_result {
     Ok((literals, literals_consumed)) => {
-      println("  📦 Literals解析: 消耗\{literals_consumed}字节, literals.length=\{literals.length()}")
-      println("  📦 块大小: \{size}字节, 序列偏移: \{offset + literals_consumed}")
       let sequences_offset = offset + literals_consumed
       let sequences_size = size - literals_consumed
-      
-      // Block结构验证
-      
+
       // 深度验证：检查序列部分大小
       if sequences_size < 0 {
         return Err("Invalid block structure: literals section exceeds block size")
       }
-      
+
       if sequences_size == 0 {
         // Only literals, no sequences - this is valid
         return Ok(literals)
       }
-      
+
       // Parse sequences section with validation
       let sequences_result = parse_sequences_section(data, sequences_offset, sequences_size)
       match sequences_result {
@@ -641,32 +615,10 @@ fn decompress_compressed_block(data: Bytes, offset: Int, size: Int) -> Result[By
           if sequences.length() == 0 {
             Ok(literals)  // 没有序列，只返回literals
           } else {
-            println("  🔍 执行 \{sequences.length()} 个序列, literals.length=\{literals.length()}")
-            // 打印前3个序列的值
-            for i = 0; i < sequences.length().min(3); i = i + 1 {
-              let seq = sequences[i]
-              let ll = @zstd_core.get_sequence_literal_length(seq)
-              let ml = @zstd_core.get_sequence_match_length(seq)
-              let of = @zstd_core.get_sequence_offset(seq)
-              println("    序列\{i}: LL=\{ll}, ML=\{ml}, OF=\{of}")
-            }
-            let exec_result = execute_sequences_with_literals(literals, sequences)
-            match exec_result {
-              Ok(output) => {
-                println("  ✅ 序列执行成功: 输出\{output.length()}字节")
-                Ok(output)
-              }
-              Err(e) => {
-                println("  ❌ 序列执行失败: \{e}")
-                Err(e)
-              }
-            }
+            execute_sequences_with_literals(literals, sequences)
           }
         }
-        Err(err) => {
-          println("  ⚠️ 序列解析失败: \{err}，返回literals")
-          Ok(literals)  // 失败时返回literals而不是错误
-        }
+        Err(err) => Err("Sequence parsing failed: " + err)
       }
     }
     Err(err) => Err("Literals parsing failed: " + err)
@@ -698,18 +650,10 @@ fn parse_sequences_section(data: Bytes, offset: Int, size: Int) -> Result[Array[
       }
       
       // Decode sequences (full implementation with FSE)
-      // ✅ 修复：offset 应该跳过头部，直接指向序列数据
-      println("  🔍 调用FSE解码: offset=\{offset + header_size}, num_seq=\{header.num_sequences}")
       let result = decode_sequences_simple(data, offset + header_size, header)
       match result {
-        Ok(seqs) => {
-          println("  ✅ decode_sequences_simple返回: \{seqs.length()} 个序列")
-          Ok(seqs)
-        }
-        Err(e) => {
-          println("  ❌ decode_sequences_simple失败: \{e}")
-          Err(e)
-        }
+        Ok(seqs) => Ok(seqs)
+        Err(e) => Err(e)
       }
     }
   }
@@ -723,9 +667,7 @@ fn parse_sequence_header(data: Bytes, offset: Int) -> Result[(@zstd_core.Sequenc
   
   let first_byte = data[offset].to_int()
   let mut current_offset = offset + 1
-  
-  println("  📋 解析序列头部: first_byte=\{first_byte}, offset=\{offset}")
-  
+
   // Parse number of sequences
   let num_sequences = if first_byte < 128 {
     first_byte
@@ -744,9 +686,7 @@ fn parse_sequence_header(data: Bytes, offset: Int) -> Result[(@zstd_core.Sequenc
     current_offset = current_offset + 1
     count
   }
-  
-  println("  📋 序列数量: \{num_sequences}")
-  
+
   // Parse sequence modes
   if current_offset >= data.length() {
     return Err("Insufficient sequence modes data: current_offset=\{current_offset}, data.length=\{data.length()}, offset=\{offset}")
@@ -754,9 +694,7 @@ fn parse_sequence_header(data: Bytes, offset: Int) -> Result[(@zstd_core.Sequenc
   
   let modes_byte = data[current_offset].to_int()
   current_offset = current_offset + 1
-  
-  println("  📋 模式字节: 0x\{modes_byte.to_string()}, offset=\{current_offset}")
-  
+
   // 解析三种模式（Literal Lengths, Match Lengths, Offsets）
   let ll_mode_val = (modes_byte >> 6) & 0x3
   let of_mode_val = (modes_byte >> 4) & 0x3
@@ -801,9 +739,8 @@ fn decode_sequences_simple(
   }
 
   let current_offset = offset
-  
+
   // 解析或使用预定义的 FSE 表（区分 LL/OF/ML）
-  println("  获取权重表...")
   let ll_weights_result = get_sequence_weights(data, current_offset, header.ll_mode, "LL")
   let of_weights_result = get_sequence_weights(data, current_offset, header.of_mode, "OF")
   let ml_weights_result = get_sequence_weights(data, current_offset, header.ml_mode, "ML")
@@ -823,15 +760,6 @@ fn decode_sequences_simple(
     Err(_) => (@zstd_entropy.normalize_counts(get_predefined_ml_weights(), 6), current_offset_after_of)
   }
 
-  // 调试：打印归一化后的权重
-  let ll_sample = if ll_weights.length() >= 6 { [ll_weights[0], ll_weights[1], ll_weights[2], ll_weights[3], ll_weights[4], ll_weights[5]] } else { [] }
-  let of_sample = if of_weights.length() >= 6 { [of_weights[0], of_weights[1], of_weights[2], of_weights[3], of_weights[4], of_weights[5]] } else { [] }
-  let ml_sample = if ml_weights.length() >= 6 { [ml_weights[0], ml_weights[1], ml_weights[2], ml_weights[3], ml_weights[4], ml_weights[5]] } else { [] }
-  println("  归一化权重: LL[0..5]=\{ll_sample}, OF[0..5]=\{of_sample}, ML[0..5]=\{ml_sample}")
-
-  println("    ✓ 权重表获取成功: LL.len=\{ll_weights.length()}, OF.len=\{of_weights.length()}, ML.len=\{ml_weights.length()}")
-  println("    ✓ 序列数据 offset=\{final_offset}")
-
   // 使用 FSE 解码序列
   let sequences_result = @zstd_entropy.decode_fse_sequences(
     data,
@@ -844,48 +772,23 @@ fn decode_sequences_simple(
 
   match sequences_result {
     Ok(sequences) => {
-      println("  ✅ FSE解码完成: 解码了 \{sequences.length()} 个序列")
-
-      // 验证序列值的合理性
+      // 验证序列值的合理性（依据 ZSTD 规范上限，不使用魔法值）
       let mut has_invalid_sequence = false
       for i = 0; i < sequences.length(); i = i + 1 {
         let seq = sequences[i]
-        // println("    序列\{i}: LL=\{seq.literal_length}, ML=\{seq.match_length}, OF=\{seq.offset}")
-        // 检查基本范围
-        if seq.literal_length < 0 || seq.match_length < 0 || seq.offset < 0 {
-          println("    ⚠️ 发现无效序列 \{i}: LL=\{seq.literal_length}, ML=\{seq.match_length}, OF=\{seq.offset} (负值)")
+        // ZSTD 规范：literal_length 和 match_length 不超过 max block size (128KB)
+        // offset 不超过窗口大小上限 (理论最大 3GB，实践中取 2^24 = 16MB 作为保守上限)
+        if seq.literal_length < 0 || seq.match_length < 0 || seq.offset <= 0 {
           has_invalid_sequence = true
-        }
-        // 检查合理上限（ZSTD最大块大小等）
-        // ZSTD 规范：offset 最大值通常限制在窗口大小内，这里使用保守的上限
-        let max_reasonable_offset = 0x40000  // 256KB，合理的最大 offset
-        if seq.literal_length > 0x10000 || seq.match_length > 0x10000 ||
-           seq.offset > 0x1000000 || seq.offset > max_reasonable_offset {
-          println("    ⚠️ 发现无效序列 \{i}: LL=\{seq.literal_length}, ML=\{seq.match_length}, OF=\{seq.offset} (值过大, 最大允许 offset=\{max_reasonable_offset})")
-          has_invalid_sequence = true
-        }
-        // 检查基本错误条件
-        if seq.offset == 0 {
-          println("    ⚠️ 发现offset=0序列 \{i}: LL=\{seq.literal_length}, ML=\{seq.match_length}, OF=\{seq.offset}")
-          has_invalid_sequence = true
-        }
-        if seq.literal_length == 512 || seq.match_length == 59 || seq.offset == 524285 ||
-           seq.literal_length > 0x10000 || seq.match_length > 0x10000 || seq.offset > 0x1000000 {
-          println("    ⚠️ 发现无效序列 \{i}: LL=\{seq.literal_length}, ML=\{seq.match_length}, OF=\{seq.offset}")
+        } else if seq.literal_length > @zstd_core.ZSTD_MAX_BLOCK_SIZE ||
+                  seq.match_length > @zstd_core.ZSTD_MAX_BLOCK_SIZE ||
+                  seq.offset > 0x1000000 {
           has_invalid_sequence = true
         }
       }
 
       if has_invalid_sequence {
-        println("    🔄 FSE解码失败，返回空序列（使用literals）")
-        // FSE解码失败，返回空序列数组，表示只有literals没有sequences
-        return Ok([])
-      }
-
-      // 打印前3个序列的值
-      for i = 0; i < sequences.length().min(3); i = i + 1 {
-        let seq = sequences[i]
-        println("    序列\{i}: LL=\{seq.literal_length}, ML=\{seq.match_length}, OF=\{seq.offset}")
+        return Err("Data corruption detected: FSE decoded invalid sequence values")
       }
 
       let core_sequences: Array[@zstd_core.Sequence] = []
@@ -895,16 +798,7 @@ fn decode_sequences_simple(
       }
       Ok(core_sequences)
     }
-    Err(_e) => {
-      println("  ❌ FSE解码失败")
-      // 如果 FSE 解码失败，使用简化的序列（作为回退）
-      let fallback_sequences: Array[@zstd_core.Sequence] = []
-      for i = 0; i < header.num_sequences; i = i + 1 {
-        // 使用最小有效序列
-        fallback_sequences.push(@zstd_core.make_sequence(0, 3, 1))
-      }
-      Ok(fallback_sequences)
-    }
+    Err(e) => Err("FSE sequence decoding failed: " + e)
   }
 }
 
@@ -993,26 +887,20 @@ fn execute_sequences_with_literals_ctx(
   literals: Bytes,
   sequences: Array[@zstd_core.Sequence]
 ) -> Result[Bytes, String] {
+  // Use the context window for sequence execution.
+  // execute_sequences adds every byte to the window byte-by-byte as it decodes,
+  // so no separate bulk add is needed here.
+  let window = get_decoder_window(ctx)
+
   if sequences.length() == 0 {
-    // 即使没有序列，也要将 literals 添加到窗口中
-    add_decoded_data_to_window(ctx, literals)
+    // No sequences: emit all literals and add each to the window
+    for i = 0; i < literals.length(); i = i + 1 {
+      add_to_window(window, literals[i])
+    }
     return Ok(literals)
   }
 
-  // 使用上下文中的窗口
-  let window = get_decoder_window(ctx)
-
-  // Execute sequences
-  let result = execute_sequences(literals, sequences, window)
-
-  // 如果成功，将解码的数据添加到窗口
-  match result {
-    Ok(decoded_data) => {
-      add_decoded_data_to_window(ctx, decoded_data)
-      Ok(decoded_data)
-    }
-    Err(e) => Err(e)
-  }
+  execute_sequences(literals, sequences, window)
 }
 
 /// Execute sequences with literals (legacy function)
@@ -1064,13 +952,12 @@ fn execute_sequences(
     // Handle match — byte-by-byte to support overlapping copies (match_length > offset)
     if match_length > 0 && offset > 0 {
       for _i = 0; _i < match_length; _i = _i + 1 {
-        let match_result = copy_single_byte_from_window(window, offset)
-        match match_result {
+        match copy_single_byte_from_window(window, offset) {
           Ok(byte) => {
             output.push(byte)
             add_to_window(window, byte)
           }
-          Err(_) => break
+          Err(e) => return Err("Match reference out of window bounds: " + e)
         }
       }
     }
@@ -1142,8 +1029,12 @@ pub fn decompress_block_with_context(
 
       match decompressed_result {
         Ok(decompressed_data) => {
-          // 将解码的数据添加到滑动窗口
-          add_decoded_data_to_window(ctx, decompressed_data)
+          // For Raw/RLE blocks, populate the sliding window (Compressed blocks
+          // already populate it byte-by-byte inside execute_sequences).
+          match header.block_type {
+            @zstd_core.BlockType::Compressed => ()
+            _ => add_decoded_data_to_window(ctx, decompressed_data)
+          }
           let total_consumed = header_size + header.block_size
           Ok((decompressed_data, total_consumed, header.last_block))
         }

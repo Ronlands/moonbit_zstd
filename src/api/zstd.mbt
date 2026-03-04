@@ -255,104 +255,11 @@ pub fn decompress(data: Bytes) -> Bytes {
     return Bytes::from_array([])
   }
   
-  // 使用正确的解压缩实现
   let result = @zstd_decoder.decompress(data)
   match result {
     Ok(decompressed) => decompressed
-    Err(_) => decompress_advanced(data)  // 失败时回退到简化版本
+    Err(_) => Bytes::from_array([])
   }
-}
-
-/// 高级解压缩函数，支持多种块类型
-fn decompress_advanced(data: Bytes) -> Bytes {
-  if data.length() < 6 {
-    return Bytes::from_array([])
-  }
-  
-  // 解析帧头
-  let frame_header_desc = data[4].to_int()
-  let fcs_field_size = (frame_header_desc >> 6) & 3
-  let _single_segment = ((frame_header_desc >> 5) & 1) != 0
-  
-  let mut offset = 5  // 跳过魔数和帧头描述符
-  
-  // 跳过内容大小字段
-  if _single_segment {
-    // Single_Segment 模式下，内容大小根据 FCS_Field_Size 确定
-    if fcs_field_size == 0 {
-      offset = offset + 1  // 1 byte
-    } else if fcs_field_size == 1 {
-      offset = offset + 2  // 2 bytes
-    } else if fcs_field_size == 2 {
-      offset = offset + 4  // 4 bytes
-    } else if fcs_field_size == 3 {
-      offset = offset + 8  // 8 bytes
-    }
-  }
-  
-  let result: Array[Byte] = []
-  
-  while offset < data.length() {
-    // 简化的块解析
-    if offset + 3 < data.length() {
-      let block_header = data[offset].to_int() | 
-                        (data[offset + 1].to_int() << 8) | 
-                        (data[offset + 2].to_int() << 16)
-      
-      let is_last_block = (block_header & 1) != 0
-      let block_type = (block_header >> 1) & 3
-      let block_size = (block_header >> 3) & 0x1FFFFF
-      
-      offset = offset + 3
-      
-      // 计算实际压缩数据大小
-      // 对于RLE块，block_size是解压后的大小，但压缩数据只有1字节
-      let compressed_size = if block_type == 1 { 1 } else { block_size }
-      
-      if offset + compressed_size <= data.length() {
-        // 解压缩块
-        match block_type {
-          0 => {
-            // Raw block - 直接复制
-            for i = 0; i < block_size; i = i + 1 {
-              result.push(data[offset + i])
-            }
-          }
-          1 => {
-            // RLE block - 重复数据
-            if block_size > 0 && offset < data.length() {
-              let repeat_byte = data[offset]
-              for _i = 0; _i < block_size; _i = _i + 1 {
-                result.push(repeat_byte)
-              }
-            }
-          }
-          2 => {
-            // Compressed block - 简化处理
-            for i = 0; i < block_size; i = i + 1 {
-              result.push(data[offset + i])
-            }
-          }
-          _ => {
-            // 未知块类型，跳过
-            ignore(block_size)
-          }
-        }
-        
-        offset = offset + compressed_size
-        
-        if is_last_block {
-          break
-        }
-      } else {
-        break
-      }
-    } else {
-      break
-    }
-  }
-  
-  Bytes::from_array(result)
 }
 
 /// Analyze the structure of a ZSTD compressed file.
@@ -457,7 +364,10 @@ fn analyze_file_detailed(data: Bytes) -> ZSTDFileAnalysis {
       }
     }
     let window_desc = data[offset].to_int()
-    window_size = (1U << (window_desc + 10))
+    let wd_exp = (window_desc >> 3) & 0x1F
+    let wd_mant = window_desc & 0x07
+    let window_base = 1 << (wd_exp + 10)
+    window_size = (window_base + (window_base / 8) * wd_mant).reinterpret_as_uint()
     offset = offset + 1
   }
   
@@ -472,14 +382,20 @@ fn analyze_file_detailed(data: Bytes) -> ZSTDFileAnalysis {
     offset = offset + dict_id_bytes
   }
   
-  // 跳过内容大小字段（在 Single_Segment 模式下）
-  if single_segment {
-    let content_size_bytes = match fcs_field_size {
-      0 => 1
-      1 => 2
-      2 => 4
-      3 => 8
-      _ => 0
+  // Skip Frame_Content_Size when present.
+  // FCS is present when: single_segment=1 (any fcs_flag), OR fcs_flag != 0.
+  // When single_segment=1 and fcs_flag=0, the field is 1 byte.
+  let has_fcs = single_segment || fcs_field_size != 0
+  if has_fcs {
+    let content_size_bytes = if single_segment && fcs_field_size == 0 {
+      1
+    } else {
+      match fcs_field_size {
+        1 => 2
+        2 => 4
+        3 => 8
+        _ => 0
+      }
     }
     offset = offset + content_size_bytes
   }
@@ -752,7 +668,6 @@ pub fn run_all_basic_tests() -> Bool {
     }
   }
   
-  println("Basic tests passed: " + passed.to_string() + "/" + tests.length().to_string())
   passed == tests.length()
 }
 
@@ -776,7 +691,6 @@ pub fn run_all_compatibility_tests() -> Bool {
     }
   }
   
-  println("Compatibility tests passed: " + passed.to_string() + "/" + tests.length().to_string())
   passed == tests.length()
 }
 

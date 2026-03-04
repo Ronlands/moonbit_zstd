@@ -167,9 +167,30 @@ fn parse_frame_header_for_analyzer(data: Bytes) -> Result[(FrameHeader, Int), St
   
   // 解析帧头描述符中的标志位
   let single_segment = (fhd & 0x20) != 0    // 单段标志
+  let reserved_bit = (fhd >> 3) & 1         // 保留位 (bit 3)
   let content_checksum = (fhd & 0x04) != 0     // 校验和标志
   let dict_id_flag = fhd & 0x03             // 字典ID标志
   let fcs_flag = (fhd >> 6) & 0x03          // 帧内容大小标志
+  
+  // RFC 8878: 保留位必须为零
+  if reserved_bit != 0 {
+    return Err("Unsupported frame parameter: reserved bit is set")
+  }
+  
+  // RFC 8878 字段顺序: Window_Descriptor, Dictionary_ID, Frame_Content_Size
+  // 先解析 Window_Descriptor（如果非 single_segment）
+  let mut window_size = 65536
+  if !single_segment {
+    if offset >= data.length() { return Err("Invalid frame header") }
+    let window_descriptor = data[offset].to_int()
+    let exponent = (window_descriptor >> 3) & 0x1F
+    let mantissa = window_descriptor & 0x07
+    let window_log = 10 + exponent
+    let window_base = 1 << window_log
+    let window_add = (window_base / 8) * mantissa
+    window_size = window_base + window_add
+    offset = offset + 1
+  }
   
   // 解析字典ID（如果存在）
   let mut dict_id = 0
@@ -194,7 +215,7 @@ fn parse_frame_header_for_analyzer(data: Bytes) -> Result[(FrameHeader, Int), St
   // 验证字典ID的合理性
   if dict_id_flag > 0 {
     if !validate_dictionary_id(dict_id) {
-      return Err("帧头数据不足")
+      return Err("Invalid dictionary ID")
     }
   }
   
@@ -227,23 +248,8 @@ fn parse_frame_header_for_analyzer(data: Bytes) -> Result[(FrameHeader, Int), St
     }
   }
   
-  // 解析窗口描述符（如果存在）
-  let mut window_size = 65536  // 默认窗口大小
-  if !single_segment {
-    // 需要解析 Window_Descriptor
-    if offset >= data.length() { return Err("Invalid frame header") }
-    let window_descriptor = data[offset].to_int()
-    offset = offset + 1
-    
-    // 解析窗口大小：windowLog = 10 + Exponent; windowBase = 1 << windowLog; windowAdd = (windowBase / 8) * Mantissa
-    let exponent = (window_descriptor >> 3) & 0x1F  // 位 7-3
-    let mantissa = window_descriptor & 0x07          // 位 2-0
-    let window_log = 10 + exponent
-    let window_base = 1 << window_log
-    let window_add = (window_base / 8) * mantissa
-    window_size = window_base + window_add
-  } else {
-    // 单段模式下，窗口大小等于帧内容大小
+  // 单段模式下，窗口大小等于帧内容大小
+  if single_segment {
     window_size = frame_content_size
   }
   
@@ -876,8 +882,10 @@ fn has_structural_inconsistencies(data: Bytes) -> Bool {
                           (data[current_offset + 1].to_int() << 8) |
                           (data[current_offset + 2].to_int() << 16)
         
+        let bt = (block_header >> 1) & 3
         let block_size = (block_header >> 3) & 0x1FFFFF
-        let required_bytes = current_offset + 3 + block_size
+        let payload = if bt == 1 { 1 } else { block_size }
+        let required_bytes = current_offset + 3 + payload
         
         if required_bytes > data.length() {
           let excess_ratio = required_bytes.to_double() / data.length().to_double()
@@ -886,7 +894,7 @@ fn has_structural_inconsistencies(data: Bytes) -> Bool {
           }
         }
         
-        current_offset = current_offset + 3 + block_size
+        current_offset = current_offset + 3 + payload
         if (block_header & 1) != 0 { break }
       }
       
@@ -1234,6 +1242,9 @@ fn detect_block_size_corruption(data: Bytes) -> Array[String] {
           break
         }
         
+        // RLE blocks store only 1 byte of payload; block_size is the decompressed size
+        let compressed_payload = if block_type == 1 { 1 } else { block_size }
+        
         // 计算最大块大小
         let max_block_size = if frame_header.window_size > 0 { 
           frame_header.window_size 
@@ -1246,7 +1257,7 @@ fn detect_block_size_corruption(data: Bytes) -> Array[String] {
           errors = errors + ["块大小超过最大限制: " + block_size.to_string() + " > " + max_block_size.to_string()]
         }
         
-        let required_bytes = current_offset + 3 + block_size
+        let required_bytes = current_offset + 3 + compressed_payload
         if required_bytes > data.length() {
           // 检查这是否是已知的测试文件模式
           let is_known_test_file = is_known_test_file_pattern(data, current_offset, block_size)
@@ -1269,7 +1280,7 @@ fn detect_block_size_corruption(data: Bytes) -> Array[String] {
           // 对于已知测试文件，不报告为错误
         }
         
-        current_offset = current_offset + 3 + block_size
+        current_offset = current_offset + 3 + compressed_payload
         
       if is_last_block {
         break
@@ -1417,15 +1428,17 @@ fn calculate_structure_consistency(data: Bytes) -> Double {
                           (data[current_offset + 1].to_int() << 8) |
                           (data[current_offset + 2].to_int() << 16)
         
+        let bt = (block_header >> 1) & 3
         let block_size = (block_header >> 3) & 0x1FFFFF
-        let required_bytes = current_offset + 3 + block_size
+        let payload = if bt == 1 { 1 } else { block_size }
+        let required_bytes = current_offset + 3 + payload
         
         if required_bytes > data.length() {
           let excess_ratio = required_bytes.to_double() / data.length().to_double()
           consistency_score = consistency_score * (1.0 / excess_ratio)
         }
         
-        current_offset = current_offset + 3 + block_size
+        current_offset = current_offset + 3 + payload
         if (block_header & 1) != 0 { break }
       }
       
@@ -1890,14 +1903,14 @@ fn detect_reserved_bits_error(data: Bytes) -> Array[String] {
         if block_type == 2 { // 压缩块
           let block_content_start = current_offset + 3
           if block_content_start < data.length() {
-            // 检查序列部分的保留位
             if detect_reserved_bits_in_sequences(data, block_content_start, block_size) {
               errors = errors + ["检测到非零保留位错误: 序列头中的保留位不为零"]
             }
           }
         }
         
-        current_offset = current_offset + 3 + block_size
+        let payload = if block_type == 1 { 1 } else { block_size }
+        current_offset = current_offset + 3 + payload
         if (block_header & 1) != 0 { break }
       }
     }
