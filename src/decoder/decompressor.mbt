@@ -44,7 +44,7 @@ pub fn create_decompressor_with_dict(window_size : Int, dictionary: Bytes) -> De
 /// Supports concatenated frames per RFC 8878.
 pub fn decompress(data : Bytes) -> @zstd_core.ZSTDResult[Bytes] {
   if data.length() < 4 {
-    return Err(@zstd_core.invalid_data_error())
+    return Err(@zstd_core.parse_error("Data too short: need at least 4 bytes, got " + data.length().to_string()))
   }
 
   let all_output: Array[Byte] = []
@@ -67,7 +67,7 @@ pub fn decompress(data : Bytes) -> @zstd_core.ZSTDResult[Bytes] {
     // Validate frame structure
     let analysis = analyze_file(frame_data)
     if !analysis.is_valid {
-      return Err(@zstd_core.decompression_error())
+      return Err(@zstd_core.message_error(analysis.error_message))
     }
 
     // Decompress this frame

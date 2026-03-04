@@ -395,7 +395,7 @@ pub fn compress(data : Bytes) -> @zstd_core.ZSTDResult[Bytes] {
   let config = create_default_config()
   match compress_data(data, config) {
     Ok(compressed) => Ok(compressed)
-    Err(_) => Err(@zstd_core.compression_error())
+    Err(e) => Err(@zstd_core.message_error(e))
   }
 }
 

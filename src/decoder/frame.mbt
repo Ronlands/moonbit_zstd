@@ -4,7 +4,7 @@
 /// Parse ZSTD frame header according to RFC 8878 - Improved version
 pub fn parse_frame_header(data : Bytes) -> @zstd_core.ZSTDResult[(@zstd_core.FrameHeader, Int)] {
   if data.length() < 5 {
-    return Err(@zstd_core.invalid_frame_header_error())
+    return Err(@zstd_core.parse_error("Frame too short: need at least 5 bytes, got " + data.length().to_string()))
   }
   
   // Check magic number (little-endian)
@@ -14,7 +14,7 @@ pub fn parse_frame_header(data : Bytes) -> @zstd_core.ZSTDResult[(@zstd_core.Fra
               data[0].to_int()
   
   if magic.reinterpret_as_uint() != @zstd_core.ZSTD_MAGIC_NUMBER {
-    return Err(@zstd_core.invalid_magic_number_error())
+    return Err(@zstd_core.parse_error("Invalid magic number: expected 0xFD2FB528, got 0x" + magic.to_string()))
   }
   
   // Parse Frame Header Descriptor (FHD) at offset 4
@@ -30,13 +30,13 @@ pub fn parse_frame_header(data : Bytes) -> @zstd_core.ZSTDResult[(@zstd_core.Fra
 
   // RFC 8878: reserved bit must be zero
   if reserved_bit != 0 {
-    return Err(@zstd_core.invalid_frame_header_error())
+    return Err(@zstd_core.parse_error("Reserved bit in FHD must be zero (FHD=0x" + fhd.to_string() + ")"))
   }
 
   // RFC 8878 field order: Window_Descriptor, Dictionary_ID, Frame_Content_Size
   let mut window_size = 0
   if !single_segment {
-    if offset >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
+    if offset >= data.length() { return Err(@zstd_core.parse_error("Window_Descriptor missing: data ends at offset " + offset.to_string())) }
     let wd = data[offset].to_int()
     let exponent = wd >> 3
     let mantissa = wd & 7
@@ -50,15 +50,15 @@ pub fn parse_frame_header(data : Bytes) -> @zstd_core.ZSTDResult[(@zstd_core.Fra
   // Parse dictionary ID if present
   let mut dict_id = 0
   if dict_id_flag == 1 {
-    if offset >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
+    if offset >= data.length() { return Err(@zstd_core.parse_error("Dict_ID (1-byte) missing at offset " + offset.to_string())) }
     dict_id = data[offset].to_int()
     offset = offset + 1
   } else if dict_id_flag == 2 {
-    if offset + 1 >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
+    if offset + 1 >= data.length() { return Err(@zstd_core.parse_error("Dict_ID (2-byte) truncated at offset " + offset.to_string())) }
     dict_id = data[offset].to_int() | (data[offset + 1].to_int() << 8)
     offset = offset + 2
   } else if dict_id_flag == 3 {
-    if offset + 3 >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
+    if offset + 3 >= data.length() { return Err(@zstd_core.parse_error("Dict_ID (4-byte) truncated at offset " + offset.to_string())) }
     dict_id = data[offset].to_int() | (data[offset + 1].to_int() << 8) | 
               (data[offset + 2].to_int() << 16) | (data[offset + 3].to_int() << 24)
     offset = offset + 4
@@ -68,20 +68,20 @@ pub fn parse_frame_header(data : Bytes) -> @zstd_core.ZSTDResult[(@zstd_core.Fra
   let mut frame_content_size = 0
   if single_segment && fcs_flag == 0 {
     // Single_Segment with FCS_Field_Size=0 → 1-byte FCS
-    if offset >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
+    if offset >= data.length() { return Err(@zstd_core.parse_error("FCS (1-byte) missing at offset " + offset.to_string())) }
     frame_content_size = data[offset].to_int()
     offset = offset + 1
   } else if fcs_flag == 1 {
-    if offset + 1 >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
+    if offset + 1 >= data.length() { return Err(@zstd_core.parse_error("FCS (2-byte) truncated at offset " + offset.to_string())) }
     frame_content_size = (data[offset].to_int() | (data[offset + 1].to_int() << 8)) + 256
     offset = offset + 2
   } else if fcs_flag == 2 {
-    if offset + 3 >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
-    frame_content_size = data[offset].to_int() | (data[offset + 1].to_int() << 8) | 
+    if offset + 3 >= data.length() { return Err(@zstd_core.parse_error("FCS (4-byte) truncated at offset " + offset.to_string())) }
+    frame_content_size = data[offset].to_int() | (data[offset + 1].to_int() << 8) |
                         (data[offset + 2].to_int() << 16) | (data[offset + 3].to_int() << 24)
     offset = offset + 4
   } else if fcs_flag == 3 {
-    if offset + 7 >= data.length() { return Err(@zstd_core.invalid_frame_header_error()) }
+    if offset + 7 >= data.length() { return Err(@zstd_core.parse_error("FCS (8-byte) truncated at offset " + offset.to_string())) }
     frame_content_size = data[offset].to_int() | (data[offset + 1].to_int() << 8) | 
                         (data[offset + 2].to_int() << 16) | (data[offset + 3].to_int() << 24)
     offset = offset + 8
