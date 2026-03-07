@@ -3,6 +3,9 @@
 /// Hash table size for LZ77 matching (64K buckets)
 let hash_table_size : Int = 65536
 
+/// Maximum block size (128KB)
+let max_block_size : Int = 131072
+
 /// Frame content size thresholds for FCS field size selection
 let fcs_threshold_1byte : Int = 256      // < 256: 1-byte FCS
 let fcs_threshold_2byte : Int = 65792    // < 65792: 2-byte FCS, else 4-byte FCS
@@ -196,7 +199,7 @@ pub fn create_compression_context(config: CompressionConfig) -> CompressionConte
 // LZ77 Compression / LZ77 压缩
 // ============================================================================
 
-/// Generate sequences using greedy LZ77 matching (multi-sequence)
+/// Generate sequences using greedy LZ77 matching with repeat offset optimization
 fn generate_sequences(data: Bytes, min_match: Int, window_size: Int) -> (Array[Sequence], Array[Byte]) {
   let sequences: Array[Sequence] = []
   let literals: Array[Byte] = []
@@ -204,6 +207,9 @@ fn generate_sequences(data: Bytes, min_match: Int, window_size: Int) -> (Array[S
 
   let mut pos = 0
   let mut literal_start = 0
+  let mut rep0 = 1
+  let mut rep1 = 4
+  let mut rep2 = 8
 
   while pos < data.length() {
     let match_result = find_match(data, pos, hash_table, min_match, window_size)
@@ -214,10 +220,24 @@ fn generate_sequences(data: Bytes, min_match: Int, window_size: Int) -> (Array[S
         literals.push(data[i])
       }
 
+      let offset = match_result.offset
+      let encoded_offset = if offset == rep0 {
+        -1  // Special marker for rep[0]
+      } else if offset == rep1 {
+        -2  // Special marker for rep[1]
+      } else if offset == rep2 {
+        -3  // Special marker for rep[2]
+      } else {
+        rep2 = rep1
+        rep1 = rep0
+        rep0 = offset
+        offset
+      }
+
       sequences.push(Sequence::{
         literal_length,
         match_length: match_result.length,
-        offset: match_result.offset,
+        offset: encoded_offset,
       })
 
       let mut i = pos
@@ -252,6 +272,12 @@ fn generate_sequences(data: Bytes, min_match: Int, window_size: Int) -> (Array[S
 /// - Compressed 块：LZ77 + FSE/Huffman 高级压缩
 pub fn compress_data(data: Bytes, config: CompressionConfig) -> Result[Bytes, String] {
   if data.length() == 0 { return compress_empty_frame() }
+
+  // Use multi-block compression for large data
+  if data.length() > max_block_size {
+    return compress_multi_block(data, config)
+  }
+
   if is_rle_beneficial(data) {
     return compress_as_rle_block(data, config)
   }
@@ -259,11 +285,9 @@ pub fn compress_data(data: Bytes, config: CompressionConfig) -> Result[Bytes, St
   if should_try_compressed_block(data) {
     match compress_as_compressed_block(data, config) {
       Ok(compressed) => {
-        // 只在压缩后更小时才使用压缩块
         if compressed.length() < data.length() + 12 {
           return Ok(compressed)
         }
-        // 压缩后反而更大，回退到 Raw 块
         return compress_as_raw_block(data, config)
       }
       Err(_) => {
@@ -273,6 +297,116 @@ pub fn compress_data(data: Bytes, config: CompressionConfig) -> Result[Bytes, St
   }
 
   compress_as_raw_block(data, config)
+}
+
+/// Compress large data as multiple blocks
+fn compress_multi_block(data: Bytes, config: CompressionConfig) -> Result[Bytes, String] {
+  let output: Array[Byte] = []
+
+  write_zstd_magic(output)
+  write_frame_header_descriptor(output, data.length())
+
+  let mut offset = 0
+  while offset < data.length() {
+    let block_size = (data.length() - offset).min(max_block_size)
+
+    // Extract block data
+    let block_bytes: Array[Byte] = []
+    for i = 0; i < block_size; i = i + 1 {
+      block_bytes.push(data[offset + i])
+    }
+    let block_data = Bytes::from_array(block_bytes)
+    let is_last = offset + block_size >= data.length()
+
+    let block_result = if is_rle_beneficial(block_data) {
+      compress_block_content_rle(block_data)
+    } else if should_try_compressed_block(block_data) {
+      match compress_block_content_compressed(block_data, config) {
+        Ok(compressed) => {
+          if compressed.length() < block_size {
+            Ok((2, compressed))
+          } else {
+            compress_block_content_raw(block_data)
+          }
+        }
+        Err(_) => compress_block_content_raw(block_data)
+      }
+    } else {
+      compress_block_content_raw(block_data)
+    }
+
+    match block_result {
+      Ok((block_type, block_content)) => {
+        write_block_header(output, block_type, block_content.length(), is_last)
+        for i = 0; i < block_content.length(); i = i + 1 {
+          output.push(block_content[i])
+        }
+      }
+      Err(e) => return Err(e)
+    }
+
+    offset = offset + block_size
+  }
+
+  Ok(Bytes::from_array(output))
+}
+
+/// Write block header
+fn write_block_header(output: Array[Byte], block_type: Int, size: Int, is_last: Bool) -> Unit {
+  let last_bit = if is_last { 1 } else { 0 }
+  let header = last_bit | (block_type << 1) | (size << 3)
+  output.push((header & 0xFF).to_byte())
+  output.push(((header >> 8) & 0xFF).to_byte())
+  output.push(((header >> 16) & 0xFF).to_byte())
+}
+
+/// Compress block content as raw
+fn compress_block_content_raw(data: Bytes) -> Result[(Int, Bytes), String] {
+  Ok((0, data))
+}
+
+/// Compress block content as RLE
+fn compress_block_content_rle(data: Bytes) -> Result[(Int, Bytes), String] {
+  let output: Array[Byte] = []
+  output.push(data[0])
+  Ok((1, Bytes::from_array(output)))
+}
+
+/// Compress block content as compressed
+fn compress_block_content_compressed(data: Bytes, config: CompressionConfig) -> Result[Bytes, String] {
+  let min_match = config.min_match
+  let window_size = 1 << config.window_log
+  let (sequences, literals) = generate_sequences(data, min_match, window_size)
+
+  if sequences.length() == 0 {
+    return Err("No sequences")
+  }
+
+  let output: Array[Byte] = []
+
+  encode_literals_section(literals, output)
+
+  let num_sequences = sequences.length()
+  if num_sequences < 128 {
+    output.push(num_sequences.to_byte())
+  } else if num_sequences < 32768 {
+    output.push(((num_sequences >> 8) + 128).to_byte())
+    output.push((num_sequences & 0xFF).to_byte())
+  } else {
+    output.push(0xFF)
+    output.push((num_sequences & 0xFF).to_byte())
+    output.push(((num_sequences >> 8) & 0xFF).to_byte())
+  }
+
+  if num_sequences > 0 {
+    output.push(0x00)
+    match encode_sequences_predefined_fse(sequences, output) {
+      Ok(_) => ()
+      Err(e) => return Err(e)
+    }
+  }
+
+  Ok(Bytes::from_array(output))
 }
 
 /// 判断是否应该尝试 Compressed block
@@ -942,8 +1076,15 @@ fn encode_ml_symbol(ml: Int) -> Int {
   code
 }
 
-/// 编码 Offset 为符号（使用 RFC 8878 标准表）
+/// Encode Offset symbol with repeat offset support
 fn encode_of_symbol(offset: Int) -> Int {
+  if offset == -1 {
+    return 0  // rep[0]
+  } else if offset == -2 {
+    return 1  // rep[1]
+  } else if offset == -3 {
+    return 1  // rep[2] (will need extra bit)
+  }
   let (code, _) = @zstd_entropy.encode_of(offset)
   code
 }

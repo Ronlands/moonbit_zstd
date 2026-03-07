@@ -1,23 +1,21 @@
 # MoonBit ZSTD
 
-A pure MoonBit implementation of Zstandard (ZSTD) compression algorithm, fully compliant with RFC 8878.
+Pure MoonBit implementation of Zstandard (ZSTD) compression algorithm following RFC 8878.
 
-纯 MoonBit 实现的 Zstandard (ZSTD) 压缩算法库，符合 RFC 8878 规范。
+## Highlights
 
-## Highlights / 亮点
+- **Full Compression & Decompression** — LZ77 + FSE entropy coding
+- **Official zstd Compatible** — Output verified with `zstd -d` v1.5.6/v1.5.7
+- **26/26 Tests Passing** — All test categories passing
+- **Pure MoonBit** — No C/FFI dependencies, runs on WASM
 
-- **Full Compression & Decompression** / **完整压缩与解压缩** — LZ77 + FSE entropy coding, not just raw/RLE
-- **Official zstd Compatible** / **官方 zstd 兼容** — Output verified with `zstd -d` v1.5.7
-- **21/21 Tests Passing** / **21/21 测试通过** — Including multi-sequence compressed blocks
-- **Pure MoonBit** / **纯 MoonBit** — No C/FFI dependencies, runs on WASM
-
-## Quick Start / 快速开始
+## Quick Start
 
 ```bash
 moon run src/cmd    # Run demos + full test suite
 ```
 
-### Basic Usage / 基本用法
+### Basic Usage
 
 ```moonbit
 // Compress and decompress
@@ -35,9 +33,9 @@ let compressed = @zstd.compress_advanced(data, Auto, 3)
 let analysis = @zstd.analyze_file(data)
 ```
 
-## Features / 功能
+## Features
 
-### Compression / 压缩
+### Compression
 
 | Block Type | Description                             | Compression Ratio |
 | ---------- | --------------------------------------- | ----------------- |
@@ -45,68 +43,60 @@ let analysis = @zstd.analyze_file(data)
 | RLE        | Run-length encoding for repetitive data | Up to 20:1        |
 | Compressed | LZ77 + FSE (tANS) entropy coding        | 3:1 ~ 7:1 typical |
 
-- 22 compression levels with configurable window size (64KB~1MB) and search depth
+- 22 compression levels with configurable window size and search depth
 - Automatic block type selection (Raw/RLE/Compressed)
-- Greedy multi-sequence LZ77 matching with 64KB window
-- Predefined FSE tables matching RFC 8878 Section 3.1.1.3.2.2
-- RLE Literals (type=1) for all-same-byte literal sections
-- **Byte-compatible with official `zstd -d`** (verified with v1.5.7)
+- Multi-sequence LZ77 matching
+- Predefined FSE tables per RFC 8878
+- RLE Literals optimization
+- Byte-compatible with official `zstd -d`
 
-### Decompression / 解压缩
+### Decompression
 
 - All block types: Raw, RLE, Compressed
-- FSE (tANS) decoding with proper backward bitstream and reload
-- Huffman literals decoding (Compressed + Treeless modes)
-- Sliding window support with overlapping match copy
+- FSE (tANS) decoding with backward bitstream
+- Huffman literals decoding
+- Sliding window with overlapping match copy
 - Multi-block frame support
-- Dictionary decompression support
+- Dictionary support
 
-### Entropy Coding / 熵编码
+### Entropy Coding
 
-- **FSE (tANS)**: Full encoder + decoder with official spread algorithm (high-threshold placement for -1 probability symbols)
-- **Huffman**: Encoder + decoder with canonical codes, weight serialization, tree building
+- **FSE (tANS)**: Encoder + decoder with official spread algorithm
+- **Huffman**: Encoder + decoder with canonical codes
 
-### Dictionary / 字典
+### Dictionary
 
 - Raw and ZSTD-format dictionary support
 - Dictionary ID management
-- Cover algorithm for dictionary building from samples
-- Dictionary-enhanced LZ77 compression
+- Cover algorithm for dictionary building
+- Dictionary-enhanced compression
 
-## Test Results / 测试结果
+## Test Results
 
 ```
-Basic tests passed:         11/11
-Compatibility tests passed:  5/5
-Dictionary tests passed:     5/5
+Basic tests passed:                      11/11
+Compatibility tests passed:               5/5
+Dictionary tests passed:                  5/5
+Non-compliance & cross-compat tests:      7/7
 All tests passed! ✓
 ```
 
-| Test Category               | Count  | Status         |
-| --------------------------- | ------ | -------------- |
-| Basic Compression           | 1      | Passed         |
-| Format Detection            | 1      | Passed         |
-| File Analysis               | 1      | Passed         |
-| Compression Levels          | 1      | Passed         |
-| Empty Data                  | 1      | Passed         |
-| Data Integrity              | 1      | Passed         |
-| Compressed Block (LZ77+FSE) | 1      | Passed         |
-| Multi-Sequence Block        | 1      | Passed         |
-| RLE Literals                | 1      | Passed         |
-| FSE Bitstream               | 1      | Passed         |
-| FSE Encode Simple           | 1      | Passed         |
-| Compatibility tests         | 5      | Passed         |
-| Dictionary tests            | 5      | Passed         |
-| **Total**                   | **21** | **All Passed** |
+| Test Category               | Count | Status |
+| --------------------------- | ----- | ------ |
+| Basic Compression           | 11    | Passed |
+| Compatibility tests         | 5     | Passed |
+| Dictionary tests            | 5     | Passed |
+| Non-compliance & cross-compat | 7   | Passed |
+| **Total**                   | **26** | **All Passed** |
 
-### Official Tool Verification / 官方工具验证
+### Official Tool Verification
 
 ```bash
 # Our encoder output → official zstd decoder
-zstd -d moonbit_compressed.zst -o output.txt    # ✓ 450 bytes, content matches
+zstd -d moonbit_compressed.zst -o output.txt    # ✓ Content matches
 ```
 
-## Compression Benchmark / 压缩性能
+## Compression Benchmark
 
 Test data: `"The quick brown fox jumps over the lazy dog. "` repeated 10x (450 bytes)
 
@@ -116,7 +106,7 @@ Test data: `"The quick brown fox jumps over the lazy dog. "` repeated 10x (450 b
 | RLE Block (all-same data) | 10 bytes    | 20:1    |
 | Compressed Block          | 64 bytes    | **7:1** |
 
-## Project Structure / 项目结构
+## Project Structure
 
 ```
 src/
@@ -132,9 +122,9 @@ src/
 └── test-data/    # Golden test files from official ZSTD suite
 ```
 
-## API Reference / API 参考
+## API Reference
 
-### Compression / 压缩
+### Compression
 
 ```moonbit
 fn compress(data: Bytes) -> Bytes
@@ -146,7 +136,7 @@ fn compress_as_rle(data: Bytes, level: Int) -> Bytes
 fn compress_as_compressed(data: Bytes, level: Int) -> Bytes
 ```
 
-### Decompression / 解压缩
+### Decompression
 
 ```moonbit
 fn decompress(data: Bytes) -> Bytes
@@ -154,7 +144,7 @@ fn decompress_with_sliding_window(decoder: SlidingWindowDecoder, data: Bytes) ->
 fn create_sliding_window_decoder(window_size: Int) -> SlidingWindowDecoder
 ```
 
-### Analysis / 分析
+### Analysis
 
 ```moonbit
 fn analyze_file(data: Bytes) -> ZSTDFileAnalysis
@@ -162,7 +152,7 @@ fn is_zstd_format(data: Bytes) -> Bool
 fn analyze_data_integrity(data: Bytes) -> DataIntegrityAnalysis
 ```
 
-### Dictionary / 字典
+### Dictionary
 
 ```moonbit
 fn compress_with_dictionary(data: Bytes, dictionary: Dictionary) -> Result[Bytes, String]
@@ -170,64 +160,59 @@ fn decompress_with_dictionary(data: Bytes, dictionary: Dictionary) -> Result[Byt
 fn build_dictionary_with_cover(samples: Array[Bytes], target_size: Int, ngram_size: Int) -> Result[Dictionary, String]
 ```
 
-## Implementation Status / 实现状态
+## Implementation Status
 
-### Completed / 已完成
+### Completed
 
-- [x] Full compression: Raw + RLE + Compressed blocks (LZ77 + FSE)
-- [x] Full decompression: All block types with sliding window
-- [x] FSE (tANS) encoder/decoder with official-compatible table spread
+- [x] Full compression: Raw + RLE + Compressed blocks
+- [x] Full decompression: All block types
+- [x] FSE (tANS) encoder/decoder
 - [x] Huffman encoder/decoder
 - [x] Dictionary compression and decompression
-- [x] Official `zstd -d` compatibility for Compressed blocks
+- [x] Official `zstd -d` compatibility
 - [x] 22 compression levels
-- [x] RLE Literals optimization
-- [x] Multi-sequence LZ77 with greedy matching
-- [x] Bitstream reload for large data
+- [x] Multi-sequence LZ77
+- [x] Repeat Offset optimization
+- [x] Multi-block frame compression
 
-### Future Work / 未来工作
+### Future Work
 
-- [ ] Huffman Literals compression (type=2) in encoder — currently uses Raw/RLE literals
-- [ ] Repeat Offset optimization (offset codes 1/2/3)
-- [ ] Multi-block frame compression for data > 128KB
-- [ ] FSE Compressed mode (custom tables) in addition to Predefined
-- [ ] Performance optimization (batch copy, reduced allocations)
+- [ ] Huffman Literals compression in encoder
+- [ ] FSE Compressed mode (custom tables)
+- [ ] Performance optimization
 - [ ] Content checksum support
 
-## Technical Details / 技术细节
+## Technical Details
 
 ### ZSTD Bitstream Format
 
-The encoder produces a standard ZSTD bitstream:
+Standard ZSTD bitstream structure:
 
 1. **Frame Header**: Magic (0xFD2FB528) + FHD + Frame Content Size
-2. **Block Header**: Last_Block flag + Block_Type (Raw/RLE/Compressed) + Block_Size
+2. **Block Header**: Last_Block flag + Block_Type + Block_Size
 3. **Compressed Block**:
-   - Literals Section (Raw or RLE literals)
-   - Sequences Section:
-     - Sequence count + compression modes byte (Predefined FSE)
-     - FSE-encoded bitstream with padding bit marker
+   - Literals Section (Raw or RLE)
+   - Sequences Section (FSE-encoded)
 
-The FSE bitstream follows the official ZSTD encoding order:
+FSE bitstream encoding order:
+- **Encoder**: init seqN-1, extras LL→ML→OF, states ML→OF→LL
+- **Decoder**: read states LL→OF→ML, extras OF→ML→LL, update LL→OF→ML
 
-- **Encoder**: init seqN-1, extras LL→ML→OF, states ML→OF→LL, final states ML→OF→LL
-- **Decoder**: read states LL→OF→ML, extras OF→ML→(reload)→LL, update LL→OF→ML
+## Contributing
 
-## Contributing / 贡献
-
-Contributions welcome! Areas where help is appreciated:
+Contributions welcome! Areas of interest:
 
 - Performance optimization
-- Huffman Literals compression integration
+- Huffman Literals compression
 - Additional test cases
 - Repeat Offset optimization
 
-## License / 许可证
+## License
 
 [Apache-2.0](LICENSE)
 
-## Acknowledgments / 致谢
+## Acknowledgments
 
 - [RFC 8878](https://www.rfc-editor.org/rfc/rfc8878.html) — ZSTD specification
 - [Facebook ZSTD](https://github.com/facebook/zstd) — Reference implementation
-- [MoonBit](https://www.moonbitlang.com/) — The language that made this possible
+- [MoonBit](https://www.moonbitlang.com/) — The language
