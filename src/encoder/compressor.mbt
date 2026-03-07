@@ -1,10 +1,4 @@
 /// ZSTD Compressor - LZ77 + Entropy Coding
-///
-/// 支持功能：
-/// - ✅ Raw 块（无压缩）
-/// - ✅ RLE 块（重复数据压缩，可达 2000% 压缩率）
-/// - ✅ 压缩级别 1-22（可配置窗口大小和搜索深度）
-/// - ⏳ Compressed 块（LZ77 + FSE/Huffman，待完善）
 
 /// Hash table size for LZ77 matching (64K buckets)
 let hash_table_size : Int = 65536
@@ -818,8 +812,8 @@ fn find_match_with_dict(
     let match_length = calculate_match_length_from_dict(data, dictionary, pos, dict_pos)
 
     if match_length >= min_match {
-      // 字典匹配的偏移 = 字典长度 - 匹配位置 + 当前输出位置
-      // 简化：使用数据开始到当前位置的距离
+      // 字典匹配的偏移计算（ZSTD标准）
+      // offset = 当前位置 + (字典长度 - 匹配位置)
       let offset = pos + (dictionary.length() - dict_pos)
       Match::{ offset: offset, length: match_length }
     } else {

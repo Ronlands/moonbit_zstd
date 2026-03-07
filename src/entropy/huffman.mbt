@@ -1,12 +1,4 @@
-/// Huffman encoder/decoder implementation
-/// Used for encoding/decoding literals in ZSTD
-/// Following RFC 8878 specification
-///
-/// ✅ Huffman 编码器已实现：
-/// - [✓] Huffman 树构建（用于编码）
-/// - [✓] Huffman 符号编码
-/// - [✓] 权重优化算法
-/// - [✓] 表序列化输出
+/// Huffman encoder/decoder
 
 /// Huffman表结构
 pub struct HuffmanTable {
@@ -609,7 +601,7 @@ fn calculate_code_lengths(node: HuffmanTreeNode, depth: Int, lengths: Array[Int]
   }
 }
 
-/// 生成 Huffman 编码 - 使用规范的算法
+/// 生成 Huffman 编码
 fn generate_huffman_codes_optimized(lengths: Array[Int]) -> Array[HuffmanCode] {
   let codes: Array[HuffmanCode] = []
   // 找到真正的最大长度
@@ -971,7 +963,7 @@ pub fn test_huffman_roundtrip() -> Result[Bool, String] {
       println("  原始数据大小: \{test_data.length()} 字节")
       println("  编码后大小: \{encoded_bytes.length()} 字节")
 
-      // 解码（简化版：需要知道权重信息的位置）
+      // Decode (requires knowing weight information position)
       // 这里只是测试基本功能，实际实现需要解析权重
       let frequencies = count_huffman_symbols(test_data, max_symbol)
       let encode_table = build_huffman_encode_table(frequencies)

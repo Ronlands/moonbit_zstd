@@ -1,11 +1,4 @@
-/// ZSTD Block Decompression Module - Unified Implementation
-/// Handles all block types: Raw, RLE, and Compressed blocks
-///
-/// TODO: 性能优化
-/// - [ ] 序列执行优化（批量复制）
-/// - [ ] 减少数组分配次数
-/// - [ ] 优化 Huffman/FSE 解码性能
-/// - [ ] 使用更高效的数据结构
+/// ZSTD Block Decompression
 
 // ============================================================================
 // Decoder Context for Sliding Window Management
@@ -280,14 +273,22 @@ fn parse_literals_header(data: Bytes, offset: Int) -> Result[(@zstd_core.Literal
   }
 }
 
-/// Block decompression context（块级上下文，用于保存 Huffman 树）
+/// Block decompression context（块级上下文，用于保存 Huffman 树和 FSE 表）
 priv struct BlockContext {
   mut last_huffman_weights: Option[@zstd_entropy.HuffmanWeights]
+  mut last_ll_weights: Option[Array[Int]]
+  mut last_of_weights: Option[Array[Int]]
+  mut last_ml_weights: Option[Array[Int]]
 }
 
 /// 创建块上下文
 fn create_block_context() -> BlockContext {
-  BlockContext::{ last_huffman_weights: None }
+  BlockContext::{
+    last_huffman_weights: None,
+    last_ll_weights: None,
+    last_of_weights: None,
+    last_ml_weights: None
+  }
 }
 
 /// Decompress literals section with context support
@@ -340,19 +341,11 @@ fn decompress_literals_section(
         @zstd_core.LiteralsType::Compressed => {
           // Huffman compressed - need to parse weights and decode
           let result = decode_huffman_literals(data, data_offset, info, header_size)
-          
+
           // 保存 Huffman 权重以供 Treeless 模式使用
           match result {
-            Ok((literals, consumed)) => {
-              // 重新解析权重以保存（简化实现）
-              let weights_result = @zstd_entropy.parse_huffman_weights(data, data_offset, 256)
-              let _ = match weights_result {
-                Ok((weights, _)) => {
-                  context.last_huffman_weights = Some(weights)
-                  true
-                }
-                Err(_) => false  // 忽略错误，只是无法保存
-              }
+            Ok((literals, consumed, weights)) => {
+              context.last_huffman_weights = Some(weights)
               Ok((literals, consumed))
             }
             Err(e) => Err(e)
@@ -442,7 +435,7 @@ fn decode_huffman_literals(
   offset: Int,
   info: @zstd_core.LiteralsSectionInfo,
   header_size: Int
-) -> Result[(Bytes, Int), String] {
+) -> Result[(Bytes, Int, @zstd_entropy.HuffmanWeights), String] {
   // 关键验证：Huffman 压缩数据不能为 0 字节
   // 这是检测 truncated_huff_state.zst 的关键
   if info.compressed_size == 0 {
@@ -570,7 +563,7 @@ fn decode_huffman_literals(
                 return Err("Huffman decoding mismatch: decoded " + decoded_bytes.length().to_string() +
                           " symbols, expected " + regen.to_string() + " (possible truncation)")
               }
-              Ok((Bytes::from_array(decoded_bytes), header_size + info.compressed_size))
+              Ok((Bytes::from_array(decoded_bytes), header_size + info.compressed_size, weights))
             }
             Err(e) => {
               let error_msg = if e.contains("Truncated") || e.contains("truncated") {
@@ -624,7 +617,7 @@ fn decompress_compressed_block_with_context(
   let sequences_size = size - literals_consumed
 
   let sequences = if sequences_size > 0 {
-    match parse_sequences_section(data, sequences_offset, sequences_size) {
+    match parse_sequences_section(data, sequences_offset, sequences_size, context) {
       Ok(seqs) => seqs
       Err(e) => return Err("Failed to parse sequences: " + e)
     }
@@ -671,7 +664,7 @@ fn decompress_compressed_block(data: Bytes, offset: Int, size: Int) -> Result[By
       }
 
       // Parse sequences section with validation
-      let sequences_result = parse_sequences_section(data, sequences_offset, sequences_size)
+      let sequences_result = parse_sequences_section(data, sequences_offset, sequences_size, context)
       match sequences_result {
         Ok(sequences) => {
           if sequences.length() == 0 {
@@ -688,7 +681,12 @@ fn decompress_compressed_block(data: Bytes, offset: Int, size: Int) -> Result[By
 }
 
 /// Parse sequences section with validation
-fn parse_sequences_section(data: Bytes, offset: Int, size: Int) -> Result[Array[@zstd_core.Sequence], String] {
+fn parse_sequences_section(
+  data: Bytes,
+  offset: Int,
+  size: Int,
+  context: BlockContext
+) -> Result[Array[@zstd_core.Sequence], String] {
   // Parse sequence header
   let header_result = parse_sequence_header(data, offset)
   match header_result {
@@ -713,7 +711,7 @@ fn parse_sequences_section(data: Bytes, offset: Int, size: Int) -> Result[Array[
       
       // Decode sequences (full implementation with FSE)
       // Pass the sequences section end so the FSE decoder doesn't read beyond the block boundary
-      let result = decode_sequences_simple(data, offset + header_size, header, offset + size)
+      let result = decode_sequences_simple(data, offset + header_size, header, offset + size, context)
       match result {
         Ok(seqs) => Ok(seqs)
         Err(e) => Err(e)
@@ -796,7 +794,8 @@ fn decode_sequences_simple(
   data: Bytes,
   offset: Int,
   header: @zstd_core.SequencesSectionInfo,
-  data_end: Int  // end of the sequences section in `data`
+  data_end: Int,  // end of the sequences section in `data`
+  context: BlockContext
 ) -> Result[Array[@zstd_core.Sequence], String] {
   if header.num_sequences == 0 {
     return Ok([])
@@ -805,22 +804,31 @@ fn decode_sequences_simple(
   let current_offset = offset
 
   // 解析或使用预定义的 FSE 表（区分 LL/OF/ML）
-  let ll_weights_result = get_sequence_weights(data, current_offset, header.ll_mode, "LL")
-  let of_weights_result = get_sequence_weights(data, current_offset, header.of_mode, "OF")
-  let ml_weights_result = get_sequence_weights(data, current_offset, header.ml_mode, "ML")
+  let ll_weights_result = get_sequence_weights(data, current_offset, header.ll_mode, "LL", context)
+  let of_weights_result = get_sequence_weights(data, current_offset, header.of_mode, "OF", context)
+  let ml_weights_result = get_sequence_weights(data, current_offset, header.ml_mode, "ML", context)
 
   let (ll_weights, current_offset_after_ll) = match ll_weights_result {
-    Ok((w, s)) => (@zstd_entropy.normalize_counts(ensure_weights_length(w, 36), 6), current_offset + s)
+    Ok((w, s)) => {
+      context.last_ll_weights = Some(w)
+      (@zstd_entropy.normalize_counts(ensure_weights_length(w, 36), 6), current_offset + s)
+    }
     Err(_) => (@zstd_entropy.normalize_counts(get_predefined_ll_weights(), 6), current_offset)
   }
 
   let (of_weights, current_offset_after_of) = match of_weights_result {
-    Ok((w, s)) => (@zstd_entropy.normalize_counts(ensure_weights_length(w, 32), 5), current_offset_after_ll + s)
+    Ok((w, s)) => {
+      context.last_of_weights = Some(w)
+      (@zstd_entropy.normalize_counts(ensure_weights_length(w, 32), 5), current_offset_after_ll + s)
+    }
     Err(_) => (@zstd_entropy.normalize_counts(get_predefined_of_weights(), 5), current_offset_after_ll)
   }
 
   let (ml_weights, final_offset) = match ml_weights_result {
-    Ok((w, s)) => (@zstd_entropy.normalize_counts(ensure_weights_length(w, 53), 6), current_offset_after_of + s)
+    Ok((w, s)) => {
+      context.last_ml_weights = Some(w)
+      (@zstd_entropy.normalize_counts(ensure_weights_length(w, 53), 6), current_offset_after_of + s)
+    }
     Err(_) => (@zstd_entropy.normalize_counts(get_predefined_ml_weights(), 6), current_offset_after_of)
   }
 
@@ -881,7 +889,8 @@ fn get_sequence_weights(
   data: Bytes,
   offset: Int,
   mode: @zstd_core.SequenceMode,
-  weight_type: String  // "LL", "ML", or "OF"
+  weight_type: String,  // "LL", "ML", or "OF"
+  context: BlockContext
 ) -> Result[(Array[Int], Int), String] {
   match mode {
     @zstd_core.SequenceMode::Predefined => {
@@ -915,11 +924,20 @@ fn get_sequence_weights(
       }
     }
     @zstd_core.SequenceMode::Repeat => {
-      // Repeat 模式：使用上一个表（简化处理，使用预定义）
+      // Repeat 模式：使用上一个表
       let weights = match weight_type {
-        "LL" => get_predefined_ll_weights()
-        "ML" => get_predefined_ml_weights()
-        "OF" => get_predefined_of_weights()
+        "LL" => match context.last_ll_weights {
+          Some(w) => w
+          None => get_predefined_ll_weights()
+        }
+        "ML" => match context.last_ml_weights {
+          Some(w) => w
+          None => get_predefined_ml_weights()
+        }
+        "OF" => match context.last_of_weights {
+          Some(w) => w
+          None => get_predefined_of_weights()
+        }
         _ => get_predefined_ll_weights()
       }
       Ok((weights, 0))

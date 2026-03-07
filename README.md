@@ -2,7 +2,7 @@
 
 A pure MoonBit implementation of Zstandard (ZSTD) compression algorithm, fully compliant with RFC 8878.
 
-纯 MoonBit 实现的 Zstandard (ZSTD) 压缩算法库，完全符合 RFC 8878 规范。
+纯 MoonBit 实现的 Zstandard (ZSTD) 压缩算法库，符合 RFC 8878 规范。
 
 ## Highlights / 亮点
 

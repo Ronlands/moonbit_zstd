@@ -1,12 +1,4 @@
-/// ZSTD decompressor module
-/// Simplified implementation using analyzer functionality
-///
-/// TODO: 性能优化
-/// - [ ] 位流操作优化（批量读取、缓存）
-/// - [ ] 内存分配优化（预分配、重用缓冲区）
-/// - [ ] 多帧处理支持
-/// - [ ] 并行解压缩（多线程）
-/// - [ ] 缓存友好的数据结构
+/// ZSTD decompressor
 
 /// Decompressor structure
 pub struct Decompressor {
@@ -298,7 +290,8 @@ fn parse_frame_header_for_decompressor(data: Bytes, offset: Int) -> Result[(@zst
     if current_offset + 7 >= data.length() {
       return Err("Frame_Content_Size字段不完整")
     }
-    // 8字节Frame_Content_Size，但MoonBit的Int可能只有32位，这里简化处理
+    // 8字节Frame_Content_Size：MoonBit Int 限制为32位，只读取低4字节
+    // 这限制了对 >4GB 文件的支持，但对大多数用例足够
     frame_content_size = data[current_offset].to_int() |
                         (data[current_offset + 1].to_int() << 8) |
                         (data[current_offset + 2].to_int() << 16) |

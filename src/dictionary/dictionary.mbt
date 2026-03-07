@@ -1,12 +1,4 @@
-/// ZSTD字典支持模块
-/// 实现字典压缩和解压功能
-///
-/// ✅ 完整字典支持已实现：
-/// - [✓] 解压缩时预加载字典内容到解压缩窗口
-/// - [✓] 压缩时的字典匹配实现（使用哈希表预加载）
-/// - [✓] 在帧头中正确写入字典 ID
-/// - [✓] 实现 Cover 算法用于智能字典构建
-/// - [✓] 实际压缩测试以计算字典收益（替换估算方法）
+/// ZSTD dictionary support
 
 /// 字典类型
 pub enum DictionaryType {
@@ -413,8 +405,7 @@ pub fn calculate_dictionary_benefit(data: Bytes, dictionary: Dictionary) -> Doub
   }
 }
 
-/// 计算字典压缩收益（详细版本，返回更多信息）
-/// 提供详细的压缩统计信息
+/// Calculate dictionary compression benefit with detailed statistics
 pub fn calculate_dictionary_benefit_detailed(
   data: Bytes,
   dictionary: Dictionary
@@ -504,7 +495,7 @@ pub fn format_benefit_stats(stats: DictionaryBenefitStats) -> String {
 
 /// 格式化浮点数（保留指定小数位）
 fn format_double(value: Double, decimals: Int) -> String {
-  // 简化实现：乘以 10^decimals，取整，再除以 10^decimals
+  // 四舍五入到指定小数位
   let multiplier = match decimals {
     0 => 1.0
     1 => 10.0

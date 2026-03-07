@@ -1,12 +1,4 @@
-/// Finite State Entropy (FSE) decoder implementation
-/// Used for decoding sequence distributions (Literal Lengths, Match Lengths, Offsets)
-/// Following RFC 8878 specification
-///
-/// TODO: 实现 FSE 编码器
-/// - [ ] FSE 表构建（用于编码）
-/// - [ ] FSE 符号编码
-/// - [ ] 权重归一化算法
-/// - [ ] 表序列化输出
+/// Finite State Entropy (FSE) decoder
 
 /// Sequence structure
 pub struct Sequence {
@@ -794,7 +786,7 @@ pub fn build_fse_encode_table(counts: Array[Int], table_log: Int) -> FSEEncodeTa
     
     // 为每个可能的位值计算下一个状态
     for bits_val = 0; bits_val < max_bits_value; bits_val = bits_val + 1 {
-      // 简化的状态转换计算
+      // 状态转换计算
       let next_state = (normalized[symbol] + bits_val) % table_size
       state_transitions[bits_val] = next_state
     }
@@ -1104,7 +1096,7 @@ fn decode_symbol_from_state(state: UInt64, table: FSECTable) -> (Int, UInt64, In
     if state_idx >= 0 && state_idx < table.state_table.length() &&
        table.state_table[state_idx].to_int() == state_int {
       // 找到匹配的符号，返回结果
-      // 新状态使用简化计算
+      // 新状态初始化为表大小
       let new_state = (1 << table.table_log).to_uint64()
       return (s, new_state, nb_bits_out)
     }

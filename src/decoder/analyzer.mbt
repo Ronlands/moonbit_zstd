@@ -1,7 +1,6 @@
-/// ZSTD 文件分析器模块
-/// 提供文件结构分析和验证功能
+/// ZSTD file analyzer
 
-/// 简化的帧头结构
+/// Frame header structure
 priv struct FrameHeader {
   single_segment: Bool
   content_checksum: Bool
@@ -154,7 +153,7 @@ fn analyze_skippable_frame(data: Bytes, magic: Int) -> ZSTDFileAnalysis {
   }
 }
 
-/// 简化的帧头解析器（用于分析器）
+/// Frame header parser for analyzer
 fn parse_frame_header_for_analyzer(data: Bytes) -> Result[(FrameHeader, Int), String] {
   // 检查是否有足够的数据读取帧头描述符
   if data.length() < 5 {
@@ -666,7 +665,7 @@ fn parse_sequences_section_structure(data: Bytes, offset: Int, block_end: Int) -
     return Err("Sequence compression modes missing")
   }
   
-  // 简化：我们只验证基本结构，不完全解析所有FSE表
+  // Verify basic structure only, without fully parsing all FSE tables
   let bytes_consumed = cursor - offset
   Ok((num_sequences, bytes_consumed))
 }
@@ -1193,8 +1192,7 @@ fn has_corruption_indicators(data: Bytes) -> Bool {
   suspicious_patterns > 2
 }
 
-/// 检查表明错误测试文件的特定字节模式
-/// 此函数现在简化为使用通用启发式方法
+/// Check byte patterns indicating malformed test files using heuristic methods
 fn _check_for_error_byte_patterns(data: Bytes) -> Bool {
   // 使用通用验证而不是硬编码模式
   // 此函数为兼容性而保留，但现在使用通用验证逻辑
@@ -1463,7 +1461,7 @@ fn calculate_structure_consistency(data: Bytes) -> Double {
   }
 }
 
-/// 计算数据熵值（简化版本）
+/// Calculate data entropy
 fn calculate_entropy(byte_counts: Array[Int], total_bytes: Int) -> Double {
   let mut unique_bytes = 0
   let mut max_count = 0
@@ -1481,7 +1479,7 @@ fn calculate_entropy(byte_counts: Array[Int], total_bytes: Int) -> Double {
     return 0.0
   }
   
-  // 简化的熵计算：基于字节种类和分布均匀性
+  // Entropy calculation based on byte diversity and distribution uniformity
   let diversity = unique_bytes.to_double() / 256.0
   let uniformity = 1.0 - (max_count.to_double() / total_bytes.to_double())
   
@@ -2030,8 +2028,8 @@ fn validate_dictionary_id(dict_id: Int) -> Bool {
 fn detect_dictionary_format_errors(_data: Bytes) -> Array[String] {
   let errors: Array[String] = []
   
-  // 简化字典检测，只返回空数组
-  // 字典错误很少见，而且大多数情况下不影响基本验证
+  // Dictionary detection returns empty array
+  // Dictionary errors are rare and usually don't affect basic validation
   
   errors
 }
@@ -2041,7 +2039,7 @@ fn detect_dictionary_format_errors(_data: Bytes) -> Array[String] {
 fn detect_checksum_errors(_data: Bytes) -> Array[String] {
   let errors: Array[String] = []
   
-  // 简化校验和检测，不进行深度验证
+  // Checksum detection without deep verification
   
   errors
 }

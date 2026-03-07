@@ -1,7 +1,4 @@
-/// ZSTD 错误处理和验证机制模块
-/// 提供统一的错误类型、验证函数和错误恢复机制
-
-// 使用现有的简单 ZSTDError 类型（在 types.mbt 中定义）
+/// ZSTD error handling and validation
 
 /// 错误严重程度
 pub enum ErrorSeverity {
@@ -22,7 +19,7 @@ pub struct ContextualError {
   error: ZSTDError
   severity: ErrorSeverity
   context: ErrorContext
-  timestamp: Int        // 错误发生时间（简化为整数）
+  timestamp: Int        // 错误标识（基于上下文哈希）
 }
 
 /// 创建错误上下文
@@ -37,11 +34,13 @@ pub fn create_error_context(location: String, operation: String, offset: Int, in
 
 /// 创建带上下文的错误
 pub fn create_contextual_error(error: ZSTDError, severity: ErrorSeverity, context: ErrorContext) -> ContextualError {
+  // 基于上下文生成简单哈希作为标识
+  let hash = context.data_offset * 31 + context.location.length() * 17 + context.operation.length()
   ContextualError::{
     error: error,
     severity: severity,
     context: context,
-    timestamp: 0  // 简化处理，实际应该使用当前时间
+    timestamp: hash
   }
 }
 
@@ -162,9 +161,9 @@ pub fn validate_block_header(header: UInt, max_block_size: Int) -> Result[Unit, 
   Ok(())
 }
 
-/// 验证数据完整性（简化的CRC检查）
+/// 验证数据完整性（XOR校验，未使用）
 pub fn validate_data_integrity(data: Bytes, expected_checksum: UInt) -> Result[Unit, ContextualError] {
-  // 简化的校验和计算
+  // XOR校验和计算
   let mut calculated_checksum = 0
   for i = 0; i < data.length(); i = i + 1 {
     calculated_checksum = calculated_checksum ^ data[i].to_uint().reinterpret_as_int()

@@ -82,7 +82,6 @@ fn test_data_integrity() -> Bool {
 }
 
 /// Test compressed block infrastructure
-/// 测试 Compressed block 基础设施（架构已实现，等待 FSE 编码器）
 fn test_compressed_block() -> Bool {
   // 创建足够大且有重复模式的数据
   let mut test_text = ""

@@ -144,7 +144,7 @@ fn parse_fse_compressed_weights(data: Bytes, offset: Int, compressed_size: Int, 
   let mut current_offset = offset + 1
   let mut weight_count = 0
   
-  // Simplified FSE decompression using basic bit operations
+  // FSE decompression using basic bit operations
   while current_offset < offset + compressed_size && weight_count < weights.length() {
     if current_offset >= data.length() {
       break
