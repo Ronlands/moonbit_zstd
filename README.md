@@ -174,13 +174,13 @@ fn build_dictionary_with_cover(samples: Array[Bytes], target_size: Int, ngram_si
 - [x] Multi-sequence LZ77
 - [x] Repeat Offset optimization
 - [x] Multi-block frame compression
+- [x] FSE Compressed mode (custom tables)
+- [x] Performance optimization
+- [x] Content checksum support
 
 ### Future Work
 
 - [ ] Huffman Literals compression in encoder
-- [ ] FSE Compressed mode (custom tables)
-- [ ] Performance optimization
-- [ ] Content checksum support
 
 ## Technical Details
 

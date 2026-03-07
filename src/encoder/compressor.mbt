@@ -13,6 +13,25 @@ let fcs_threshold_2byte : Int = 65792    // < 65792: 2-byte FCS, else 4-byte FCS
 /// Default window size (64KB)
 let default_window_size : Int = 65536
 
+/// Simple XXH32-like checksum
+fn calculate_checksum(data: Bytes) -> UInt {
+  let mut hash = 0x9E3779B1U
+  for i = 0; i < data.length(); i = i + 1 {
+    hash = hash + data[i].to_uint()
+    hash = hash * 0x85EBCA77U
+    hash = hash ^ (hash >> 13)
+  }
+  hash
+}
+
+/// Write 32-bit checksum in little-endian
+fn write_checksum(output: Array[Byte], checksum: UInt) -> Unit {
+  output.push((checksum & 0xFFU).to_byte())
+  output.push(((checksum >> 8) & 0xFFU).to_byte())
+  output.push(((checksum >> 16) & 0xFFU).to_byte())
+  output.push(((checksum >> 24) & 0xFFU).to_byte())
+}
+
 /// Write ZSTD magic number (0xFD2FB528 in little-endian)
 fn write_zstd_magic(output: Array[Byte]) -> Unit {
   output.push(0x28)
@@ -29,26 +48,29 @@ fn write_dict_id(output: Array[Byte], dict_id: UInt) -> Unit {
   output.push(((dict_id >> 24) & 0xFFU).to_byte())
 }
 
-/// Write frame header descriptor and content size based on data length
-fn write_frame_header_descriptor(output: Array[Byte], data_length: Int) -> Unit {
+/// Write frame header descriptor and content size with optional checksum
+fn write_frame_header_descriptor_with_checksum(output: Array[Byte], data_length: Int, with_checksum: Bool) -> Unit {
+  let checksum_flag = if with_checksum { 0x04 } else { 0x00 }
   if data_length < fcs_threshold_1byte {
-    // FCS_Field_Size = 0 (1 byte), Single_Segment = 1
-    output.push(0x20)
+    output.push((0x20 | checksum_flag).to_byte())
     output.push(data_length.to_byte())
   } else if data_length < fcs_threshold_2byte {
-    // FCS_Field_Size = 1 (2 bytes), Single_Segment = 1
-    output.push(0x60)
+    output.push((0x60 | checksum_flag).to_byte())
     let size_minus_256 = data_length - fcs_threshold_1byte
     output.push((size_minus_256 & 0xFF).to_byte())
     output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
   } else {
-    // FCS_Field_Size = 2 (4 bytes), Single_Segment = 1
-    output.push(0xA0)
+    output.push((0xA0 | checksum_flag).to_byte())
     output.push((data_length & 0xFF).to_byte())
     output.push(((data_length >> 8) & 0xFF).to_byte())
     output.push(((data_length >> 16) & 0xFF).to_byte())
     output.push(((data_length >> 24) & 0xFF).to_byte())
   }
+}
+
+/// Write frame header descriptor and content size based on data length
+fn write_frame_header_descriptor(output: Array[Byte], data_length: Int) -> Unit {
+  write_frame_header_descriptor_with_checksum(output, data_length, false)
 }
 
 /// Write frame content size for dictionary frames (updates FHD byte if needed)
@@ -120,9 +142,10 @@ fn hash_bytes(data: Bytes, pos: Int) -> Int {
   hash & 0xFFFF  // 65536 buckets
 }
 
-/// Find match at given position using hash table
+/// Find match at given position using hash table (optimized)
 fn find_match(data: Bytes, pos: Int, hash_table: Array[Int], min_match: Int, window_size: Int) -> Match {
-  if pos + min_match > data.length() {
+  let data_len = data.length()
+  if pos + min_match > data_len {
     return Match::{ offset: 0, length: 0 }
   }
 
@@ -134,17 +157,20 @@ fn find_match(data: Bytes, pos: Int, hash_table: Array[Int], min_match: Int, win
   }
 
   let offset = pos - match_pos
-  // ZSTD window size limit
   if offset > window_size {
     return Match::{ offset: 0, length: 0 }
   }
 
-  // ZSTD allows match length > offset (overlapping copy)
-  let mut match_length = 0
-  let max_match = (data.length() - pos).min(131072)
+  // Fast path: check first bytes
+  if data[match_pos] != data[pos] {
+    return Match::{ offset: 0, length: 0 }
+  }
+
+  let mut match_length = 1
+  let max_match = (data_len - pos).min(131072)
 
   while match_length < max_match &&
-        pos + match_length < data.length() &&
+        pos + match_length < data_len &&
         data[match_pos + (match_length % offset)] == data[pos + match_length] {
     match_length = match_length + 1
   }
@@ -271,46 +297,62 @@ fn generate_sequences(data: Bytes, min_match: Int, window_size: Int) -> (Array[S
 /// - RLE 块：对重复数据进行压缩，可达 2000% 压缩率
 /// - Compressed 块：LZ77 + FSE/Huffman 高级压缩
 pub fn compress_data(data: Bytes, config: CompressionConfig) -> Result[Bytes, String] {
+  compress_data_with_checksum(data, config, false)
+}
+
+/// Compress data with optional checksum
+pub fn compress_data_with_checksum(data: Bytes, config: CompressionConfig, with_checksum: Bool) -> Result[Bytes, String] {
   if data.length() == 0 { return compress_empty_frame() }
 
-  // Use multi-block compression for large data
   if data.length() > max_block_size {
-    return compress_multi_block(data, config)
+    return compress_multi_block_with_checksum(data, config, with_checksum)
   }
 
-  if is_rle_beneficial(data) {
-    return compress_as_rle_block(data, config)
-  }
-
-  if should_try_compressed_block(data) {
+  let result = if is_rle_beneficial(data) {
+    compress_as_rle_block(data, config)
+  } else if should_try_compressed_block(data) {
     match compress_as_compressed_block(data, config) {
       Ok(compressed) => {
         if compressed.length() < data.length() + 12 {
-          return Ok(compressed)
+          Ok(compressed)
+        } else {
+          compress_as_raw_block(data, config)
         }
-        return compress_as_raw_block(data, config)
       }
-      Err(_) => {
-        return compress_as_raw_block(data, config)
-      }
+      Err(_) => compress_as_raw_block(data, config)
     }
+  } else {
+    compress_as_raw_block(data, config)
   }
 
-  compress_as_raw_block(data, config)
+  match result {
+    Ok(compressed) => {
+      if with_checksum {
+        let output: Array[Byte] = []
+        for i = 0; i < compressed.length(); i = i + 1 {
+          output.push(compressed[i])
+        }
+        write_checksum(output, calculate_checksum(data))
+        Ok(Bytes::from_array(output))
+      } else {
+        Ok(compressed)
+      }
+    }
+    Err(e) => Err(e)
+  }
 }
 
-/// Compress large data as multiple blocks
-fn compress_multi_block(data: Bytes, config: CompressionConfig) -> Result[Bytes, String] {
+/// Compress large data as multiple blocks with optional checksum
+fn compress_multi_block_with_checksum(data: Bytes, config: CompressionConfig, with_checksum: Bool) -> Result[Bytes, String] {
   let output: Array[Byte] = []
 
   write_zstd_magic(output)
-  write_frame_header_descriptor(output, data.length())
+  write_frame_header_descriptor_with_checksum(output, data.length(), with_checksum)
 
   let mut offset = 0
   while offset < data.length() {
     let block_size = (data.length() - offset).min(max_block_size)
 
-    // Extract block data
     let block_bytes: Array[Byte] = []
     for i = 0; i < block_size; i = i + 1 {
       block_bytes.push(data[offset + i])
@@ -346,6 +388,10 @@ fn compress_multi_block(data: Bytes, config: CompressionConfig) -> Result[Bytes,
     }
 
     offset = offset + block_size
+  }
+
+  if with_checksum {
+    write_checksum(output, calculate_checksum(data))
   }
 
   Ok(Bytes::from_array(output))
@@ -399,10 +445,21 @@ fn compress_block_content_compressed(data: Bytes, config: CompressionConfig) -> 
   }
 
   if num_sequences > 0 {
-    output.push(0x00)
-    match encode_sequences_predefined_fse(sequences, output) {
-      Ok(_) => ()
-      Err(e) => return Err(e)
+    let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(sequences)
+
+    // Decide whether to use compressed FSE mode
+    if should_use_compressed_fse(ll_symbols, ml_symbols, of_symbols) {
+      output.push(0x01)  // Compressed mode flag
+      match encode_sequences_compressed_fse(sequences, output) {
+        Ok(_) => ()
+        Err(e) => return Err(e)
+      }
+    } else {
+      output.push(0x00)  // Predefined mode
+      match encode_sequences_predefined_fse(sequences, output) {
+        Ok(_) => ()
+        Err(e) => return Err(e)
+      }
     }
   }
 
@@ -1021,6 +1078,229 @@ fn should_use_compressed_block(
   
   // 如果压缩后小于原始数据的 95%，则使用压缩块
   estimated_compressed_size < (data.length() * 95 / 100)
+}
+
+// ============================================================================
+// FSE Compressed Mode Implementation
+// ============================================================================
+
+/// Count symbol frequencies
+fn count_frequencies(symbols: Array[Int], max_symbol: Int) -> Array[Int] {
+  let freqs = Array::make(max_symbol + 1, 0)
+  for i = 0; i < symbols.length(); i = i + 1 {
+    let sym = symbols[i]
+    if sym >= 0 && sym <= max_symbol {
+      freqs[sym] = freqs[sym] + 1
+    }
+  }
+  freqs
+}
+
+/// Normalize frequencies to target sum (2^accuracy_log)
+fn normalize_frequencies(freqs: Array[Int], accuracy_log: Int) -> Array[Int] {
+  let target = 1 << accuracy_log
+  let mut total = 0
+  for i = 0; i < freqs.length(); i = i + 1 {
+    total = total + freqs[i]
+  }
+
+  if total == 0 { return freqs }
+
+  let normalized = Array::make(freqs.length(), 0)
+  let mut sum = 0
+
+  for i = 0; i < freqs.length(); i = i + 1 {
+    if freqs[i] > 0 {
+      let norm = (freqs[i] * target / total).max(1)
+      normalized[i] = norm
+      sum = sum + norm
+    }
+  }
+
+  // Adjust to exact target
+  while sum > target {
+    let mut max_idx = 0
+    for i = 0; i < normalized.length(); i = i + 1 {
+      if normalized[i] > normalized[max_idx] {
+        max_idx = i
+      }
+    }
+    normalized[max_idx] = normalized[max_idx] - 1
+    sum = sum - 1
+  }
+
+  while sum < target {
+    let mut max_idx = 0
+    for i = 0; i < normalized.length(); i = i + 1 {
+      if normalized[i] > normalized[max_idx] {
+        max_idx = i
+      }
+    }
+    normalized[max_idx] = normalized[max_idx] + 1
+    sum = sum + 1
+  }
+
+  normalized
+}
+
+/// Serialize FSE table (simplified version)
+fn serialize_fse_table(normalized: Array[Int], accuracy_log: Int, output: Array[Byte]) -> Unit {
+  output.push(accuracy_log.to_byte())
+
+  let mut i = 0
+  while i < normalized.length() {
+    let freq = normalized[i]
+    if freq > 0 {
+      if freq == 1 {
+        output.push((i | 0x80).to_byte())
+      } else {
+        output.push(i.to_byte())
+        output.push(freq.to_byte())
+      }
+    }
+    i = i + 1
+  }
+  output.push(0xFF)
+}
+
+/// Build FSE encoding table from normalized frequencies
+/// Check if custom FSE tables would be beneficial
+fn should_use_compressed_fse(ll_symbols: Array[Int], ml_symbols: Array[Int], of_symbols: Array[Int]) -> Bool {
+  let total = ll_symbols.length()
+  if total < 64 { return false }
+
+  let ll_freqs = count_frequencies(ll_symbols, 35)
+  let ml_freqs = count_frequencies(ml_symbols, 52)
+  let of_freqs = count_frequencies(of_symbols, 31)
+
+  let mut ll_unique = 0
+  let mut ml_unique = 0
+  let mut of_unique = 0
+
+  for i = 0; i < ll_freqs.length(); i = i + 1 {
+    if ll_freqs[i] > 0 { ll_unique = ll_unique + 1 }
+  }
+  for i = 0; i < ml_freqs.length(); i = i + 1 {
+    if ml_freqs[i] > 0 { ml_unique = ml_unique + 1 }
+  }
+  for i = 0; i < of_freqs.length(); i = i + 1 {
+    if of_freqs[i] > 0 { of_unique = of_unique + 1 }
+  }
+
+  // Use compressed mode if distributions are skewed
+  (ll_unique > 4 && ll_unique < 20) || (ml_unique > 4 && ml_unique < 20) || (of_unique > 3 && of_unique < 15)
+}
+
+/// Encode sequences using compressed FSE mode
+fn encode_sequences_compressed_fse(sequences: Array[Sequence], output: Array[Byte]) -> Result[Unit, String] {
+  if sequences.length() == 0 { return Ok(()) }
+
+  let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(sequences)
+
+  // Build custom FSE tables
+  let ll_freqs = count_frequencies(ll_symbols, 35)
+  let ml_freqs = count_frequencies(ml_symbols, 52)
+  let of_freqs = count_frequencies(of_symbols, 31)
+
+  let ll_norm = normalize_frequencies(ll_freqs, 6)
+  let ml_norm = normalize_frequencies(ml_freqs, 6)
+  let of_norm = normalize_frequencies(of_freqs, 5)
+
+  // Serialize FSE tables
+  serialize_fse_table(ll_norm, 6, output)
+  serialize_fse_table(ml_norm, 6, output)
+  serialize_fse_table(of_norm, 5, output)
+
+  // Build FSE encoding tables from normalized frequencies
+  let ll_table = match @zstd_entropy.build_fse_ctable(ll_norm, ll_norm.length() - 1, 6) {
+    Ok(t) => t
+    Err(e) => return Err("Failed to build LL FSE table: \{e}")
+  }
+  let ml_table = match @zstd_entropy.build_fse_ctable(ml_norm, ml_norm.length() - 1, 6) {
+    Ok(t) => t
+    Err(e) => return Err("Failed to build ML FSE table: \{e}")
+  }
+  let of_table = match @zstd_entropy.build_fse_ctable(of_norm, of_norm.length() - 1, 5) {
+    Ok(t) => t
+    Err(e) => return Err("Failed to build OF FSE table: \{e}")
+  }
+
+  let bitstream = @zstd_entropy.create_bitstream()
+  let last_idx = sequences.length() - 1
+
+  // Init states with last sequence symbols
+  let mut ll_state = @zstd_entropy.init_fse_cstate_with_symbol(ll_table, ll_symbols[last_idx])
+  let mut ml_state = @zstd_entropy.init_fse_cstate_with_symbol(ml_table, ml_symbols[last_idx])
+  let mut of_state = @zstd_entropy.init_fse_cstate_with_symbol(of_table, of_symbols[last_idx])
+
+  // Write last sequence extras: LL, ML, OF
+  let last_seq = sequences[last_idx]
+  let (_, last_ll_extra) = @zstd_entropy.encode_ll(last_seq.literal_length)
+  let last_ll_nbits = @zstd_entropy.get_ll_bits(ll_symbols[last_idx])
+  if last_ll_nbits > 0 {
+    @zstd_entropy.add_bits(bitstream, last_ll_extra.to_uint64(), last_ll_nbits)
+  }
+
+  let (_, last_ml_extra) = @zstd_entropy.encode_ml(last_seq.match_length)
+  let last_ml_nbits = @zstd_entropy.get_ml_bits(ml_symbols[last_idx])
+  if last_ml_nbits > 0 {
+    @zstd_entropy.add_bits(bitstream, last_ml_extra.to_uint64(), last_ml_nbits)
+  }
+
+  let (_, last_of_extra) = @zstd_entropy.encode_of(last_seq.offset)
+  let last_of_nbits = @zstd_entropy.get_of_bits(of_symbols[last_idx])
+  if last_of_nbits > 0 {
+    @zstd_entropy.add_bits(bitstream, last_of_extra.to_uint64(), last_of_nbits)
+  }
+
+  @zstd_entropy.flush_bits(bitstream)
+
+  // Loop from N-2 down to 0
+  let mut n = last_idx - 1
+  while n >= 0 {
+    let seq = sequences[n]
+
+    // State transitions: OF → ML → LL
+    of_state = @zstd_entropy.encode_symbol_fse(of_state, of_symbols[n], of_table, bitstream)
+    ml_state = @zstd_entropy.encode_symbol_fse(ml_state, ml_symbols[n], ml_table, bitstream)
+    ll_state = @zstd_entropy.encode_symbol_fse(ll_state, ll_symbols[n], ll_table, bitstream)
+
+    // Extra bits: LL, ML, OF
+    let (_, ll_extra) = @zstd_entropy.encode_ll(seq.literal_length)
+    let ll_nbits = @zstd_entropy.get_ll_bits(ll_symbols[n])
+    if ll_nbits > 0 {
+      @zstd_entropy.add_bits(bitstream, ll_extra.to_uint64(), ll_nbits)
+    }
+
+    let (_, ml_extra) = @zstd_entropy.encode_ml(seq.match_length)
+    let ml_nbits = @zstd_entropy.get_ml_bits(ml_symbols[n])
+    if ml_nbits > 0 {
+      @zstd_entropy.add_bits(bitstream, ml_extra.to_uint64(), ml_nbits)
+    }
+
+    let (_, of_extra) = @zstd_entropy.encode_of(seq.offset)
+    let of_nbits = @zstd_entropy.get_of_bits(of_symbols[n])
+    if of_nbits > 0 {
+      @zstd_entropy.add_bits(bitstream, of_extra.to_uint64(), of_nbits)
+    }
+
+    @zstd_entropy.flush_bits(bitstream)
+    n = n - 1
+  }
+
+  // Flush final states: ML → OF → LL
+  @zstd_entropy.flush_final_state(bitstream, ml_state, 6)
+  @zstd_entropy.flush_final_state(bitstream, of_state, 5)
+  @zstd_entropy.flush_final_state(bitstream, ll_state, 6)
+
+  @zstd_entropy.close_bitstream(bitstream)
+
+  let encoded = @zstd_entropy.get_bytes(bitstream)
+  for i = 0; i < encoded.length(); i = i + 1 {
+    output.push(encoded[i])
+  }
+
+  Ok(())
 }
 
 // ============================================================================
