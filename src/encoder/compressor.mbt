@@ -9,16 +9,39 @@
 /// Hash table size for LZ77 matching (64K buckets)
 let hash_table_size : Int = 65536
 
+/// Frame content size thresholds for FCS field size selection
+let fcs_threshold_1byte : Int = 256      // < 256: 1-byte FCS
+let fcs_threshold_2byte : Int = 65792    // < 65792: 2-byte FCS, else 4-byte FCS
+
+/// Default window size (64KB)
+let default_window_size : Int = 65536
+
+/// Write ZSTD magic number (0xFD2FB528 in little-endian)
+fn write_zstd_magic(output: Array[Byte]) -> Unit {
+  output.push(0x28)
+  output.push(0xB5)
+  output.push(0x2F)
+  output.push(0xFD)
+}
+
+/// Write 32-bit dictionary ID in little-endian format
+fn write_dict_id(output: Array[Byte], dict_id: UInt) -> Unit {
+  output.push((dict_id & 0xFFU).to_byte())
+  output.push(((dict_id >> 8) & 0xFFU).to_byte())
+  output.push(((dict_id >> 16) & 0xFFU).to_byte())
+  output.push(((dict_id >> 24) & 0xFFU).to_byte())
+}
+
 /// Write frame header descriptor and content size based on data length
 fn write_frame_header_descriptor(output: Array[Byte], data_length: Int) -> Unit {
-  if data_length < 256 {
+  if data_length < fcs_threshold_1byte {
     // FCS_Field_Size = 0 (1 byte), Single_Segment = 1
     output.push(0x20)
     output.push(data_length.to_byte())
-  } else if data_length < 65792 {
+  } else if data_length < fcs_threshold_2byte {
     // FCS_Field_Size = 1 (2 bytes), Single_Segment = 1
     output.push(0x60)
-    let size_minus_256 = data_length - 256
+    let size_minus_256 = data_length - fcs_threshold_1byte
     output.push((size_minus_256 & 0xFF).to_byte())
     output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
   } else {
@@ -33,13 +56,13 @@ fn write_frame_header_descriptor(output: Array[Byte], data_length: Int) -> Unit 
 
 /// Write frame content size for dictionary frames (updates FHD byte if needed)
 fn write_frame_content_size_with_dict(output: Array[Byte], data_length: Int, fhd_index: Int) -> Unit {
-  if data_length < 256 {
+  if data_length < fcs_threshold_1byte {
     // FCS_flag=0: FHD = 0x23, 1-byte FCS
     output.push(data_length.to_byte())
-  } else if data_length < 65792 {
+  } else if data_length < fcs_threshold_2byte {
     // FCS_flag=1: FHD = 0x63, 2-byte FCS (value - 256)
     output[fhd_index] = 0x63
-    let size_minus_256 = data_length - 256
+    let size_minus_256 = data_length - fcs_threshold_1byte
     output.push((size_minus_256 & 0xFF).to_byte())
     output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
   } else {
@@ -115,7 +138,7 @@ fn find_match(data: Bytes, pos: Int, hash_table: Array[Int], min_match: Int) -> 
 
   let offset = pos - match_pos
   // ZSTD window size limit (64KB)
-  if offset > 65536 {
+  if offset > default_window_size {
     return Match::{ offset: 0, length: 0 }
   }
 
@@ -146,7 +169,7 @@ pub fn new_compressor() -> Compressor {
   Compressor::{
     level: 1,
     hash_table: hash_table,
-    window_size: 65536  // 64KB default window - must match decoder
+    window_size: default_window_size  // 64KB default window - must match decoder
   }
 }
 
@@ -307,12 +330,9 @@ pub fn compress_as_rle_block(data: Bytes, _config: CompressionConfig) -> Result[
   }
   
   let output: Array[Byte] = []
-  
-  // ZSTD Magic Number (0xFD2FB528)
-  output.push(0x28)
-  output.push(0xB5)
-  output.push(0x2F)
-  output.push(0xFD)
+
+  // ZSTD Magic Number
+  write_zstd_magic(output)
 
   // Frame Header Descriptor and Content Size
   write_frame_header_descriptor(output, data.length())
@@ -344,11 +364,8 @@ pub fn compress_as_raw_block(data: Bytes, _config: CompressionConfig) -> Result[
   let output: Array[Byte] = []
   let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
 
-  // ZSTD Magic Number (0xFD2FB528)
-  output.push(0x28)
-  output.push(0xB5)
-  output.push(0x2F)
-  output.push(0xFD)
+  // ZSTD Magic Number
+  write_zstd_magic(output)
 
   // Frame Header Descriptor and Content Size
   write_frame_header_descriptor(output, data.length())
@@ -378,13 +395,10 @@ pub fn compress_as_raw_block(data: Bytes, _config: CompressionConfig) -> Result[
 /// Compress empty data
 fn compress_empty_frame() -> Result[Bytes, String] {
   let output: Array[Byte] = []
-  
+
   // ZSTD Magic Number
-  output.push(0x28)
-  output.push(0xB5)
-  output.push(0x2F)
-  output.push(0xFD)
-  
+  write_zstd_magic(output)
+
   // Frame Header: Single segment, no checksum, FCS=0
   output.push(0x20)
   output.push(0x00)  // Content size = 0
@@ -466,22 +480,16 @@ fn compress_with_dict_id(
 fn compress_as_raw_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, String] {
   let output: Array[Byte] = []
   let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
-  
+
   // ZSTD Magic Number
-  output.push(0x28)
-  output.push(0xB5)
-  output.push(0x2F)
-  output.push(0xFD)
-  
+  write_zstd_magic(output)
+
   // Frame Header Descriptor with Dictionary_ID_Flag=3 (4 bytes)
   let fhd: Byte = 0x23  // Single_Segment=1, Dictionary_ID_Flag=3
   output.push(fhd)
-  
+
   // Dictionary ID (4 bytes, little-endian)
-  output.push((dict_id & 0xFFU).to_byte())
-  output.push(((dict_id >> 8) & 0xFFU).to_byte())
-  output.push(((dict_id >> 16) & 0xFFU).to_byte())
-  output.push(((dict_id >> 24) & 0xFFU).to_byte())
+  write_dict_id(output, dict_id)
 
   // Frame Content Size
   write_frame_content_size_with_dict(output, data.length(), 4)
@@ -566,16 +574,13 @@ pub fn compress_as_compressed_block(data: Bytes, _config: CompressionConfig) -> 
   let (sequences, literals) = generate_sequences(data, min_match)
 
   if sequences.length() == 0 {
-    return Err("No sequences found")
+    return Err("No compression benefit - fallback to raw block")
   }
 
   let output: Array[Byte] = []
 
-  // ZSTD Magic Number (0xFD2FB528)
-  output.push(0x28)
-  output.push(0xB5)
-  output.push(0x2F)
-  output.push(0xFD)
+  // ZSTD Magic Number
+  write_zstd_magic(output)
 
   // Frame Header Descriptor and Content Size
   write_frame_header_descriptor(output, data.length())
@@ -1044,22 +1049,16 @@ fn compress_as_rle_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, 
   }
   
   let output: Array[Byte] = []
-  
+
   // ZSTD Magic Number
-  output.push(0x28)
-  output.push(0xB5)
-  output.push(0x2F)
-  output.push(0xFD)
-  
+  write_zstd_magic(output)
+
   // Frame Header with Dictionary ID
   let fhd: Byte = 0x23
   output.push(fhd)
   
   // Dictionary ID
-  output.push((dict_id & 0xFFU).to_byte())
-  output.push(((dict_id >> 8) & 0xFFU).to_byte())
-  output.push(((dict_id >> 16) & 0xFFU).to_byte())
-  output.push(((dict_id >> 24) & 0xFFU).to_byte())
+  write_dict_id(output, dict_id)
 
   // Frame Content Size
   write_frame_content_size_with_dict(output, data.length(), 4)

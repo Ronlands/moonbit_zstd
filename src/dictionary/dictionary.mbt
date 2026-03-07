@@ -33,17 +33,17 @@ pub fn create_raw_dictionary(content: Bytes, dict_id: UInt) -> Dictionary {
 /// 解析ZSTD格式字典
 pub fn parse_zstd_dictionary(data: Bytes) -> Result[Dictionary, String] {
   if data.length() < 8 {
-    return Err("字典数据太短")
+    return Err("Dictionary data too short")
   }
-  
+
   // 检查魔数 (0xEC30A437 = ZSTD字典魔数)
   let magic = data[0].to_uint() |
               (data[1].to_uint() << 8) |
               (data[2].to_uint() << 16) |
               (data[3].to_uint() << 24)
-  
+
   if magic != 0xEC30A437U {
-    return Err("无效的字典魔数")
+    return Err("Invalid dictionary magic number")
   }
   
   // 读取字典ID
@@ -80,22 +80,22 @@ pub fn decompress_with_dictionary(compressed_data: Bytes, dictionary: Dictionary
   let frame_result = @zstd_decoder.parse_frame_header(compressed_data)
   let frame_dict_id = match frame_result {
     Ok((frame_header, _)) => frame_header.dict_id.reinterpret_as_uint()
-    Err(err) => return Err("无法解析帧头: " + @zstd_core.error_to_string(err))
+    Err(err) => return Err("Cannot parse frame header: " + @zstd_core.error_to_string(err))
   }
-  
+
   // 验证字典ID匹配（0表示不使用字典）
   if frame_dict_id != 0U && frame_dict_id != dictionary.dict_id {
-    return Err("字典ID不匹配: 期望 " + dictionary.dict_id.to_string() + ", 实际 " + frame_dict_id.to_string())
+    return Err("Dictionary ID mismatch: expected " + dictionary.dict_id.to_string() + ", got " + frame_dict_id.to_string())
   }
-  
+
   // 使用带字典的解压缩函数
   let decompression_result = @zstd_decoder.decompress_zstd_data_with_dict(
-    compressed_data, 
+    compressed_data,
     dictionary.content
   )
   match decompression_result {
     Ok(decompressed) => Ok(decompressed)
-    Err(err_msg) => Err("解压缩失败: " + err_msg)
+    Err(err_msg) => Err("Decompression failed: " + err_msg)
   }
 }
 
@@ -115,11 +115,11 @@ pub fn compress_with_dictionary(data: Bytes, dictionary: Dictionary) -> Result[B
 /// 构建字典 - 使用简单方法
 pub fn build_dictionary(samples: Array[Bytes], target_size: Int) -> Result[Dictionary, String] {
   if samples.length() == 0 {
-    return Err("没有样本数据")
+    return Err("No sample data")
   }
-  
+
   if target_size <= 0 {
-    return Err("目标大小必须大于0")
+    return Err("Target size must be greater than 0")
   }
   
   // 使用简单合并方法
@@ -163,11 +163,11 @@ pub fn build_dictionary_with_cover(
   ngram_size: Int  // N-gram 大小，通常 6-8
 ) -> Result[Dictionary, String] {
   if samples.length() == 0 {
-    return Err("没有样本数据")
+    return Err("No sample data")
   }
-  
+
   if target_size <= 0 {
-    return Err("目标大小必须大于0")
+    return Err("Target size must be greater than 0")
   }
   
   let effective_ngram_size = ngram_size.max(4).min(16)
@@ -420,11 +420,11 @@ pub fn calculate_dictionary_benefit_detailed(
   dictionary: Dictionary
 ) -> Result[DictionaryBenefitStats, String] {
   if data.length() == 0 {
-    return Err("数据为空")
+    return Err("Data is empty")
   }
   
   if !validate_dictionary(dictionary) {
-    return Err("字典无效")
+    return Err("Dictionary is invalid")
   }
   
   let config = @zstd_encoder.create_default_config()
@@ -433,7 +433,7 @@ pub fn calculate_dictionary_benefit_detailed(
   let without_dict_result = @zstd_encoder.compress_data(data, config)
   let without_dict_size = match without_dict_result {
     Ok(compressed) => compressed.length()
-    Err(e) => return Err("无字典压缩失败: " + e)
+    Err(e) => return Err("Compression without dictionary failed: " + e)
   }
   
   // 使用字典压缩
@@ -445,7 +445,7 @@ pub fn calculate_dictionary_benefit_detailed(
   )
   let with_dict_size = match with_dict_result {
     Ok(compressed) => compressed.length()
-    Err(e) => return Err("有字典压缩失败: " + e)
+    Err(e) => return Err("Compression with dictionary failed: " + e)
   }
   
   // 计算统计信息
@@ -536,15 +536,15 @@ pub fn get_dictionary_stats(dictionary: Dictionary) -> String {
 /// 合并多个字典
 pub fn merge_dictionaries(dictionaries: Array[Dictionary], target_size: Int) -> Result[Dictionary, String] {
   if dictionaries.length() == 0 {
-    return Err("没有字典可合并")
+    return Err("No dictionaries to merge")
   }
-  
+
   if dictionaries.length() == 1 {
     return Ok(dictionaries[0])
   }
-  
+
   if target_size <= 0 {
-    return Err("目标大小必须大于0")
+    return Err("Target size must be greater than 0")
   }
   
   let combined_content: Array[Byte] = []

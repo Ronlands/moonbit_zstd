@@ -158,7 +158,7 @@ fn analyze_skippable_frame(data: Bytes, magic: Int) -> ZSTDFileAnalysis {
 fn parse_frame_header_for_analyzer(data: Bytes) -> Result[(FrameHeader, Int), String] {
   // 检查是否有足够的数据读取帧头描述符
   if data.length() < 5 {
-    return Err("帧头数据不足")
+    return Err("Insufficient frame header data")
   }
   
   // 读取帧头描述符 (Frame Header Descriptor)
@@ -277,17 +277,17 @@ fn analyze_blocks_structure(data: Bytes, start_offset: Int) -> Result[(Int, Stri
   
   // 检查起始偏移量是否超出数据范围
   if start_offset >= data.length() {
-    return Err("起始偏移量超出数据范围: " + start_offset.to_string() + " >= " + data.length().to_string())
+    return Err("Start offset out of range: " + start_offset.to_string() + " >= " + data.length().to_string())
   }
-  
+
   if current_offset >= data.length() {
-    return Err("偏移量在开始时超出范围: offset=" + current_offset.to_string() + ", length=" + data.length().to_string())
+    return Err("Offset out of range at start: offset=" + current_offset.to_string() + ", length=" + data.length().to_string())
   }
-  
+
   // 检查是否有足够的数据读取块头
   let remaining_bytes = data.length() - current_offset
   if remaining_bytes < 3 {
-    return Err("从偏移量 " + current_offset.to_string() + " 开始的数据不足以读取块头: " + remaining_bytes.to_string() + " < 3")
+    return Err("Insufficient data to read block header from offset " + current_offset.to_string() + ": " + remaining_bytes.to_string() + " < 3")
   }
   
   // 遍历所有块
@@ -399,7 +399,7 @@ fn analyze_blocks_structure(data: Bytes, start_offset: Int) -> Result[(Int, Stri
   
   // 检查是否找到了有效块
   if block_count == 0 {
-    return Err("未找到有效块，起始偏移量: " + start_offset.to_string() + ", 剩余字节: " + remaining_bytes.to_string())
+    return Err("No valid blocks found, start offset: " + start_offset.to_string() + ", remaining bytes: " + remaining_bytes.to_string())
   }
   
   // 返回分析结果
@@ -516,7 +516,7 @@ fn validate_compressed_block_content(data: Bytes, offset: Int, block_size: Int, 
 /// 解析字面量区结构，返回消耗的字节数
 fn parse_literals_section_structure(data: Bytes, offset: Int, block_end: Int) -> Result[Int, String] {
   if offset >= data.length() {
-    return Err("无法读取字面量头")
+    return Err("Cannot read literals header")
   }
   
   let literals_header = data[offset].to_int()
@@ -535,12 +535,12 @@ fn parse_literals_section_structure(data: Bytes, offset: Int, block_end: Int) ->
           regenerated_size = (literals_header >> 3) & 0x1F
         }
         1 => {
-          if cursor >= data.length() { return Err("字面量大小字段不完整") }
+          if cursor >= data.length() { return Err("Incomplete literals size field") }
           regenerated_size = ((literals_header >> 4) & 0x0F) | (data[cursor].to_int() << 4)
           cursor = cursor + 1
         }
         3 => {
-          if cursor + 1 >= data.length() { return Err("字面量大小字段不完整") }
+          if cursor + 1 >= data.length() { return Err("Incomplete literals size field") }
           regenerated_size = ((literals_header >> 4) & 0x0F) | (data[cursor].to_int() << 4) | (data[cursor + 1].to_int() << 12)
           cursor = cursor + 2
         }
@@ -553,13 +553,13 @@ fn parse_literals_section_structure(data: Bytes, offset: Int, block_end: Int) ->
       if literals_block_type == 0 {
         // Raw: 直接是未压缩数据
         if cursor + regenerated_size > block_end {
-          return Err("原始字面量数据超出块边界")
+          return Err("Raw literals data exceeds block boundary")
         }
         return Ok(cursor - offset + regenerated_size)
       } else {
         // RLE: 只有1字节
         if cursor >= block_end {
-          return Err("RLE字面量数据缺失")
+          return Err("RLE literals data missing")
         }
         return Ok(cursor - offset + 1)
       }
@@ -568,25 +568,25 @@ fn parse_literals_section_structure(data: Bytes, offset: Int, block_end: Int) ->
       // 解析 regenerated_size 和 compressed_size
       match size_format {
         0 => {
-          if cursor + 1 >= data.length() { return Err("霍夫曼字面量大小字段不完整") }
+          if cursor + 1 >= data.length() { return Err("Incomplete Huffman literals size field") }
           regenerated_size = ((literals_header >> 4) & 0x0F) | ((data[cursor].to_int() & 0x3F) << 4)
           compressed_size = (data[cursor].to_int() >> 6) | (data[cursor + 1].to_int() << 2)
           cursor = cursor + 2
         }
         1 => {
-          if cursor + 1 >= data.length() { return Err("霍夫曼字面量大小字段不完整") }
+          if cursor + 1 >= data.length() { return Err("Incomplete Huffman literals size field") }
           regenerated_size = ((literals_header >> 4) & 0x3F) | (data[cursor].to_int() << 4)
           compressed_size = data[cursor + 1].to_int()
           cursor = cursor + 2
         }
         2 => {
-          if cursor + 2 >= data.length() { return Err("霍夫曼字面量大小字段不完整") }
+          if cursor + 2 >= data.length() { return Err("Incomplete Huffman literals size field") }
           regenerated_size = ((literals_header >> 4) & 0x3F) | (data[cursor].to_int() << 4) | ((data[cursor + 1].to_int() & 0x03) << 12)
           compressed_size = (data[cursor + 1].to_int() >> 2) | (data[cursor + 2].to_int() << 6)
           cursor = cursor + 3
         }
         3 => {
-          if cursor + 3 >= data.length() { return Err("霍夫曼字面量大小字段不完整") }
+          if cursor + 3 >= data.length() { return Err("Incomplete Huffman literals size field") }
           regenerated_size = ((literals_header >> 4) & 0x3F) | (data[cursor].to_int() << 4) | ((data[cursor + 1].to_int() & 0x3F) << 12)
           compressed_size = (data[cursor + 1].to_int() >> 6) | (data[cursor + 2].to_int() << 2) | (data[cursor + 3].to_int() << 10)
           cursor = cursor + 4
@@ -606,7 +606,7 @@ fn parse_literals_section_structure(data: Bytes, offset: Int, block_end: Int) ->
             cursor = cursor + weights_size
           }
           Err(_) => {
-            return Err("检测到截断的Huffman状态: 权重表解析失败")
+            return Err("Truncated Huffman state detected: weights table parsing failed")
           }
         }
       }
@@ -614,12 +614,12 @@ fn parse_literals_section_structure(data: Bytes, offset: Int, block_end: Int) ->
       // 检查压缩数据是否完整
       let remaining_compressed = compressed_size - (cursor - offset - (if literals_block_type == 2 { 0 } else { 0 }))
       if cursor + remaining_compressed > block_end {
-        return Err("检测到截断的Huffman状态: 压缩数据不完整")
+        return Err("Truncated Huffman state detected: compressed data incomplete")
       }
       
       return Ok(cursor - offset + remaining_compressed)
     }
-    _ => return Err("无效的字面量块类型")
+    _ => return Err("Invalid literals block type")
   }
 }
 
@@ -633,7 +633,7 @@ fn parse_sequences_section_structure(data: Bytes, offset: Int, block_end: Int) -
   
   // 读取序列数
   if cursor >= data.length() {
-    return Err("无法读取序列数")
+    return Err("Cannot read sequence count")
   }
   
   let first_byte = data[cursor].to_int()
@@ -644,12 +644,12 @@ fn parse_sequences_section_structure(data: Bytes, offset: Int, block_end: Int) -
   } else if first_byte < 128 {
     first_byte
   } else if first_byte < 255 {
-    if cursor >= data.length() { return Err("序列数字段不完整") }
+    if cursor >= data.length() { return Err("Incomplete sequence count field") }
     let num_sequences = ((first_byte - 128) << 8) | data[cursor].to_int()
     cursor = cursor + 1
     num_sequences
   } else {
-    if cursor + 1 >= data.length() { return Err("序列数字段不完整") }
+    if cursor + 1 >= data.length() { return Err("Incomplete sequence count field") }
     let low = data[cursor].to_int()
     let high = data[cursor + 1].to_int()
     cursor = cursor + 2
@@ -663,7 +663,7 @@ fn parse_sequences_section_structure(data: Bytes, offset: Int, block_end: Int) -
   
   // 序列数>0时，至少应该有 compression modes 字节
   if cursor >= block_end {
-    return Err("序列压缩模式缺失")
+    return Err("Sequence compression modes missing")
   }
   
   // 简化：我们只验证基本结构，不完全解析所有FSE表

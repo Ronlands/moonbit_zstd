@@ -176,7 +176,7 @@ pub fn decompress_zstd_data_with_dict(data: Bytes, dictionary: Bytes) -> Result[
         
         // 检查块大小（使用压缩数据大小）
         if current_offset + compressed_size > data.length() {
-          return Err("块数据超出文件边界")
+          return Err("Block data exceeds file boundary")
         }
         
         // 解压缩块（传递block_size作为解压后的大小和当前窗口用于序列执行）
@@ -222,7 +222,7 @@ pub fn decompress_zstd_data_with_dict(data: Bytes, dictionary: Bytes) -> Result[
 /// 解析帧头用于解压缩
 fn parse_frame_header_for_decompressor(data: Bytes, offset: Int) -> Result[(@zstd_core.FrameHeader, Int), String] {
   if offset + 1 > data.length() {
-    return Err("帧头不完整")
+    return Err("Incomplete frame header")
   }
   
   // 读取Frame_Header_Descriptor (1字节)
@@ -360,10 +360,10 @@ fn decompress_single_block_with_window(
     }
     3 => {
       // Reserved block type
-      Err("保留块类型")
+      Err("Reserved block type")
     }
     _ => {
-      Err("未知块类型: " + block_type.to_string())
+      Err("Unknown block type: " + block_type.to_string())
     }
   }
 }

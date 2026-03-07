@@ -976,7 +976,7 @@ pub fn test_huffman_roundtrip() -> Result[Bool, String] {
         Ok(decoded_data) => {
           // 验证解码结果
           if decoded_data.length() != test_data.length() {
-            return Err("解码数据长度不匹配")
+            return Err("Decoded data length mismatch")
           }
 
           let mut all_match = true
@@ -991,13 +991,13 @@ pub fn test_huffman_roundtrip() -> Result[Bool, String] {
             println("✅ Huffman 编解码循环测试通过")
             Ok(true)
           } else {
-            Err("解码数据内容不匹配")
+            Err("Decoded data content mismatch")
           }
         }
-        Err(e) => Err("解码失败: \{e}")
+        Err(e) => Err("Decoding failed: \{e}")
       }
     }
-    Err(e) => Err("编码失败: \{e}")
+    Err(e) => Err("Encoding failed: \{e}")
   }
 }
 

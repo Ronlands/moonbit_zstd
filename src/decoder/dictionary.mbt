@@ -10,7 +10,7 @@ pub type WindowBuffer = @zstd_core.WindowBuffer
 /// 格式化字典包含魔数、字典ID和压缩数据
 pub fn parse_formatted_dictionary(data: Bytes) -> Result[Dictionary, String] {
   if data.length() < 8 {
-    return Err("字典数据太短")
+    return Err("Dictionary data too short")
   }
   
   // 检查魔数 (0xEC30A437)
@@ -20,7 +20,7 @@ pub fn parse_formatted_dictionary(data: Bytes) -> Result[Dictionary, String] {
               (data[3].to_uint() << 24)
   
   if magic != 0xEC30A437 {
-    return Err("无效的字典魔数")
+    return Err("Invalid dictionary magic number")
   }
   
   // 读取字典ID
@@ -64,11 +64,11 @@ pub fn write_to_window(window: WindowBuffer, data: Bytes) -> Unit {
 /// length: 要读取的字节数
 pub fn read_from_window(window: WindowBuffer, offset: Int, length: Int) -> Result[Bytes, String] {
   if offset <= 0 || length <= 0 {
-    return Err("无效的偏移量或长度")
+    return Err("Invalid offset or length")
   }
-  
+
   if offset > window.size + window.dictionary.size {
-    return Err("偏移量超出可用历史数据范围")
+    return Err("Offset exceeds available history data range")
   }
   
   let result: Array[Byte] = []
@@ -89,7 +89,7 @@ pub fn read_from_window(window: WindowBuffer, offset: Int, length: Int) -> Resul
 /// offset: 相对于当前位置的偏移量（1表示前一个字节）
 fn get_historical_byte(window: WindowBuffer, offset: Int) -> Result[Byte, String] {
   if offset <= 0 {
-    return Err("无效的偏移量")
+    return Err("Invalid offset")
   }
   
   // 首先检查窗口缓冲区
@@ -109,14 +109,14 @@ fn get_historical_byte(window: WindowBuffer, offset: Int) -> Result[Byte, String
     return Ok(window.dictionary.data[dict_pos])
   }
   
-  Err("偏移量超出历史数据范围")
+  Err("Offset exceeds history data range")
 }
 
 /// 复制匹配数据到窗口缓冲区
 /// 这是ZSTD解压缩中的核心操作，用于处理重复序列
 pub fn copy_match(window: WindowBuffer, offset: Int, length: Int) -> Result[Bytes, String] {
   if offset <= 0 || length <= 0 {
-    return Err("无效的匹配参数")
+    return Err("Invalid match parameters")
   }
   
   let copied_data: Array[Byte] = []

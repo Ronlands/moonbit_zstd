@@ -68,7 +68,7 @@ pub fn build_fse_table_from_weights(weights: Array[Int], table_log: Int) -> Resu
   }
   
   if total_count == 0 {
-    return Err("所有权重都为零")
+    return Err("All weights are zero")
   }
   
   // 计算归一化因子
@@ -135,7 +135,7 @@ pub fn fse_decode_symbol(state: FSEState, bitstream: Bytes, bit_pos: Int) -> Res
     let bit_offset = current_bit_pos % 8
     
     if byte_pos >= bitstream.length() {
-      return Err("位流数据不足")
+      return Err("Insufficient bitstream data")
     }
     
     let bit = (bitstream[byte_pos].to_int() >> bit_offset) & 1
@@ -514,7 +514,7 @@ fn get_fse_decode_entry(
   let u = normalized_state - table_size
 
   if u < 0 || u >= dtable.length() {
-    Err("状态越界错误: state=\{state}, normalized=\{normalized_state}, u=\{u}, table_size=\{table_size}")
+    Err("State out of bounds error: state=\{state}, normalized=\{normalized_state}, u=\{u}, table_size=\{table_size}")
   } else {
     Ok(dtable[u])
   }
