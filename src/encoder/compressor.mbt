@@ -94,7 +94,7 @@ priv struct Sequence {
 
 pub struct CompressionConfig {
   level: Int         // 1-22
-  window_log: Int    // Window = 2^window_log
+  window_log: Int    // Window = 2^window_log (controls LZ77 match distance limit)
   min_match: Int     // Min match length for LZ77
   search_depth: Int  // Search depth (quality vs speed)
 }
@@ -124,7 +124,7 @@ fn hash_bytes(data: Bytes, pos: Int) -> Int {
 }
 
 /// Find match at given position using hash table
-fn find_match(data: Bytes, pos: Int, hash_table: Array[Int], min_match: Int) -> Match {
+fn find_match(data: Bytes, pos: Int, hash_table: Array[Int], min_match: Int, window_size: Int) -> Match {
   if pos + min_match > data.length() {
     return Match::{ offset: 0, length: 0 }
   }
@@ -137,8 +137,8 @@ fn find_match(data: Bytes, pos: Int, hash_table: Array[Int], min_match: Int) -> 
   }
 
   let offset = pos - match_pos
-  // ZSTD window size limit (64KB)
-  if offset > default_window_size {
+  // ZSTD window size limit
+  if offset > window_size {
     return Match::{ offset: 0, length: 0 }
   }
 
@@ -203,7 +203,7 @@ pub fn create_compression_context(config: CompressionConfig) -> CompressionConte
 // ============================================================================
 
 /// Generate sequences using greedy LZ77 matching (multi-sequence)
-fn generate_sequences(data: Bytes, min_match: Int) -> (Array[Sequence], Array[Byte]) {
+fn generate_sequences(data: Bytes, min_match: Int, window_size: Int) -> (Array[Sequence], Array[Byte]) {
   let sequences: Array[Sequence] = []
   let literals: Array[Byte] = []
   let hash_table = Array::make(hash_table_size, -1)
@@ -212,7 +212,7 @@ fn generate_sequences(data: Bytes, min_match: Int) -> (Array[Sequence], Array[By
   let mut literal_start = 0
 
   while pos < data.length() {
-    let match_result = find_match(data, pos, hash_table, min_match)
+    let match_result = find_match(data, pos, hash_table, min_match, window_size)
 
     if match_result.length >= min_match {
       let literal_length = pos - literal_start
@@ -413,8 +413,42 @@ fn compress_empty_frame() -> Result[Bytes, String] {
 
 /// 估算压缩大小
 pub fn estimate_compressed_size(data: Bytes, _config: CompressionConfig) -> Int {
-  // 简化估算：假设压缩比为 60%
-  (data.length().to_double() * 0.6).to_int()
+  if data.length() == 0 {
+    return 10  // Empty frame overhead
+  }
+
+  // Check for RLE (highly compressible)
+  if is_rle_beneficial(data) {
+    return 10 + (data.length() / 128000) * 4  // RLE block overhead
+  }
+
+  // Analyze data entropy
+  let mut unique_bytes = 0
+  let byte_counts = Array::make(256, 0)
+  let sample_size = data.length().min(1000)
+
+  for i = 0; i < sample_size; i = i + 1 {
+    let b = data[i].to_int()
+    if byte_counts[b] == 0 {
+      unique_bytes = unique_bytes + 1
+    }
+    byte_counts[b] = byte_counts[b] + 1
+  }
+
+  // Estimate based on entropy
+  let entropy_ratio = unique_bytes.to_double() / 256.0
+  let compression_ratio = if entropy_ratio < 0.1 {
+    0.3  // Low entropy, good compression
+  } else if entropy_ratio < 0.3 {
+    0.5  // Medium-low entropy
+  } else if entropy_ratio < 0.6 {
+    0.7  // Medium entropy
+  } else {
+    0.95  // High entropy, poor compression
+  }
+
+  let estimated = (data.length().to_double() * compression_ratio).to_int()
+  estimated + 12  // Add frame header overhead
 }
 
 /// Simple compress function
@@ -428,8 +462,11 @@ pub fn compress(data : Bytes) -> @zstd_core.ZSTDResult[Bytes] {
 
 /// Compress with context
 pub fn compress_with_context(comp : Compressor, data : Bytes) -> @zstd_core.ZSTDResult[(Compressor, Bytes)] {
-  // Placeholder implementation
-  Ok((comp, data))
+  let config = create_config_with_level(comp.level)
+  match compress_data(data, config) {
+    Ok(compressed) => Ok((comp, compressed))
+    Err(e) => Err(@zstd_core.message_error(e))
+  }
 }
 
 // ============================================================================
@@ -568,10 +605,11 @@ fn encode_literals_section(literals: Array[Byte], output: Array[Byte]) -> Unit {
 }
 
 /// Compress as compressed block (with LZ77 sequences)
-pub fn compress_as_compressed_block(data: Bytes, _config: CompressionConfig) -> Result[Bytes, String] {
-  let min_match = 4
+pub fn compress_as_compressed_block(data: Bytes, config: CompressionConfig) -> Result[Bytes, String] {
+  let min_match = config.min_match
+  let window_size = 1 << config.window_log
 
-  let (sequences, literals) = generate_sequences(data, min_match)
+  let (sequences, literals) = generate_sequences(data, min_match, window_size)
 
   if sequences.length() == 0 {
     return Err("No compression benefit - fallback to raw block")
@@ -645,21 +683,23 @@ fn compress_with_dictionary_matching(
 ) -> Result[Bytes, String] {
   // 创建哈希表并预加载字典内容
   let hash_table = Array::make(hash_table_size, -1)
-  
+
   // 将字典内容预加载到哈希表
   // 这样 LZ77 压缩器就能找到数据和字典内容的匹配
   preload_dictionary_to_hash_table(dictionary, hash_table)
-  
+
+  // 计算窗口大小
+  let window_size = 1 << config.window_log
+
   // 使用预加载了字典的哈希表进行 LZ77 压缩
-  let sequences_result = generate_sequences_with_dict(data, dictionary, hash_table, config.min_match)
+  let sequences_result = generate_sequences_with_dict(data, dictionary, hash_table, config.min_match, window_size)
   
   match sequences_result {
     Ok((sequences, literals)) => {
       // 如果找到了足够的匹配，使用压缩块
       if sequences.length() > 0 && should_use_compressed_block(data, sequences, literals) {
-        // 当前简化处理：使用 Raw 块但带有字典 ID
-        // 未来可以实现完整的 Compressed 块
-        compress_with_dict_id(data, config, dict_id)
+        // 使用完整的 Compressed 块（带字典 ID）
+        compress_as_compressed_block_with_dict(data, sequences, literals, dict_id)
       } else {
         // 降级到 RLE 或 Raw 块
         compress_with_dict_id(data, config, dict_id)
@@ -692,7 +732,8 @@ fn generate_sequences_with_dict(
   data: Bytes,
   dictionary: Bytes,
   hash_table: Array[Int],
-  min_match: Int
+  min_match: Int,
+  window_size: Int
 ) -> Result[(Array[Sequence], Array[Byte]), String] {
   let sequences: Array[Sequence] = []
   let literals: Array[Byte] = []
@@ -702,7 +743,7 @@ fn generate_sequences_with_dict(
   
   while pos < data.length() {
     // 尝试找到匹配（包括字典匹配）
-    let match_result = find_match_with_dict(data, dictionary, pos, hash_table, min_match)
+    let match_result = find_match_with_dict(data, dictionary, pos, hash_table, min_match, window_size)
     
     if match_result.length >= min_match {
       // 找到匹配！
@@ -755,12 +796,13 @@ fn find_match_with_dict(
   dictionary: Bytes,
   pos: Int,
   hash_table: Array[Int],
-  min_match: Int
+  min_match: Int,
+  window_size: Int
 ) -> Match {
   if pos + min_match > data.length() {
     return Match::{ offset: 0, length: 0 }
   }
-  
+
   let hash = hash_bytes(data, pos)
   let match_pos = hash_table[hash]
 
@@ -768,13 +810,13 @@ fn find_match_with_dict(
   if match_pos == -1 || match_pos >= pos {
     return Match::{ offset: 0, length: 0 }
   }
-  
+
   // 区分字典匹配和数据匹配
   if match_pos < 0 {
     // 字典匹配（负数位置）
     let dict_pos = -match_pos - 1
     let match_length = calculate_match_length_from_dict(data, dictionary, pos, dict_pos)
-    
+
     if match_length >= min_match {
       // 字典匹配的偏移 = 字典长度 - 匹配位置 + 当前输出位置
       // 简化：使用数据开始到当前位置的距离
@@ -785,10 +827,15 @@ fn find_match_with_dict(
     }
   } else {
     // 数据内部匹配
+    let offset = pos - match_pos
+    if offset > window_size {
+      return Match::{ offset: 0, length: 0 }
+    }
+
     let match_length = calculate_match_length_in_data(data, pos, match_pos)
-    
+
     if match_length >= min_match {
-      Match::{ offset: pos - match_pos, length: match_length }
+      Match::{ offset: offset, length: match_length }
     } else {
       Match::{ offset: 0, length: 0 }
     }
@@ -1027,6 +1074,69 @@ fn encode_sequences_predefined_fse(sequences: Array[Sequence], output: Array[Byt
   }
 
   Ok(())
+}
+
+/// Compress as compressed block with dictionary ID
+fn compress_as_compressed_block_with_dict(
+  data: Bytes,
+  sequences: Array[Sequence],
+  literals: Array[Byte],
+  dict_id: UInt
+) -> Result[Bytes, String] {
+  let output: Array[Byte] = []
+
+  // ZSTD Magic Number
+  write_zstd_magic(output)
+
+  // Frame Header with Dictionary ID
+  let fhd: Byte = 0x23
+  output.push(fhd)
+
+  // Dictionary ID (4 bytes, little-endian)
+  write_dict_id(output, dict_id)
+
+  // Frame Content Size
+  write_frame_content_size_with_dict(output, data.length(), 4)
+
+  // Build block content: Literals_Section + Sequences_Section
+  let block_content: Array[Byte] = []
+
+  // Literals Section
+  encode_literals_section(literals, block_content)
+
+  // Sequences Section
+  let num_sequences = sequences.length()
+  if num_sequences < 128 {
+    block_content.push(num_sequences.to_byte())
+  } else if num_sequences < 32768 {
+    block_content.push(((num_sequences >> 8) + 128).to_byte())
+    block_content.push((num_sequences & 0xFF).to_byte())
+  } else {
+    block_content.push(0xFF)
+    block_content.push((num_sequences & 0xFF).to_byte())
+    block_content.push(((num_sequences >> 8) & 0xFF).to_byte())
+  }
+
+  if num_sequences > 0 {
+    block_content.push(0x00)
+    match encode_sequences_predefined_fse(sequences, block_content) {
+      Ok(_) => ()
+      Err(e) => return Err("Failed to encode sequences: \{e}")
+    }
+  }
+
+  // Block Header
+  let block_size = block_content.length()
+  let block_header = 0x01 | (2 << 1) | (block_size << 3)
+  output.push((block_header & 0xFF).to_byte())
+  output.push(((block_header >> 8) & 0xFF).to_byte())
+  output.push(((block_header >> 16) & 0xFF).to_byte())
+
+  for i = 0; i < block_content.length(); i = i + 1 {
+    output.push(block_content[i])
+  }
+
+  Ok(Bytes::from_array(output))
 }
 
 /// Compress as RLE block with dictionary ID

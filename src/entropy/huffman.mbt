@@ -863,29 +863,36 @@ pub fn huffman_decode_literals(encoded_data: Bytes, table: HuffmanEncodeTable, n
 /// 从频率计算 Huffman 权重
 pub fn calculate_huffman_weights(frequencies: Array[Int]) -> Array[Int] {
   let weights: Array[Int] = []
-  
+
   // 计算总频率
   let mut total = 0
   for i = 0; i < frequencies.length(); i = i + 1 {
     total = total + frequencies[i]
   }
-  
+
   if total == 0 {
     return Array::make(frequencies.length(), 0)
   }
-  
+
   // 计算权重（使用对数尺度）
+  // weight = -log2(freq/total) ≈ log2(total/freq)
   for i = 0; i < frequencies.length(); i = i + 1 {
     if frequencies[i] == 0 {
       weights.push(0)
     } else {
-      // 权重 = -log2(freq/total) 的近似
-      //todo 简化：使用归一化的倒数
-      let weight = (total / frequencies[i]).min(255)
-      weights.push(weight)
+      // 使用整数近似 log2: 找到最高位
+      let ratio = total / frequencies[i]
+      let mut weight = 0
+      let mut temp = ratio
+      while temp > 1 {
+        weight = weight + 1
+        temp = temp / 2
+      }
+      // 限制权重范围 [1, 11] (ZSTD Huffman 标准)
+      weights.push(weight.max(1).min(11))
     }
   }
-  
+
   weights
 }
 
