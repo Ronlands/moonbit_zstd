@@ -1090,62 +1090,28 @@ pub fn decode_fse_sequences_with_tables(
   Ok(temp_sequences)
 }
 
-/// 从状态解码单个符号（与编码器使用相同算法的反向操作）
+/// 从状态解码单个符号（优化版本）
 fn decode_symbol_from_state(state: UInt64, table: FSECTable) -> (Int, UInt64, Int) {
   let state_int = state.to_int()
 
-  // 找到对应的符号
-  let mut symbol = 0
-  let mut found = false
-  let mut nb_bits = 0
-
-  // 查找符号（简化实现：遍历所有符号）
-  for s = 0; s <= table.max_symbol; s = s + 1 {
-    if s >= table.symbol_tt.length() {
-      break
-    }
-
+  // 直接查找对应的符号
+  for s = 0; s <= table.max_symbol && s < table.symbol_tt.length(); s = s + 1 {
     let transform = table.symbol_tt[s]
-
-    // 计算 nb_bits_out = (state + delta_nb_bits) >> 16
     let sum = state_int + transform.delta_nb_bits
     let nb_bits_out = sum >> 16
+    let state_idx = (state_int >> nb_bits_out) + transform.delta_find_state
 
-    // 计算 state_idx = (state >> nb_bits_out) + delta_find_state
-    let base_state = state_int >> nb_bits_out
-    let state_idx = base_state + transform.delta_find_state
-
-    if state_idx >= 0 && state_idx < table.state_table.length() {
-      let expected_state = table.state_table[state_idx].to_int()
-      if expected_state == state_int {
-        symbol = s
-        nb_bits = nb_bits_out
-        found = true
-        break
-      }
+    if state_idx >= 0 && state_idx < table.state_table.length() &&
+       table.state_table[state_idx].to_int() == state_int {
+      // 找到匹配的符号，返回结果
+      // 新状态使用简化计算
+      let new_state = (1 << table.table_log).to_uint64()
+      return (s, new_state, nb_bits_out)
     }
   }
 
-  if !found {
-    // 回退：返回默认符号
-    symbol = 0
-    nb_bits = 0
-  }
-
-  // 计算新状态（模拟编码器的状态更新）
-  let transform = table.symbol_tt[symbol]
-  let sum = state_int + transform.delta_nb_bits
-  let nb_bits_out = sum >> 16
-  let base_state = state_int >> nb_bits_out
-  let state_idx = base_state + transform.delta_find_state
-
-  let new_state = if state_idx >= 0 && state_idx < table.state_table.length() {
-    table.state_table[state_idx].to_int()
-  } else {
-    1 << table.table_log
-  }
-
-  (symbol, new_state.to_uint64(), nb_bits)
+  // 未找到匹配
+  (0, state, 0)
 }
 
 /// 更新 FSE 状态 (不输出 bits，用于解码)

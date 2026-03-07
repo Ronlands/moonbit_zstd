@@ -808,13 +808,12 @@ pub fn huffman_decode_literals(encoded_data: Bytes, table: HuffmanEncodeTable, n
   let result: Array[Byte] = []
   let reader = create_huffman_bit_reader(encoded_data)
 
-  // 为快速查找创建反向映射：编码 -> 符号
-  let code_to_symbol: Array[(Int, Int)] = []  // (code, length) -> symbol
+  // 构建高效的反向查找表：(code, length) -> symbol
+  let code_map: Array[(Int, Int, Int)] = []  // (code, length, symbol)
   for symbol = 0; symbol < table.codes.length(); symbol = symbol + 1 {
     let code = table.codes[symbol]
     if code.length > 0 {
-      let _ = code_to_symbol + [(code.code.to_int(), code.length)]
-      // 注意：这里简化了反向查找，实际实现需要更高效的数据结构
+      code_map.push((code.code.to_int(), code.length, symbol))
     }
   }
 
@@ -825,7 +824,7 @@ pub fn huffman_decode_literals(encoded_data: Bytes, table: HuffmanEncodeTable, n
     let mut code_length = 0
     let mut found_symbol = -1
 
-    while code_length < 32 {  // 最大编码长度限制
+    while code_length < 32 {
       let read_result = read_bits(current_reader, 1)
       match read_result {
         Ok((bit, new_reader)) => {
@@ -833,11 +832,11 @@ pub fn huffman_decode_literals(encoded_data: Bytes, table: HuffmanEncodeTable, n
           current_code = (current_code << 1) | bit
           code_length = code_length + 1
 
-          // 检查是否匹配任何编码
-          for j = 0; j < code_to_symbol.length(); j = j + 1 {
-            let (code_value, code_len) = code_to_symbol[j]
+          // 快速查找匹配的编码
+          for j = 0; j < code_map.length(); j = j + 1 {
+            let (code_value, code_len, symbol) = code_map[j]
             if code_len == code_length && code_value == current_code.to_int() {
-              found_symbol = j  // 符号就是索引
+              found_symbol = symbol
               break
             }
           }
