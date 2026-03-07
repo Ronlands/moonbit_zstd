@@ -1,10 +1,56 @@
 /// ZSTD Compressor - LZ77 + Entropy Coding
-/// 
+///
 /// 支持功能：
 /// - ✅ Raw 块（无压缩）
 /// - ✅ RLE 块（重复数据压缩，可达 2000% 压缩率）
 /// - ✅ 压缩级别 1-22（可配置窗口大小和搜索深度）
 /// - ⏳ Compressed 块（LZ77 + FSE/Huffman，待完善）
+
+/// Hash table size for LZ77 matching (64K buckets)
+let hash_table_size : Int = 65536
+
+/// Write frame header descriptor and content size based on data length
+fn write_frame_header_descriptor(output: Array[Byte], data_length: Int) -> Unit {
+  if data_length < 256 {
+    // FCS_Field_Size = 0 (1 byte), Single_Segment = 1
+    output.push(0x20)
+    output.push(data_length.to_byte())
+  } else if data_length < 65792 {
+    // FCS_Field_Size = 1 (2 bytes), Single_Segment = 1
+    output.push(0x60)
+    let size_minus_256 = data_length - 256
+    output.push((size_minus_256 & 0xFF).to_byte())
+    output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
+  } else {
+    // FCS_Field_Size = 2 (4 bytes), Single_Segment = 1
+    output.push(0xA0)
+    output.push((data_length & 0xFF).to_byte())
+    output.push(((data_length >> 8) & 0xFF).to_byte())
+    output.push(((data_length >> 16) & 0xFF).to_byte())
+    output.push(((data_length >> 24) & 0xFF).to_byte())
+  }
+}
+
+/// Write frame content size for dictionary frames (updates FHD byte if needed)
+fn write_frame_content_size_with_dict(output: Array[Byte], data_length: Int, fhd_index: Int) -> Unit {
+  if data_length < 256 {
+    // FCS_flag=0: FHD = 0x23, 1-byte FCS
+    output.push(data_length.to_byte())
+  } else if data_length < 65792 {
+    // FCS_flag=1: FHD = 0x63, 2-byte FCS (value - 256)
+    output[fhd_index] = 0x63
+    let size_minus_256 = data_length - 256
+    output.push((size_minus_256 & 0xFF).to_byte())
+    output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
+  } else {
+    // FCS_flag=2: FHD = 0xA3, 4-byte FCS
+    output[fhd_index] = 0xA3
+    output.push((data_length & 0xFF).to_byte())
+    output.push(((data_length >> 8) & 0xFF).to_byte())
+    output.push(((data_length >> 16) & 0xFF).to_byte())
+    output.push(((data_length >> 24) & 0xFF).to_byte())
+  }
+}
 
 pub struct Compressor {
   level: Int
@@ -96,7 +142,6 @@ fn find_match(data: Bytes, pos: Int, hash_table: Array[Int], min_match: Int) -> 
 
 /// Create new compressor
 pub fn new_compressor() -> Compressor {
-  let hash_table_size = 65536
   let hash_table = Array::make(hash_table_size, -1)
   Compressor::{
     level: 1,
@@ -138,7 +183,7 @@ pub fn create_compression_context(config: CompressionConfig) -> CompressionConte
 fn generate_sequences(data: Bytes, min_match: Int) -> (Array[Sequence], Array[Byte]) {
   let sequences: Array[Sequence] = []
   let literals: Array[Byte] = []
-  let hash_table = Array::make(65536, -1)
+  let hash_table = Array::make(hash_table_size, -1)
 
   let mut pos = 0
   let mut literal_start = 0
@@ -268,28 +313,10 @@ pub fn compress_as_rle_block(data: Bytes, _config: CompressionConfig) -> Result[
   output.push(0xB5)
   output.push(0x2F)
   output.push(0xFD)
-  
-  // Frame Header Descriptor
-  // Single_Segment_Flag=1, FCS_Field_Size 根据数据大小决定
-  if data.length() < 256 {
-    // FCS_Field_Size = 0, Single_Segment = 1
-    output.push(0x20)
-    output.push(data.length().to_byte())
-  } else if data.length() < 65792 {
-    // FCS_Field_Size = 1 (2 bytes), Single_Segment = 1
-    output.push(0x60)
-    let size_minus_256 = data.length() - 256
-    output.push((size_minus_256 & 0xFF).to_byte())
-    output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
-  } else {
-    // FCS_Field_Size = 2 (4 bytes), Single_Segment = 1
-    output.push(0xA0)
-    output.push((data.length() & 0xFF).to_byte())
-    output.push(((data.length() >> 8) & 0xFF).to_byte())
-    output.push(((data.length() >> 16) & 0xFF).to_byte())
-    output.push(((data.length() >> 24) & 0xFF).to_byte())
-  }
-  
+
+  // Frame Header Descriptor and Content Size
+  write_frame_header_descriptor(output, data.length())
+
   // Block Header: Last_Block=1, Block_Type=RLE(1), Block_Size (decompressed size ≤ 128KB per chunk)
   // Splits into multiple RLE blocks if data exceeds ZSTD_MAX_BLOCK_SIZE.
   let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
@@ -322,23 +349,9 @@ pub fn compress_as_raw_block(data: Bytes, _config: CompressionConfig) -> Result[
   output.push(0xB5)
   output.push(0x2F)
   output.push(0xFD)
-  
+
   // Frame Header Descriptor and Content Size
-  if data.length() < 256 {
-    output.push(0x20)
-    output.push(data.length().to_byte())
-  } else if data.length() < 65792 {
-    output.push(0x60)
-    let size_minus_256 = data.length() - 256
-    output.push((size_minus_256 & 0xFF).to_byte())
-    output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
-  } else {
-    output.push(0xA0)
-    output.push((data.length() & 0xFF).to_byte())
-    output.push(((data.length() >> 8) & 0xFF).to_byte())
-    output.push(((data.length() >> 16) & 0xFF).to_byte())
-    output.push(((data.length() >> 24) & 0xFF).to_byte())
-  }
+  write_frame_header_descriptor(output, data.length())
 
   // Emit one or more Raw blocks, each ≤ max_block bytes
   let mut pos = 0
@@ -469,25 +482,10 @@ fn compress_as_raw_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, 
   output.push(((dict_id >> 8) & 0xFFU).to_byte())
   output.push(((dict_id >> 16) & 0xFFU).to_byte())
   output.push(((dict_id >> 24) & 0xFFU).to_byte())
-  
-  // Frame Content Size (FHD at index 4 is updated if fcs_flag changes)
-  if data.length() < 256 {
-    // FCS_flag=0: FHD = 0x23, 1-byte FCS
-    output.push(data.length().to_byte())
-  } else if data.length() < 65792 {
-    // FCS_flag=1: FHD = 0x63, 2-byte FCS (value - 256)
-    output[4] = 0x63
-    let size_minus_256 = data.length() - 256
-    output.push((size_minus_256 & 0xFF).to_byte())
-    output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
-  } else {
-    // FCS_flag=2: FHD = 0xA3, 4-byte FCS
-    output[4] = 0xA3
-    output.push((data.length() & 0xFF).to_byte())
-    output.push(((data.length() >> 8) & 0xFF).to_byte())
-    output.push(((data.length() >> 16) & 0xFF).to_byte())
-    output.push(((data.length() >> 24) & 0xFF).to_byte())
-  }
+
+  // Frame Content Size
+  write_frame_content_size_with_dict(output, data.length(), 4)
+
   let mut pos = 0
   while pos < data.length() {
     let remaining = data.length() - pos
@@ -579,22 +577,8 @@ pub fn compress_as_compressed_block(data: Bytes, _config: CompressionConfig) -> 
   output.push(0x2F)
   output.push(0xFD)
 
-  // Frame Header: Single_Segment_Flag=1, FCS_Field_Size based on data size
-  if data.length() < 256 {
-    output.push(0x20) // FCS_Field_Size=0 (1 byte), Single_Segment=1
-    output.push(data.length().to_byte())
-  } else if data.length() < 65792 {
-    output.push(0x60) // FCS_Field_Size=1 (2 bytes), Single_Segment=1
-    let size_minus_256 = data.length() - 256
-    output.push((size_minus_256 & 0xFF).to_byte())
-    output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
-  } else {
-    output.push(0xA0) // FCS_Field_Size=2 (4 bytes), Single_Segment=1
-    output.push((data.length() & 0xFF).to_byte())
-    output.push(((data.length() >> 8) & 0xFF).to_byte())
-    output.push(((data.length() >> 16) & 0xFF).to_byte())
-    output.push(((data.length() >> 24) & 0xFF).to_byte())
-  }
+  // Frame Header Descriptor and Content Size
+  write_frame_header_descriptor(output, data.length())
 
   // Build block content: Literals_Section + Sequences_Section
   let block_content: Array[Byte] = []
@@ -655,7 +639,7 @@ fn compress_with_dictionary_matching(
   dict_id: UInt
 ) -> Result[Bytes, String] {
   // 创建哈希表并预加载字典内容
-  let hash_table = Array::make(65536, -1)
+  let hash_table = Array::make(hash_table_size, -1)
   
   // 将字典内容预加载到哈希表
   // 这样 LZ77 压缩器就能找到数据和字典内容的匹配
@@ -1076,25 +1060,9 @@ fn compress_as_rle_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, 
   output.push(((dict_id >> 8) & 0xFFU).to_byte())
   output.push(((dict_id >> 16) & 0xFFU).to_byte())
   output.push(((dict_id >> 24) & 0xFFU).to_byte())
-  
-  // Frame Content Size (FHD at index 4 is updated if fcs_flag changes)
-  if data.length() < 256 {
-    // FCS_flag=0: FHD = 0x23, 1-byte FCS
-    output.push(data.length().to_byte())
-  } else if data.length() < 65792 {
-    // FCS_flag=1: FHD = 0x63, 2-byte FCS (value - 256)
-    output[4] = 0x63
-    let size_minus_256 = data.length() - 256
-    output.push((size_minus_256 & 0xFF).to_byte())
-    output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
-  } else {
-    // FCS_flag=2: FHD = 0xA3, 4-byte FCS
-    output[4] = 0xA3
-    output.push((data.length() & 0xFF).to_byte())
-    output.push(((data.length() >> 8) & 0xFF).to_byte())
-    output.push(((data.length() >> 16) & 0xFF).to_byte())
-    output.push(((data.length() >> 24) & 0xFF).to_byte())
-  }
+
+  // Frame Content Size
+  write_frame_content_size_with_dict(output, data.length(), 4)
 
   // Emit one or more RLE blocks, each with decompressed size ≤ ZSTD_MAX_BLOCK_SIZE
   let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
