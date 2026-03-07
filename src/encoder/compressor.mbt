@@ -774,9 +774,9 @@ fn find_match_with_dict(
   
   let hash = hash_bytes(data, pos)
   let match_pos = hash_table[hash]
-  
+
   // 没有匹配
-  if match_pos == 0 || (match_pos > 0 && match_pos >= pos) {
+  if match_pos == -1 || match_pos >= pos {
     return Match::{ offset: 0, length: 0 }
   }
   
