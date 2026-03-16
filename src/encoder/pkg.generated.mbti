@@ -16,6 +16,8 @@ pub fn compress_as_rle_block(Bytes, CompressionConfig) -> Result[Bytes, String]
 
 pub fn compress_data(Bytes, CompressionConfig) -> Result[Bytes, String]
 
+pub fn compress_data_with_checksum(Bytes, CompressionConfig, Bool) -> Result[Bytes, String]
+
 pub fn compress_data_with_dict(Bytes, CompressionConfig, Bytes, UInt) -> Result[Bytes, String]
 
 pub fn compress_with_context(Compressor, Bytes) -> Result[(Compressor, Bytes), @core.ZSTDError]

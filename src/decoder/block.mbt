@@ -41,7 +41,17 @@ pub fn create_decoder_context(window_size: Int) -> DecoderContext {
 }
 
 /// Add decoded data to sliding window
-fn add_decoded_data_to_window(ctx: DecoderContext, data: Bytes) -> Unit {
+fn add_decoded_data_to_window(ctx: DecoderContext, data: Bytes) -> Result[Unit, String] {
+  let max_output_size = 134217728 // 128MB limit
+
+  if data.length() > max_output_size {
+    return Err("Input data exceeds 128MB limit")
+  }
+
+  if ctx.total_decoded + data.length() > max_output_size {
+    return Err("Cumulative output exceeds 128MB limit")
+  }
+
   let _ = @zstd_core.get_window_buffer(ctx.window)
 
   for i = 0; i < data.length(); i = i + 1 {
@@ -49,6 +59,7 @@ fn add_decoded_data_to_window(ctx: DecoderContext, data: Bytes) -> Unit {
   }
 
   ctx.total_decoded = ctx.total_decoded + data.length()
+  Ok(())
 }
 
 /// Get current window buffer
@@ -748,11 +759,23 @@ fn parse_sequence_header(data: Bytes, offset: Int) -> Result[(@zstd_core.Sequenc
     count
   }
 
-  // Parse sequence modes
+  // Parse sequence modes (RFC 8878: no modes byte when num_sequences == 1)
+  if num_sequences == 1 {
+    // Single sequence: no compression modes byte, return header size
+    let header_size = current_offset - offset
+    let info = @zstd_core.make_sequences_section_info(
+      num_sequences,
+      @zstd_core.predefined_mode(),
+      @zstd_core.predefined_mode(),
+      @zstd_core.predefined_mode()
+    )
+    return Ok((info, header_size))
+  }
+
   if current_offset >= data.length() {
     return Err("Insufficient sequence modes data: current_offset=\{current_offset}, data.length=\{data.length()}, offset=\{offset}")
   }
-  
+
   let modes_byte = data[current_offset].to_int()
   current_offset = current_offset + 1
 
@@ -789,6 +812,68 @@ fn parse_sequence_header(data: Bytes, offset: Int) -> Result[(@zstd_core.Sequenc
   Ok((info, current_offset - offset))
 }
 
+/// Decode single sequence directly (RFC 8878 Section 3.1.1.3.2.2)
+fn decode_single_sequence_direct(data: Bytes, offset: Int) -> Result[Array[@zstd_core.Sequence], String] {
+  let mut pos = offset
+
+  // Read Literal_Length (variable length encoding)
+  if pos >= data.length() { return Err("Insufficient data for LL") }
+  let ll_byte = data[pos].to_int()
+  pos = pos + 1
+  let literal_length = if ll_byte < 128 {
+    ll_byte
+  } else if ll_byte < 255 {
+    if pos >= data.length() { return Err("Insufficient data for LL") }
+    ((ll_byte - 128) << 8) + data[pos].to_int() + { pos = pos + 1; 0 }
+  } else {
+    if pos + 1 >= data.length() { return Err("Insufficient data for LL") }
+    let v = data[pos].to_int() | (data[pos + 1].to_int() << 8)
+    pos = pos + 2
+    v + 0x7F00
+  }
+  let max_value = 16777216
+  if literal_length < 0 || literal_length >= max_value {
+    return Err("LL out of bounds")
+  }
+
+  // Read Offset
+  if pos >= data.length() { return Err("Insufficient data for OF") }
+  let of_byte = data[pos].to_int()
+  pos = pos + 1
+  let offset_value = if of_byte < 128 {
+    of_byte + 1
+  } else if of_byte < 255 {
+    if pos >= data.length() { return Err("Insufficient data for OF") }
+    ((of_byte - 128) << 8) + data[pos].to_int() + 1 + { pos = pos + 1; 0 }
+  } else {
+    if pos + 1 >= data.length() { return Err("Insufficient data for OF") }
+    let v = data[pos].to_int() | (data[pos + 1].to_int() << 8)
+    pos = pos + 2
+    v + 0x7F01
+  }
+  if offset_value < 1 || offset_value >= max_value {
+    return Err("OF out of bounds")
+  }
+
+  // Read Match_Length
+  if pos >= data.length() { return Err("Insufficient data for ML") }
+  let ml_byte = data[pos].to_int()
+  let match_length = if ml_byte < 128 {
+    ml_byte + 3
+  } else if ml_byte < 255 {
+    if pos + 1 >= data.length() { return Err("Insufficient data for ML") }
+    ((ml_byte - 128) << 8) + data[pos + 1].to_int() + 3
+  } else {
+    if pos + 2 >= data.length() { return Err("Insufficient data for ML") }
+    (data[pos + 1].to_int() | (data[pos + 2].to_int() << 8)) + 0x7F03
+  }
+  if match_length < 3 || match_length >= max_value {
+    return Err("ML out of bounds")
+  }
+
+  Ok([@zstd_core.make_sequence(literal_length, match_length, offset_value)])
+}
+
 /// Decode sequences using FSE
 fn decode_sequences_simple(
   data: Bytes,
@@ -799,6 +884,11 @@ fn decode_sequences_simple(
 ) -> Result[Array[@zstd_core.Sequence], String] {
   if header.num_sequences == 0 {
     return Ok([])
+  }
+
+  // RFC 8878: When num_sequences == 1, encode directly without FSE
+  if header.num_sequences == 1 {
+    return decode_single_sequence_direct(data, offset)
   }
 
   let current_offset = offset
@@ -1023,14 +1113,13 @@ fn execute_sequences(
   let output: Array[Byte] = []
   let mut literal_pos = 0
   let mut sequence_index = 0
-  
+
   while sequence_index < sequences.length() {
     let sequence = sequences[sequence_index]
     let literal_length = @zstd_core.get_sequence_literal_length(sequence)
     let match_length = @zstd_core.get_sequence_match_length(sequence)
     let offset = @zstd_core.get_sequence_offset(sequence)
 
-    
     // Add literals
     for i = 0; i < literal_length; i = i + 1 {
       if literal_pos + i < literals.length() {
@@ -1040,7 +1129,7 @@ fn execute_sequences(
       }
     }
     literal_pos = literal_pos + literal_length
-    
+
     // Handle match — byte-by-byte to support overlapping copies (match_length > offset)
     if match_length > 0 && offset > 0 {
       for _i = 0; _i < match_length; _i = _i + 1 {
@@ -1053,10 +1142,10 @@ fn execute_sequences(
         }
       }
     }
-    
+
     sequence_index = sequence_index + 1
   }
-  
+
   // Add remaining literals
   while literal_pos < literals.length() {
     let byte = literals[literal_pos]
@@ -1064,7 +1153,7 @@ fn execute_sequences(
     add_to_window(window, byte)
     literal_pos = literal_pos + 1
   }
-  
+
   Ok(Bytes::from_array(output))
 }
 
@@ -1125,7 +1214,10 @@ pub fn decompress_block_with_context(
           // already populate it byte-by-byte inside execute_sequences).
           match header.block_type {
             @zstd_core.BlockType::Compressed => ()
-            _ => add_decoded_data_to_window(ctx, decompressed_data)
+            _ => match add_decoded_data_to_window(ctx, decompressed_data) {
+              Ok(_) => ()
+              Err(e) => return Err(e)
+            }
           }
           let total_consumed = header_size + header.block_size
           Ok((decompressed_data, total_consumed, header.last_block))

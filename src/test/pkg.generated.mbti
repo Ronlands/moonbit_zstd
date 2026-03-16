@@ -14,6 +14,8 @@ pub fn run_all_dictionary_tests() -> Bool
 
 pub fn run_all_encoding_tests() -> Unit
 
+pub fn run_all_noncompliance_tests() -> Bool
+
 pub fn run_official_test_suite() -> Unit
 
 pub fn run_test_suite(String, Array[(String, Bool)]) -> Bool

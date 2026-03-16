@@ -101,20 +101,30 @@ pub fn parse_huffman_weights(data: Bytes, offset: Int, max_symbols: Int) -> Resu
     } else {
       // 重复权重
       let repeat_count = weight_byte - 128
-      
+
+      // 添加绝对上界检查防止整数溢出
+      if repeat_count > 256 {
+        return Err("Huffman repeat count exceeds safety limit (256)")
+      }
+
       // 验证重复计数的合理性
       if repeat_count > max_symbols - symbols_parsed {
         return Err("Truncated Huffman state: repeat count exceeds remaining symbols")
       }
-      
+
+      // 验证总符号数不会溢出
+      if symbols_parsed + repeat_count > max_symbols {
+        return Err("Huffman total symbols would exceed max_symbols")
+      }
+
       // 验证有下一个字节可读
       if current_offset >= data.length() {
         return Err("Truncated Huffman state: missing repeat value byte")
       }
-      
+
       let next_byte = data[current_offset].to_int()
       current_offset = current_offset + 1
-      
+
       for _i = 0; _i < repeat_count && symbols_parsed < max_symbols; _i = _i + 1 {
         weights.push(next_byte)
         symbols_parsed = symbols_parsed + 1
@@ -195,7 +205,7 @@ pub fn huffman_decode_symbol(table: HuffmanTable, bitstream: Bytes, bit_pos: Int
   let mut current_node = table.root
   let mut current_bit_pos = bit_pos
   let mut depth = 0
-  let max_depth = table.max_bits.max(32)  // 防止无限循环
+  let max_depth = 11  // RFC 8878 max Huffman depth
   
   // 深度验证：检测位流截断
   if bit_pos >= bitstream.length() * 8 {
@@ -800,18 +810,22 @@ pub fn huffman_decode_literals(encoded_data: Bytes, table: HuffmanEncodeTable, n
   let result: Array[Byte] = []
   let reader = create_huffman_bit_reader(encoded_data)
 
-  // 构建高效的反向查找表：(code, length) -> symbol
-  let code_map: Array[(Int, Int, Int)] = []  // (code, length, symbol)
+  // 构建反向查找表：按长度分组以减少搜索空间
+  let max_length = 16
+  let code_by_length: Array[Array[(Int, Int)]] = []
+  for _i = 0; _i <= max_length; _i = _i + 1 {
+    code_by_length.push([])
+  }
+
   for symbol = 0; symbol < table.codes.length(); symbol = symbol + 1 {
     let code = table.codes[symbol]
-    if code.length > 0 {
-      code_map.push((code.code.to_int(), code.length, symbol))
+    if code.length > 0 && code.length <= max_length {
+      code_by_length[code.length].push((code.code.to_int(), symbol))
     }
   }
 
   let mut current_reader = reader
   for _i = 0; _i < num_symbols; _i = _i + 1 {
-    // 逐位读取直到找到匹配的编码
     let mut current_code: UInt64 = 0UL
     let mut code_length = 0
     let mut found_symbol = -1
@@ -824,12 +838,15 @@ pub fn huffman_decode_literals(encoded_data: Bytes, table: HuffmanEncodeTable, n
           current_code = (current_code << 1) | bit
           code_length = code_length + 1
 
-          // 快速查找匹配的编码
-          for j = 0; j < code_map.length(); j = j + 1 {
-            let (code_value, code_len, symbol) = code_map[j]
-            if code_len == code_length && code_value == current_code.to_int() {
-              found_symbol = symbol
-              break
+          // 只搜索当前长度的编码
+          if code_length <= max_length {
+            let candidates = code_by_length[code_length]
+            for j = 0; j < candidates.length(); j = j + 1 {
+              let (code_value, symbol) = candidates[j]
+              if code_value == current_code.to_int() {
+                found_symbol = symbol
+                break
+              }
             }
           }
 

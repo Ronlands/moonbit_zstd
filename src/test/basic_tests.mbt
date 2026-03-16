@@ -89,23 +89,26 @@ fn test_compressed_block() -> Bool {
     test_text = test_text + "The quick brown fox jumps over the lazy dog. "
   }
   let test_data = @encoding/utf8.encode(test_text)
-  
+
   let compressed = @zstd.compress(test_data)
-  
+
   if compressed.length() == 0 {
     return false
   }
-  
-  let decompressed = @zstd.decompress(compressed)
-  
-  // 验证长度
-  if test_data.length() != decompressed.length() {
-    println("  ❌ 长度不匹配：原始=\{test_data.length()} 解压=\{decompressed.length()}")
-    return false
+
+  match @zstd_decoder.decompress(compressed) {
+    Ok(decompressed) => {
+      if test_data.length() != decompressed.length() {
+        println("  ❌ 长度不匹配：原始=\{test_data.length()} 解压=\{decompressed.length()}")
+        return false
+      }
+      verify_data_equal(test_data, decompressed)
+    }
+    Err(e) => {
+      println("  ❌ 解压失败: \{@zstd_core.error_to_string(e)}")
+      false
+    }
   }
-  
-  // 验证往返正确
-  verify_data_equal(test_data, decompressed)
 }
 
 /// Test compressed block with multiple sequences (not just one big match)

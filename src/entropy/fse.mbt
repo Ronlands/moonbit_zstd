@@ -227,12 +227,17 @@ priv struct BitstreamReader {
   mut bit_container: UInt64
   mut bit_pos: Int         // bitsConsumed：累积消费量
   end_offset: Int          // 数据起始边界（不可越过）
+  mut reload_failed: Bool  // 标记 reload 是否失败
 }
 
 /// 从位流读取指定位数
 /// 参照官方 BIT_lookBits + BIT_skipBits
 fn read_bits_uint64(bs: BitstreamReader, nb_bits: Int) -> (BitstreamReader, UInt64) {
   if nb_bits <= 0 {
+    return (bs, 0UL)
+  }
+
+  if bs.reload_failed {
     return (bs, 0UL)
   }
 
@@ -246,13 +251,16 @@ fn read_bits_uint64(bs: BitstreamReader, nb_bits: Int) -> (BitstreamReader, UInt
 
 /// Reload bitstream — 参照官方 BIT_reloadDStream
 /// 当 bit_pos 接近 64 时，向前移动指针并重新加载 container
-fn reload_dstream(bs: BitstreamReader) -> Unit {
-  if bs.bit_pos > 64 { return }
+fn reload_dstream(bs: BitstreamReader) -> BitstreamReader {
+  if bs.bit_pos <= 64 { return bs }
 
   let bytes_consumed = bs.bit_pos / 8
   let new_offset = bs.offset - bytes_consumed
 
-  if new_offset < bs.end_offset { return }
+  if new_offset < bs.end_offset {
+    bs.reload_failed = true
+    return bs
+  }
 
   bs.offset = new_offset
   bs.bit_pos = bs.bit_pos % 8
@@ -265,6 +273,7 @@ fn reload_dstream(bs: BitstreamReader) -> Unit {
     }
   }
   bs.bit_container = container
+  bs
 }
 
 
@@ -454,27 +463,29 @@ fn build_fse_dtable(normalized: Array[Int], table_log: Int) -> Array[FSEDecodeEn
   
   // 第四步：为每个状态位置 u 构建解码项
   // 根据 ZSTD 参考实现（fse_decompress.c）
-  // symbol_next[s] 跟踪每个符号的"下一个状态值"，初始化为归一化频率
+  // symbol_next[s] 跟踪每个符号的"下一个状态值"，从0开始递增
   let symbol_next: Array[Int] = Array::make(normalized.length(), 0)
-  for s = 0; s < normalized.length(); s = s + 1 {
-    let norm = normalized[s]
-    // 对于频率为-1的符号，设为1；其他设为归一化频率
-    symbol_next[s] = if norm == -1 { 1 } else if norm > 0 { norm } else { 0 }
-  }
-  
+
   for u = 0; u < table_size; u = u + 1 {
     let symbol = table_symbol[u]
-    let next_state = symbol_next[symbol]
-    symbol_next[symbol] = next_state + 1
-    
+    let occurrence = symbol_next[symbol]
+    symbol_next[symbol] = occurrence + 1
+
+    // 计算该符号的基础频率
+    let norm = normalized[symbol]
+    let base_freq = if norm == -1 { 1 } else { norm }
+
+    // nextState = base_freq + occurrence
+    let next_state = base_freq + occurrence
+
     // ZSTD公式：nbBits = MAX(tableLog - highbit32(nextState), 0)
     let nb_bits = (table_log - highbit32(next_state)).max(0)
     // newStateBaseline = (nextState << nbBits) - tableSize
     let new_state_base = (next_state << nb_bits) - table_size
-    
-    dtable[u] = FSEDecodeEntry::{ 
-      symbol: symbol, 
-      nb_bits: nb_bits, 
+
+    dtable[u] = FSEDecodeEntry::{
+      symbol: symbol,
+      nb_bits: nb_bits,
       new_state_base: new_state_base
     }
   }
@@ -1004,6 +1015,7 @@ pub fn decode_fse_sequences_with_tables(
     bit_container: 0UL,
     bit_pos: 0,
     end_offset: offset,
+    reload_failed: false,
   }
 
   if fse_data_len >= 8 {
@@ -1343,6 +1355,7 @@ fn decode_fse_sequences_original(
     bit_container: 0UL,
     bit_pos: 0,
     end_offset: offset,
+    reload_failed: false,
   }
 
   if fse_data_len >= 8 {
@@ -1407,7 +1420,7 @@ fn decode_fse_sequences_original(
       _ => return Err("FSE状态越界错误")
     }
 
-    // 2. Read extra bits: OF, ML, (reload), LL — official order
+    // 2. Read extra bits: OF, ML, (reload), LL
     let mut final_of = decode_of(of_code, 0)
     let of_nb = get_of_bits(of_code)
     let (bs_a, of_ex) = if of_nb > 0 { read_bits_uint64(current_bs, of_nb) } else { (current_bs, 0UL) }
@@ -1418,13 +1431,33 @@ fn decode_fse_sequences_original(
     let (bs_b, ml_ex) = if ml_nb > 0 { read_bits_uint64(bs_a, ml_nb) } else { (bs_a, 0UL) }
     final_ml = final_ml + ml_ex.to_int()
 
-    // Reload between ML and LL extras (official behavior for 64-bit)
-    reload_dstream(bs_b)
+    let bs_b_reloaded = reload_dstream(bs_b)
 
     let mut final_ll = decode_ll(ll_code, 0)
     let ll_nb = get_ll_bits(ll_code)
-    let (bs_c, ll_ex) = if ll_nb > 0 { read_bits_uint64(bs_b, ll_nb) } else { (bs_b, 0UL) }
+    let (bs_c, ll_ex) = if ll_nb > 0 { read_bits_uint64(bs_b_reloaded, ll_nb) } else { (bs_b_reloaded, 0UL) }
     final_ll = final_ll + ll_ex.to_int()
+
+    // 3. State updates AFTER extras (not for last sequence)
+    if seq_idx < num_sequences - 1 {
+      // Check if we have enough data before trying to read state transitions
+      if bs_c.reload_failed {
+        return Err("Bitstream exhausted before state transitions")
+      }
+
+      let (bs1, ll_st) = read_bits_uint64(bs_c, ll_entry.nb_bits)
+      ll_state = (ll_entry.new_state_base + ll_st.to_int() + 64).to_uint64()
+
+      let (bs2, ml_st) = read_bits_uint64(bs1, ml_entry.nb_bits)
+      ml_state = (ml_entry.new_state_base + ml_st.to_int() + 64).to_uint64()
+
+      let (bs3, of_st) = read_bits_uint64(bs2, of_entry.nb_bits)
+      of_state = (of_entry.new_state_base + of_st.to_int() + 32).to_uint64()
+
+      current_bs = reload_dstream(bs3)
+    } else {
+      current_bs = bs_c
+    }
 
     // Resolve repeat offsets (RFC 8878 §3.1.1.3.2.1)
     // of_nb == 0  → of_code=0, raw=0: special repeat sentinel
@@ -1468,21 +1501,6 @@ fn decode_fse_sequences_original(
       }
     }
     sequences.push(make_sequence(final_ll, final_ml, resolved_of))
-
-    // 3. State updates: LL, ML, OF — RFC 8878 order (not needed for last sequence)
-    if seq_idx < num_sequences - 1 {
-      let (bs1, ll_st) = read_bits_uint64(bs_c, ll_entry.nb_bits)
-      ll_state = (ll_entry.new_state_base + ll_st.to_int() + 64).to_uint64()
-
-      let (bs2, ml_st) = read_bits_uint64(bs1, ml_entry.nb_bits)
-      ml_state = (ml_entry.new_state_base + ml_st.to_int() + 64).to_uint64()
-
-      let (bs3, of_st) = read_bits_uint64(bs2, of_entry.nb_bits)
-      of_state = (of_entry.new_state_base + of_st.to_int() + 32).to_uint64()
-
-      reload_dstream(bs3)
-      current_bs = bs3
-    }
   }
 
   Ok(sequences)

@@ -829,12 +829,17 @@ pub fn compress_as_compressed_block(data: Bytes, config: CompressionConfig) -> R
   }
 
   if num_sequences > 0 {
-    // Compression modes byte: LL=Predefined(0), OF=Predefined(0), ML=Predefined(0)
-    block_content.push(0x00)
+    if num_sequences == 1 {
+      // RFC 8878: Single sequence uses direct encoding (no FSE, no compression modes byte)
+      encode_single_sequence_direct(sequences[0], block_content)
+    } else {
+      // Compression modes byte: LL=Predefined(0), OF=Predefined(0), ML=Predefined(0)
+      block_content.push(0x00)
 
-    match encode_sequences_predefined_fse(sequences, block_content) {
-      Ok(_) => ()
-      Err(e) => return Err("Failed to encode sequences: \{e}")
+      match encode_sequences_predefined_fse(sequences, block_content) {
+        Ok(_) => ()
+        Err(e) => return Err("Failed to encode sequences: \{e}")
+      }
     }
   }
 
@@ -1387,6 +1392,69 @@ fn extract_sequence_symbols(sequences: Array[Sequence]) -> (Array[Int], Array[In
 
 /// Encode sequences using predefined FSE tables
 /// Matches official ZSTD_encodeSequences_body order exactly
+/// Encode single sequence directly (RFC 8878: no FSE for single sequence)
+fn encode_single_sequence_direct(seq: Sequence, output: Array[Byte]) -> Unit {
+  let ll = seq.literal_length
+  let ml = seq.match_length
+  let max_value = 16777216
+  if ll < 0 || ll >= max_value { abort("LL out of bounds") }
+  if ml < 3 || ml >= max_value { abort("ML out of bounds") }
+
+  // Handle repeat offset markers: convert to actual offset values
+  // For single sequence, we use initial repeat offsets [1, 4, 8]
+  let of = if seq.offset == -1 {
+    1  // rep[0]
+  } else if seq.offset == -2 {
+    4  // rep[1]
+  } else if seq.offset == -3 {
+    8  // rep[2]
+  } else {
+    seq.offset
+  }
+  if of < 1 || of >= max_value { abort("OF out of bounds") }
+
+  // Encode Literal_Length
+  if ll < 128 {
+    output.push(ll.to_byte())
+  } else if ll < 0x7F00 {
+    output.push(((ll >> 8) + 128).to_byte())
+    output.push((ll & 0xFF).to_byte())
+  } else {
+    output.push(0xFF)
+    let adjusted = ll - 0x7F00
+    output.push((adjusted & 0xFF).to_byte())
+    output.push(((adjusted >> 8) & 0xFF).to_byte())
+  }
+
+  // Encode Offset (stored as offset-1)
+  let of_minus_1 = of - 1
+  if of_minus_1 < 128 {
+    output.push(of_minus_1.to_byte())
+  } else if of_minus_1 < 0x7F00 {
+    output.push(((of_minus_1 >> 8) + 128).to_byte())
+    output.push((of_minus_1 & 0xFF).to_byte())
+  } else {
+    output.push(0xFF)
+    let adjusted = of_minus_1 - 0x7F00
+    output.push((adjusted & 0xFF).to_byte())
+    output.push(((adjusted >> 8) & 0xFF).to_byte())
+  }
+
+  // Encode Match_Length (stored as ml-3)
+  let ml_minus_3 = ml - 3
+  if ml_minus_3 < 128 {
+    output.push(ml_minus_3.to_byte())
+  } else if ml_minus_3 < 0x7F00 {
+    output.push(((ml_minus_3 >> 8) + 128).to_byte())
+    output.push((ml_minus_3 & 0xFF).to_byte())
+  } else {
+    output.push(0xFF)
+    let adjusted = ml_minus_3 - 0x7F00
+    output.push((adjusted & 0xFF).to_byte())
+    output.push(((adjusted >> 8) & 0xFF).to_byte())
+  }
+}
+
 fn encode_sequences_predefined_fse(sequences: Array[Sequence], output: Array[Byte]) -> Result[Unit, String] {
   if sequences.length() == 0 {
     return Ok(())

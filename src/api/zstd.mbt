@@ -249,13 +249,14 @@ pub fn decompress(data: Bytes) -> Bytes {
   if data.length() < 4 {
     return Bytes::from_array([])
   }
-  
+
   let magic = (data[3].to_int() << 24) | (data[2].to_int() << 16) | (data[1].to_int() << 8) | data[0].to_int()
   if magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT {
     return Bytes::from_array([])
   }
-  
-  let result = @zstd_decoder.decompress(data)
+
+  let max_output_size = 134217728 // 128MB global limit
+  let result = @zstd_decoder.decompress_with_limit(data, max_output_size)
   match result {
     Ok(decompressed) => decompressed
     Err(_) => Bytes::from_array([])

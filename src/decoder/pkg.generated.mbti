@@ -44,6 +44,8 @@ pub fn decompress_block_with_context(DecoderContext, Bytes, Int) -> Result[(Byte
 
 pub fn decompress_with_decompressor(@core.DecompressionContext, Bytes) -> Result[(@core.DecompressionContext, Bytes), @core.ZSTDError]
 
+pub fn decompress_with_limit(Bytes, Int) -> Result[Bytes, @core.ZSTDError]
+
 pub fn decompress_zstd_data(Bytes) -> Result[Bytes, String]
 
 pub fn decompress_zstd_data_with_dict(Bytes, Bytes) -> Result[Bytes, String]

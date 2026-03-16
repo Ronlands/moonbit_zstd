@@ -81,6 +81,52 @@ pub fn decompress(data : Bytes) -> @zstd_core.ZSTDResult[Bytes] {
   Ok(Bytes::from_array(all_output))
 }
 
+/// Decompress with global output size limit (prevents decompression bomb bypass)
+pub fn decompress_with_limit(data: Bytes, max_output: Int) -> @zstd_core.ZSTDResult[Bytes] {
+  if data.length() < 4 {
+    return Err(@zstd_core.parse_error("Data too short"))
+  }
+
+  let all_output: Array[Byte] = []
+  let mut pos = 0
+
+  while pos < data.length() {
+    if pos + 4 > data.length() { break }
+    let magic = (data[pos + 3].to_int() << 24) | (data[pos + 2].to_int() << 16) |
+                (data[pos + 1].to_int() << 8) | data[pos].to_int()
+    if magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT { break }
+
+    let remaining: Array[Byte] = []
+    for i = pos; i < data.length(); i = i + 1 {
+      remaining.push(data[i])
+    }
+    let frame_data = Bytes::from_array(remaining)
+
+    let analysis = analyze_file(frame_data)
+    if !analysis.is_valid {
+      return Err(@zstd_core.message_error(analysis.error_message))
+    }
+
+    let result = decompress_zstd_data(frame_data)
+    match result {
+      Ok(decompressed) => {
+        if all_output.length() + decompressed.length() > max_output {
+          return Err(@zstd_core.message_error("Cumulative output exceeds limit"))
+        }
+        for i = 0; i < decompressed.length(); i = i + 1 {
+          all_output.push(decompressed[i])
+        }
+        let frame_size = calculate_frame_size(frame_data)
+        if frame_size <= 0 { break }
+        pos = pos + frame_size
+      }
+      Err(e) => return Err(@zstd_core.message_error(e))
+    }
+  }
+
+  Ok(Bytes::from_array(all_output))
+}
+
 /// Calculate the total byte size of one ZSTD frame (header + all blocks + optional checksum).
 fn calculate_frame_size(data: Bytes) -> Int {
   let mut offset = 4 // skip magic
