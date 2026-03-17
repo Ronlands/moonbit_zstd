@@ -1376,9 +1376,13 @@ fn encode_of_symbol(offset: Int) -> Int {
   } else if offset == -3 {
     return 1  // rep[2] (will need extra bit)
   }
+  // Validate offset before encoding to avoid abort
+  if offset < 1 {
+    abort("Invalid offset: must be >= 1")
+  }
   match @zstd_entropy.encode_of(offset) {
     Ok((code, _)) => code
-    Err(_) => abort("Invalid offset in get_of_code")
+    Err(e) => abort("encode_of failed: " + e)
   }
 }
 
@@ -1422,6 +1426,8 @@ fn encode_single_sequence_direct(seq: Sequence, output: Array[Byte]) -> Unit {
   if of < 1 || of >= max_value { abort("OF out of bounds") }
 
   // Check for integer overflow: LL + ML + OF must not overflow Int
+  // First check ML + OF to avoid underflow in the second check
+  if ml > 2147483647 - of { abort("Integer overflow: ML + OF exceeds Int max") }
   if ll > 2147483647 - ml - of { abort("Integer overflow: LL + ML + OF exceeds Int max") }
 
   // Encode Literal_Length
