@@ -1,0 +1,6 @@
+{
+  "import": [
+    "Ronlands/moonbit_zstd/encoder",
+    "Ronlands/moonbit_zstd/decoder"
+  ]
+}

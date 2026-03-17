@@ -684,20 +684,35 @@ pub fn build_huffman_encode_table(frequencies: Array[Int]) -> HuffmanEncodeTable
   }
 }
 
-/// Huffman 编码函数
+/// Huffman 编码函数 - 包含权重表描述
 pub fn huffman_encode(data: Array[Byte]) -> Result[Bytes, String] {
-  let max_symbol = 255  // 字节数据
+  let max_symbol = 255
 
   // 1. 统计频率
   let frequencies = count_huffman_symbols(data, max_symbol)
 
-  // 2. 构建编码表
+  // 2. 计算权重
+  let weights = calculate_huffman_weights(frequencies)
+
+  // 3. 构建编码表
   let encode_table = build_huffman_encode_table(frequencies)
 
-  // 3. 编码数据
+  // 4. 序列化权重表
+  let weights_data = serialize_huffman_weights(weights)
+
+  // 5. 编码数据
   let encoded_data = huffman_encode_with_table(data, encode_table)
 
-  Ok(encoded_data)
+  // 6. 合并权重表和编码数据
+  let result: Array[Byte] = []
+  for i = 0; i < weights_data.length(); i = i + 1 {
+    result.push(weights_data[i])
+  }
+  for i = 0; i < encoded_data.length(); i = i + 1 {
+    result.push(encoded_data[i])
+  }
+
+  Ok(Bytes::from_array(result))
 }
 
 /// 使用编码表进行 Huffman 编码

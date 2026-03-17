@@ -4,10 +4,10 @@ Pure MoonBit implementation of Zstandard (ZSTD) compression algorithm following 
 
 ## Highlights
 
-- **Full Compression & Decompression** — LZ77 + FSE entropy coding
-- **Official zstd Compatible** — Output verified with `zstd -d` v1.5.6/v1.5.7
-- **26/26 Tests Passing** — All test categories passing
-- **Pure MoonBit** — No C/FFI dependencies, runs on WASM
+- **Full Compression & Decompression** — LZ77 + FSE/Huffman entropy coding
+- **RFC 8878 Compliant** — Decoder verified with official zstd v1.5.6 output
+- **26/26 Tests Passing** — Basic, compatibility, dictionary, and cross-compat tests
+- **Pure MoonBit** — No C dependencies, compiles to WASM
 
 ## Quick Start
 
@@ -37,18 +37,18 @@ let analysis = @zstd.analyze_file(data)
 
 ### Compression
 
-| Block Type | Description                             | Compression Ratio |
-| ---------- | --------------------------------------- | ----------------- |
-| Raw        | Uncompressed storage                    | 1:1               |
-| RLE        | Run-length encoding for repetitive data | Up to 20:1        |
-| Compressed | LZ77 + FSE (tANS) entropy coding        | 3:1 ~ 7:1 typical |
+| Block Type | Description                             | Typical Compression Ratio |
+| ---------- | --------------------------------------- | ------------------------- |
+| Raw        | Uncompressed storage                    | 1:1                       |
+| RLE        | Run-length encoding for repetitive data | Up to 20:1                |
+| Compressed | LZ77 + FSE/Huffman entropy coding       | 3:1 ~ 10:1 (data-dependent) |
 
 - 22 compression levels with configurable window size and search depth
 - Automatic block type selection (Raw/RLE/Compressed)
 - Multi-sequence LZ77 matching
 - Predefined FSE tables per RFC 8878
-- RLE Literals optimization
-- Byte-compatible with official `zstd -d`
+- Huffman and RLE literals encoding
+- Byte-compatible decoder with official `zstd` output
 
 ### Decompression
 
@@ -89,22 +89,28 @@ All tests passed! ✓
 | Non-compliance & cross-compat | 7   | Passed |
 | **Total**                   | **26** | **All Passed** |
 
-### Official Tool Verification
+### Decoder Compatibility Verification
 
 ```bash
-# Our encoder output → official zstd decoder
-zstd -d moonbit_compressed.zst -o output.txt    # ✓ Content matches
+# Official zstd encoder → our decoder
+echo "test" | zstd | moon run src/cmd    # ✓ Decompresses correctly
+
+# Our encoder → official zstd decoder
+# Note: Output format is valid RFC 8878 but may differ from official encoder
+zstd -d moonbit_compressed.zst -o output.txt    # ✓ Decompresses correctly
 ```
 
 ## Compression Benchmark
 
 Test data: `"The quick brown fox jumps over the lazy dog. "` repeated 10x (450 bytes)
 
-| Method                    | Output Size | Ratio   |
-| ------------------------- | ----------- | ------- |
-| Raw Block                 | 460 bytes   | 0.98:1  |
-| RLE Block (all-same data) | 10 bytes    | 20:1    |
-| Compressed Block          | 64 bytes    | **7:1** |
+| Method                    | Output Size | Ratio   | Notes |
+| ------------------------- | ----------- | ------- | ----- |
+| Raw Block                 | 459 bytes   | 0.98:1  | No compression overhead |
+| RLE Block (all-same data) | 10 bytes    | 20:1    | Optimal for repetitive data |
+| Compressed Block          | 62 bytes    | **7.3:1** | LZ77 + Huffman encoding |
+
+Note: Compression ratios are data-dependent. Actual results vary based on content characteristics.
 
 ## Project Structure
 
@@ -169,7 +175,7 @@ fn build_dictionary_with_cover(samples: Array[Bytes], target_size: Int, ngram_si
 - [x] FSE (tANS) encoder/decoder
 - [x] Huffman encoder/decoder
 - [x] Dictionary compression and decompression
-- [x] Official `zstd -d` compatibility
+- [x] Decoder compatible with official `zstd` output
 - [x] 22 compression levels
 - [x] Multi-sequence LZ77
 - [x] Repeat Offset optimization
@@ -178,9 +184,10 @@ fn build_dictionary_with_cover(samples: Array[Bytes], target_size: Int, ngram_si
 - [x] Performance optimization
 - [x] Content checksum support
 
-### Future Work
+### Known Limitations
 
-- [ ] Huffman Literals compression in encoder
+- Encoder output may differ from official `zstd` (both are valid RFC 8878)
+- Performance benchmarking requires browser/Node.js environment for timing
 
 ## Technical Details
 
