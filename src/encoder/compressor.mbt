@@ -90,7 +90,7 @@ fn write_frame_header_descriptor_with_checksum(output: Array[Byte], data_length:
     write_u16_le(output, data_length - fcs_threshold_1byte)
   } else {
     output.push((0xA0 | checksum_flag).to_byte())
-    write_u32_le(output, data_length.to_uint())
+    write_u32_le(output, data_length.reinterpret_as_uint())
   }
 }
 
@@ -108,7 +108,7 @@ fn write_frame_content_size_with_dict(output: Array[Byte], data_length: Int, fhd
     write_u16_le(output, data_length - fcs_threshold_1byte)
   } else {
     output[fhd_index] = 0xA3
-    write_u32_le(output, data_length.to_uint())
+    write_u32_le(output, data_length.reinterpret_as_uint())
   }
 }
 
@@ -149,15 +149,15 @@ fn hash_bytes(data: Bytes, pos: Int) -> Int {
   if pos + 3 >= data.length() {
     return 0
   }
-  
-  let b0 = data[pos].to_int()
-  let b1 = data[pos + 1].to_int()
-  let b2 = data[pos + 2].to_int()
-  let b3 = data[pos + 3].to_int()
-  
-  // Simple hash function
-  let hash = (b0 * 31 + b1) * 31 + b2 * 31 + b3
-  hash & 0xFFFF  // 65536 buckets
+
+  let b0 = data[pos].to_int() & 0xFF
+  let b1 = data[pos + 1].to_int() & 0xFF
+  let b2 = data[pos + 2].to_int() & 0xFF
+  let b3 = data[pos + 3].to_int() & 0xFF
+
+  // Improved hash: better distribution using bit shifts and XOR
+  let hash = ((b0 << 12) ^ (b1 << 8) ^ (b2 << 4) ^ b3) * 506832829
+  (hash >> 16) & 0xFFFF
 }
 
 /// Find match at given position using hash table (optimized)
@@ -179,12 +179,16 @@ fn find_match(data: Bytes, pos: Int, hash_table: Array[Int], min_match: Int, win
     return Match::{ offset: 0, length: 0 }
   }
 
-  // Fast path: check first bytes
-  if data[match_pos] != data[pos] {
-    return Match::{ offset: 0, length: 0 }
+  // Early exit: check min_match bytes first
+  let mut i = 0
+  while i < min_match && pos + i < data_len {
+    if data[match_pos + (i % offset)] != data[pos + i] {
+      return Match::{ offset: 0, length: 0 }
+    }
+    i = i + 1
   }
 
-  let mut match_length = 1
+  let mut match_length = min_match
   let max_match = (data_len - pos).min(131072)
 
   while match_length < max_match &&
@@ -193,11 +197,7 @@ fn find_match(data: Bytes, pos: Int, hash_table: Array[Int], min_match: Int, win
     match_length = match_length + 1
   }
 
-  if match_length >= min_match {
-    Match::{ offset: offset, length: match_length }
-  } else {
-    Match::{ offset: 0, length: 0 }
-  }
+  Match::{ offset: offset, length: match_length }
 }
 
 // ============================================================================
@@ -605,7 +605,7 @@ pub fn estimate_compressed_size(data: Bytes, _config: CompressionConfig) -> Int 
   let sample_size = data.length().min(1000)
 
   for i = 0; i < sample_size; i = i + 1 {
-    let b = data[i].to_int()
+    let b = data[i].to_int() & 0xFF
     if byte_counts[b] == 0 {
       unique_bytes = unique_bytes + 1
     }

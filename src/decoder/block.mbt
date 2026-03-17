@@ -647,11 +647,11 @@ fn decompress_compressed_block(data: Bytes, offset: Int, size: Int) -> Result[By
 
   // 深度验证：检查块大小合理性
   if size == 0 {
-    return Err("Invalid compressed block: zero size")
+    return Err("Invalid compressed block: zero size at offset \{offset}")
   }
 
-  if size > @zstd_core.ZSTD_MAX_BLOCK_SIZE {  // ZSTD 最大块大小 128KB
-    return Err("Invalid compressed block: size exceeds maximum (128KB)")
+  if size > @zstd_core.ZSTD_MAX_BLOCK_SIZE {
+    return Err("Invalid compressed block: size \{size} exceeds maximum (128KB)")
   }
 
   // 创建块上下文以保存 Huffman 树

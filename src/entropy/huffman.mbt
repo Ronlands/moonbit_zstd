@@ -407,7 +407,7 @@ pub fn create_huffman_bit_reader(data: Bytes) -> HuffmanBitReader {
 /// 向位流中写入指定数量的位 - 完整的实现
 pub fn write_bits(writer: HuffmanBitWriter, value: UInt64, num_bits: Int) -> HuffmanBitWriter {
   if num_bits <= 0 || num_bits > 64 {
-    return writer  // 无效的位数
+    return writer
   }
 
   let mut current_byte = writer.current_byte
@@ -416,21 +416,28 @@ pub fn write_bits(writer: HuffmanBitWriter, value: UInt64, num_bits: Int) -> Huf
   let mut remaining_bits = num_bits
   let value_to_write = value
 
+  // Fast path: write within current byte
+  if remaining_bits <= bit_pos + 1 {
+    let shift = bit_pos - remaining_bits + 1
+    let mask = (1UL << remaining_bits) - 1UL
+    current_byte = current_byte | ((value_to_write & mask).to_int() << shift).to_byte()
+    bit_pos = bit_pos - remaining_bits
+    if bit_pos < 0 {
+      buffer.push(current_byte)
+      return HuffmanBitWriter::{ buffer, current_byte: 0b00000000, bit_position: 7 }
+    }
+    return HuffmanBitWriter::{ buffer, current_byte, bit_position: bit_pos }
+  }
+
+  // Slow path: spans multiple bytes
   while remaining_bits > 0 {
     let bits_to_write = remaining_bits.min(bit_pos + 1)
-
-    // 提取要写入的位
     let mask = (1UL << bits_to_write) - 1UL
     let bits = (value_to_write >> (remaining_bits - bits_to_write)) & mask
-
-    // 计算位移量（从最高位开始）
     let shift = bit_pos - bits_to_write + 1
     current_byte = current_byte | (bits.to_int() << shift).to_byte()
-
     bit_pos = bit_pos - bits_to_write
     remaining_bits = remaining_bits - bits_to_write
-
-    // 如果当前字节写满，保存并开始新字节
     if bit_pos < 0 {
       buffer.push(current_byte)
       current_byte = 0b00000000
@@ -438,11 +445,7 @@ pub fn write_bits(writer: HuffmanBitWriter, value: UInt64, num_bits: Int) -> Huf
     }
   }
 
-  HuffmanBitWriter::{
-    buffer: buffer,
-    current_byte: current_byte,
-    bit_position: bit_pos
-  }
+  HuffmanBitWriter::{ buffer, current_byte, bit_position: bit_pos }
 }
 
 /// 从位流中读取指定数量的位

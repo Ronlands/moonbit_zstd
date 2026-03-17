@@ -20,7 +20,7 @@ pub fn parse_formatted_dictionary(data: Bytes) -> Result[Dictionary, String] {
               (data[3].to_uint() << 24)
   
   if magic != 0xEC30A437 {
-    return Err("Invalid dictionary magic number")
+    return Err("Invalid dictionary magic number: got 0x\{magic.to_string()}, expected 0xEC30A437")
   }
   
   // 读取字典ID

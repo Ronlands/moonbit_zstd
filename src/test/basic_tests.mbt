@@ -18,6 +18,8 @@ pub fn run_all_basic_tests() -> Bool {
     ("Single Byte", test_single_byte()),
     ("Invalid Magic", test_invalid_magic()),
     ("Large Offset", test_large_offset()),
+    ("Large Data", test_large_data()),
+    ("Corrupted Data", test_corrupted_data()),
   ]
 
   run_test_suite("Basic tests", tests)
@@ -401,4 +403,27 @@ fn test_large_offset() -> Bool {
     }
     Err(_) => false
   }
+}
+
+/// Test large data (10KB)
+fn test_large_data() -> Bool {
+  let arr: Array[Byte] = []
+  for i = 0; i < 10240; i = i + 1 {
+    arr.push(((i % 256)).to_byte())
+  }
+  let data = Bytes::from_array(arr)
+  match @zstd.compress(data) {
+    Ok(compressed) => {
+      let decompressed = @zstd.decompress(compressed)
+      decompressed.length() == data.length()
+    }
+    Err(_) => false
+  }
+}
+
+/// Test corrupted data handling
+fn test_corrupted_data() -> Bool {
+  let corrupted = Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF])
+  let result = @zstd.decompress(corrupted)
+  result.length() == 0  // Should fail gracefully
 }
