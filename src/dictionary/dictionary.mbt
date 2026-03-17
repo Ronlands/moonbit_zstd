@@ -94,10 +94,10 @@ pub fn decompress_with_dictionary(compressed_data: Bytes, dictionary: Dictionary
 /// 使用字典进行压缩
 /// 实现字典压缩 - 在帧头中写入字典 ID
 /// ✅ 字典内容已用于模式匹配以提高压缩比
-pub fn compress_with_dictionary(data: Bytes, dictionary: Dictionary) -> Result[Bytes, String] {
+pub fn compress_with_dictionary(data: Bytes, dictionary: Dictionary) -> Result[Bytes, @zstd_core.ZSTDError] {
   let config = @zstd_encoder.create_default_config()
   @zstd_encoder.compress_data_with_dict(
-    data, 
+    data,
     config,
     dictionary.content,
     dictionary.dict_id
@@ -409,13 +409,13 @@ pub fn calculate_dictionary_benefit(data: Bytes, dictionary: Dictionary) -> Doub
 pub fn calculate_dictionary_benefit_detailed(
   data: Bytes,
   dictionary: Dictionary
-) -> Result[DictionaryBenefitStats, String] {
+) -> Result[DictionaryBenefitStats, @zstd_core.ZSTDError] {
   if data.length() == 0 {
-    return Err("Data is empty")
+    return Err(@zstd_core.message_error("Data is empty"))
   }
-  
+
   if !validate_dictionary(dictionary) {
-    return Err("Dictionary is invalid")
+    return Err(@zstd_core.message_error("Dictionary is invalid"))
   }
   
   let config = @zstd_encoder.create_default_config()
@@ -424,7 +424,7 @@ pub fn calculate_dictionary_benefit_detailed(
   let without_dict_result = @zstd_encoder.compress_data(data, config)
   let without_dict_size = match without_dict_result {
     Ok(compressed) => compressed.length()
-    Err(e) => return Err("Compression without dictionary failed: " + e)
+    Err(e) => return Err(e)
   }
   
   // 使用字典压缩
@@ -436,7 +436,7 @@ pub fn calculate_dictionary_benefit_detailed(
   )
   let with_dict_size = match with_dict_result {
     Ok(compressed) => compressed.length()
-    Err(e) => return Err("Compression with dictionary failed: " + e)
+    Err(e) => return Err(e)
   }
   
   // 计算统计信息

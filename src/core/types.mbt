@@ -10,10 +10,10 @@ pub enum ZSTDError {
   InsufficientData
   CompressionError
   DecompressionError
-  Message(String)  // Generic error with custom message
-  ParseError(String)  // Parsing errors
-  ValidationError(String)  // Validation errors
-} derive(Eq)
+  Message(String)
+  ParseError(String)
+  ValidationError(String)
+} derive(Eq, Show)
 
 /// Convert ZSTDError to String
 pub fn ZSTDError::to_string(self: ZSTDError) -> String {

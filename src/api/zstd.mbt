@@ -12,6 +12,14 @@ pub enum CompressionLevel {
   Best
 }
 
+// Helper function to convert Result[T, String] to Result[T, ZSTDError]
+fn[T] to_zstd_error(result: Result[T, String]) -> Result[T, @zstd_core.ZSTDError] {
+  match result {
+    Ok(v) => Ok(v)
+    Err(msg) => Err(@zstd_core.message_error(msg))
+  }
+}
+
 /// Result of analyzing a ZSTD compressed file's structure.
 ///
 /// Contains frame header information, block metadata, and validation status.
@@ -55,24 +63,24 @@ pub struct SlidingWindowDecoder {
 /// ```moonbit no-check
 /// let compressed = @zstd.compress_with_level_int(data, 9)
 /// ```
-pub fn compress_with_level_int(data: Bytes, level: Int) -> Result[Bytes, String] {
+pub fn compress_with_level_int(data: Bytes, level: Int) -> Result[Bytes, @zstd_core.ZSTDError] {
   compress_advanced(data, CompressionMethod::Auto, level)
 }
 
 /// Compress using a Raw block (no compression, just ZSTD frame wrapping).
-pub fn compress_as_raw(data: Bytes, level: Int) -> Result[Bytes, String] {
+pub fn compress_as_raw(data: Bytes, level: Int) -> Result[Bytes, @zstd_core.ZSTDError] {
   compress_advanced(data, CompressionMethod::Raw, level)
 }
 
 /// Compress using an RLE block (ideal for highly repetitive data).
-pub fn compress_as_rle(data: Bytes, level: Int) -> Result[Bytes, String] {
+pub fn compress_as_rle(data: Bytes, level: Int) -> Result[Bytes, @zstd_core.ZSTDError] {
   compress_advanced(data, CompressionMethod::RLE, level)
 }
 
 /// Compress using a Compressed block (LZ77 + FSE entropy coding).
 ///
 /// Produces the best compression ratio for most data.
-pub fn compress_as_compressed(data: Bytes, level: Int) -> Result[Bytes, String] {
+pub fn compress_as_compressed(data: Bytes, level: Int) -> Result[Bytes, @zstd_core.ZSTDError] {
   compress_advanced(data, CompressionMethod::Compressed, level)
 }
 
@@ -92,11 +100,8 @@ pub fn compress_as_compressed(data: Bytes, level: Int) -> Result[Bytes, String] 
 ///   Err(e) => println("Compression failed: \{e}")
 /// }
 /// ```
-pub fn compress(data: Bytes) -> Result[Bytes, String] {
-  match @zstd_encoder.compress(data) {
-    Ok(bytes) => Ok(bytes)
-    Err(e) => Err(e.to_string())
-  }
+pub fn compress(data: Bytes) -> Result[Bytes, @zstd_core.ZSTDError] {
+  @zstd_encoder.compress(data)
 }
 
 /// Compress data with a `CompressionLevel` preset.
@@ -106,8 +111,7 @@ pub fn compress(data: Bytes) -> Result[Bytes, String] {
 /// ```moonbit no-check
 /// let compressed = @zstd.compress_with_level(data, CompressionLevel::Better)
 /// ```
-pub fn compress_with_level(data: Bytes, level: CompressionLevel) -> Result[Bytes, String] {
-  // 将 API 级别映射到压缩器级别
+pub fn compress_with_level(data: Bytes, level: CompressionLevel) -> Result[Bytes, @zstd_core.ZSTDError] {
   let compression_level = match level {
     CompressionLevel::Fast => 1
     CompressionLevel::Default => 3
@@ -116,10 +120,7 @@ pub fn compress_with_level(data: Bytes, level: CompressionLevel) -> Result[Bytes
   }
 
   let config = @zstd_encoder.create_config_with_level(compression_level)
-  match @zstd_encoder.compress_data(data, config) {
-    Ok(bytes) => Ok(bytes)
-    Err(e) => Err(e.to_string())
-  }
+  @zstd_encoder.compress_data(data, config)
 }
 
 /// Compression method selection.
@@ -164,11 +165,11 @@ fn is_suitable_for_rle(data: Bytes) -> Bool {
 /// ```moonbit no-check
 /// let compressed = @zstd.compress_advanced(data, Compressed, 5)
 /// ```
-pub fn compress_advanced(data: Bytes, mode: CompressionMethod, level: Int) -> Result[Bytes, String] {
+pub fn compress_advanced(data: Bytes, mode: CompressionMethod, level: Int) -> Result[Bytes, @zstd_core.ZSTDError] {
   let actual_level = if level < 1 { 2 } else if level > 22 { 22 } else { level }
   let config = @zstd_encoder.create_config_with_level(actual_level)
 
-  let result = match mode {
+  match mode {
     CompressionMethod::Auto => {
       let (compression_type, _byte, _size) = choose_compression_method(data)
       if compression_type == "rle" {
@@ -180,11 +181,6 @@ pub fn compress_advanced(data: Bytes, mode: CompressionMethod, level: Int) -> Re
     CompressionMethod::Raw => @zstd_encoder.compress_as_raw_block(data, config)
     CompressionMethod::RLE => @zstd_encoder.compress_as_rle_block(data, config)
     CompressionMethod::Compressed => @zstd_encoder.compress_as_compressed_block(data, config)
-  }
-
-  match result {
-    Ok(bytes) => Ok(bytes)
-    Err(e) => Err(e.to_string())
   }
 }
 
@@ -858,29 +854,25 @@ pub fn create_sliding_window_decoder(window_size: Int) -> SlidingWindowDecoder {
 pub fn decompress_with_sliding_window(
   decoder: SlidingWindowDecoder,
   data: Bytes
-) -> Result[Bytes, String] {
-  // 解析帧头
+) -> Result[Bytes, @zstd_core.ZSTDError] {
   let frame_result = @zstd_decoder.parse_frame_header(data)
   match frame_result {
     Ok((_, header_size)) => {
       let current_offset = header_size
       let output: Array[Byte] = []
 
-      // 逐块解码，使用滑动窗口上下文
       let block_result = @zstd_decoder.decompress_block_with_context(decoder.context, data, current_offset)
       match block_result {
         Ok((block_data, _, _)) => {
-          // 将块数据添加到输出
           for i = 0; i < block_data.length(); i = i + 1 {
             output.push(block_data[i])
           }
-
           Ok(Bytes::from_array(output))
         }
-        Err(e) => Err("Block decompression failed: " + e)
+        Err(e) => Err(@zstd_core.message_error("Block decompression failed: " + e))
       }
     }
-    Err(_) => Err("Frame header parsing failed")
+    Err(e) => Err(e)
   }
 }
 

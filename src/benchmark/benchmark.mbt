@@ -13,7 +13,7 @@ fn format_size(bytes: Int) -> String {
   else { "\{bytes / (1024 * 1024)}MB" }
 }
 
-pub fn run_benchmark(name: String, data: Bytes, level: Int) -> Result[BenchmarkResult, String] {
+pub fn run_benchmark(name: String, data: Bytes, level: Int) -> Result[BenchmarkResult, @zstd_core.ZSTDError] {
   let config = @encoder.create_config_with_level(level)
 
   match @encoder.compress_data(data, config) {
