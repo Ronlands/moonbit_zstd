@@ -1,116 +1,4 @@
-/// ZSTD Compressor - LZ77 + Entropy Coding
-
-/// Hash table size for LZ77 matching (64K buckets)
-let hash_table_size : Int = 65536
-
-/// Maximum block size (128KB)
-let max_block_size : Int = 131072
-
-/// Frame content size thresholds for FCS field size selection
-let fcs_threshold_1byte : Int = 256      // < 256: 1-byte FCS
-let fcs_threshold_2byte : Int = 65792    // < 65792: 2-byte FCS, else 4-byte FCS
-
-/// Default window size (64KB)
-let default_window_size : Int = 65536
-
-/// Helper: Write 16-bit value in little-endian
-fn write_u16_le(output: Array[Byte], value: Int) -> Unit {
-  output.push((value & 0xFF).to_byte())
-  output.push(((value >> 8) & 0xFF).to_byte())
-}
-
-/// Helper: Write 32-bit value in little-endian
-fn write_u32_le(output: Array[Byte], value: UInt) -> Unit {
-  output.push((value & 0xFFU).to_byte())
-  output.push(((value >> 8) & 0xFFU).to_byte())
-  output.push(((value >> 16) & 0xFFU).to_byte())
-  output.push(((value >> 24) & 0xFFU).to_byte())
-}
-
-/// Helper: Write 24-bit block header (last_block | block_type | block_size)
-fn write_block_header(output: Array[Byte], last_block: Bool, block_type: Int, block_size: Int) -> Unit {
-  let last = if last_block { 0x01 } else { 0x00 }
-  let header = last | (block_type << 1) | (block_size << 3)
-  output.push((header & 0xFF).to_byte())
-  output.push(((header >> 8) & 0xFF).to_byte())
-  output.push(((header >> 16) & 0xFF).to_byte())
-}
-
-/// Helper: Write sequence count header (variable-length encoding)
-fn write_sequence_count(output: Array[Byte], count: Int) -> Unit {
-  if count < 128 {
-    output.push(count.to_byte())
-  } else if count < 32768 {
-    output.push(((count >> 8) + 128).to_byte())
-    output.push((count & 0xFF).to_byte())
-  } else {
-    output.push(0xFF)
-    output.push((count & 0xFF).to_byte())
-    output.push(((count >> 8) & 0xFF).to_byte())
-  }
-}
-
-/// Simple XXH32-like checksum
-fn calculate_checksum(data: Bytes) -> UInt {
-  let mut hash = 0x9E3779B1U
-  for i = 0; i < data.length(); i = i + 1 {
-    hash = hash + data[i].to_uint()
-    hash = hash * 0x85EBCA77U
-    hash = hash ^ (hash >> 13)
-  }
-  hash
-}
-
-/// Write 32-bit checksum in little-endian
-fn write_checksum(output: Array[Byte], checksum: UInt) -> Unit {
-  write_u32_le(output, checksum)
-}
-
-/// Write ZSTD magic number (0xFD2FB528 in little-endian)
-fn write_zstd_magic(output: Array[Byte]) -> Unit {
-  output.push(0x28)
-  output.push(0xB5)
-  output.push(0x2F)
-  output.push(0xFD)
-}
-
-/// Write 32-bit dictionary ID in little-endian format
-fn write_dict_id(output: Array[Byte], dict_id: UInt) -> Unit {
-  write_u32_le(output, dict_id)
-}
-
-/// Write frame header descriptor and content size with optional checksum
-fn write_frame_header_descriptor_with_checksum(output: Array[Byte], data_length: Int, with_checksum: Bool) -> Unit {
-  let checksum_flag = if with_checksum { 0x04 } else { 0x00 }
-  if data_length < fcs_threshold_1byte {
-    output.push((0x20 | checksum_flag).to_byte())
-    output.push(data_length.to_byte())
-  } else if data_length < fcs_threshold_2byte {
-    output.push((0x60 | checksum_flag).to_byte())
-    write_u16_le(output, data_length - fcs_threshold_1byte)
-  } else {
-    output.push((0xA0 | checksum_flag).to_byte())
-    write_u32_le(output, data_length.reinterpret_as_uint())
-  }
-}
-
-/// Write frame header descriptor and content size based on data length
-fn write_frame_header_descriptor(output: Array[Byte], data_length: Int) -> Unit {
-  write_frame_header_descriptor_with_checksum(output, data_length, false)
-}
-
-/// Write frame content size for dictionary frames (updates FHD byte if needed)
-fn write_frame_content_size_with_dict(output: Array[Byte], data_length: Int, fhd_index: Int) -> Unit {
-  if data_length < fcs_threshold_1byte {
-    output.push(data_length.to_byte())
-  } else if data_length < fcs_threshold_2byte {
-    output[fhd_index] = 0x63
-    write_u16_le(output, data_length - fcs_threshold_1byte)
-  } else {
-    output[fhd_index] = 0xA3
-    write_u32_le(output, data_length.reinterpret_as_uint())
-  }
-}
+/// ZSTD Compressor - Main Compression Logic
 
 pub struct Compressor {
   level: Int
@@ -118,91 +6,16 @@ pub struct Compressor {
   window_size: Int
 }
 
-priv struct Match {
-  offset: Int
-  length: Int
-}
-
-priv struct Sequence {
-  literal_length: Int
-  match_length: Int
-  offset: Int
-}
-
 pub struct CompressionConfig {
-  level: Int         // 1-22
-  window_log: Int    // Window = 2^window_log (controls LZ77 match distance limit)
-  min_match: Int     // Min match length for LZ77
-  search_depth: Int  // Search depth (quality vs speed)
+  level: Int
+  window_log: Int
+  min_match: Int
+  search_depth: Int
 }
 
 pub struct CompressionContext {
   config: CompressionConfig
 }
-
-// ============================================================================
-// Hash Table Implementation / 哈希表实现
-// ============================================================================
-
-/// Hash a 4-byte sequence for pattern matching
-fn hash_bytes(data: Bytes, pos: Int) -> Int {
-  if pos + 3 >= data.length() {
-    return 0
-  }
-
-  let b0 = data[pos].to_int() & 0xFF
-  let b1 = data[pos + 1].to_int() & 0xFF
-  let b2 = data[pos + 2].to_int() & 0xFF
-  let b3 = data[pos + 3].to_int() & 0xFF
-
-  // Improved hash: better distribution using bit shifts and XOR
-  let hash = ((b0 << 12) ^ (b1 << 8) ^ (b2 << 4) ^ b3) * 506832829
-  (hash >> 16) & 0xFFFF
-}
-
-/// Find match at given position using hash table (optimized)
-fn find_match(data: Bytes, pos: Int, hash_table: Array[Int], min_match: Int, window_size: Int) -> Match {
-  let data_len = data.length()
-  if pos + min_match > data_len {
-    return Match::{ offset: 0, length: 0 }
-  }
-
-  let hash = hash_bytes(data, pos)
-  let match_pos = hash_table[hash]
-
-  if match_pos == -1 || match_pos >= pos {
-    return Match::{ offset: 0, length: 0 }
-  }
-
-  let offset = pos - match_pos
-  if offset > window_size {
-    return Match::{ offset: 0, length: 0 }
-  }
-
-  // Early exit: check min_match bytes first
-  let mut i = 0
-  while i < min_match && pos + i < data_len {
-    if data[match_pos + (i % offset)] != data[pos + i] {
-      return Match::{ offset: 0, length: 0 }
-    }
-    i = i + 1
-  }
-
-  let mut match_length = min_match
-  let max_match = (data_len - pos).min(131072)
-
-  while match_length < max_match &&
-        pos + match_length < data_len &&
-        data[match_pos + (match_length % offset)] == data[pos + match_length] {
-    match_length = match_length + 1
-  }
-
-  Match::{ offset: offset, length: match_length }
-}
-
-// ============================================================================
-// Compressor Creation / 压缩器创建
-// ============================================================================
 
 /// Create new compressor
 pub fn new_compressor() -> Compressor {
@@ -210,7 +23,7 @@ pub fn new_compressor() -> Compressor {
   Compressor::{
     level: 1,
     hash_table: hash_table,
-    window_size: default_window_size  // 64KB default window - must match decoder
+    window_size: default_window_size
   }
 }
 
@@ -221,15 +34,15 @@ pub fn create_default_config() -> CompressionConfig {
 pub fn create_config_with_level(level: Int) -> CompressionConfig {
   let clamped_level = level.max(1).min(22)
   let (window_log, min_match, search_depth) = match clamped_level {
-    1 => (16, 4, 4)           // Fast
+    1 => (16, 4, 4)
     2 => (16, 4, 8)
-    3 => (17, 4, 12)          // Default
+    3 => (17, 4, 12)
     4 | 5 => (17, 4, 16)
-    6 | 7 => (18, 4, 24)      // Better
+    6 | 7 => (18, 4, 24)
     8 | 9 => (18, 4, 32)
-    10 | 11 | 12 => (19, 3, 48)  // Much better
+    10 | 11 | 12 => (19, 3, 48)
     13 | 14 | 15 => (19, 3, 64)
-    16 | 17 | 18 => (20, 3, 96)  // Ultra
+    16 | 17 | 18 => (20, 3, 96)
     _ => (20, 3, 128)
   }
   CompressionConfig::{ level: clamped_level, window_log, min_match, search_depth }
@@ -239,81 +52,194 @@ pub fn create_compression_context(config: CompressionConfig) -> CompressionConte
   CompressionContext::{ config }
 }
 
-// ============================================================================
-// LZ77 Compression / LZ77 压缩
-// ============================================================================
+/// Check if RLE compression would be beneficial
+fn is_rle_beneficial(data: Bytes) -> Bool {
+  if data.length() < 4 {
+    return false
+  }
 
-/// Generate sequences using greedy LZ77 matching with repeat offset optimization
-fn generate_sequences(data: Bytes, min_match: Int, window_size: Int) -> (Array[Sequence], Array[Byte]) {
-  let sequences: Array[Sequence] = []
-  let literals: Array[Byte] = []
-  let hash_table = Array::make(hash_table_size, -1)
+  let first_byte = data[0]
+  let mut same_count = 0
+  let sample_size = data.length().min(100)
 
-  let mut pos = 0
-  let mut literal_start = 0
-  let mut rep0 = 1
-  let mut rep1 = 4
-  let mut rep2 = 8
-
-  while pos < data.length() {
-    let match_result = find_match(data, pos, hash_table, min_match, window_size)
-
-    if match_result.length >= min_match {
-      let literal_length = pos - literal_start
-      for i = literal_start; i < pos; i = i + 1 {
-        literals.push(data[i])
-      }
-
-      let offset = match_result.offset
-      let encoded_offset = if offset == rep0 {
-        -1  // Special marker for rep[0]
-      } else if offset == rep1 {
-        -2  // Special marker for rep[1]
-      } else if offset == rep2 {
-        -3  // Special marker for rep[2]
-      } else {
-        rep2 = rep1
-        rep1 = rep0
-        rep0 = offset
-        offset
-      }
-
-      sequences.push(Sequence::{
-        literal_length,
-        match_length: match_result.length,
-        offset: encoded_offset,
-      })
-
-      let mut i = pos
-      while i < pos + match_result.length && i + 3 < data.length() {
-        let hash = hash_bytes(data, i)
-        hash_table[hash] = i
-        i = i + 1
-      }
-
-      pos = pos + match_result.length
-      literal_start = pos
-    } else {
-      if pos + 3 < data.length() {
-        let hash = hash_bytes(data, pos)
-        hash_table[hash] = pos
-      }
-      pos = pos + 1
+  for i = 0; i < sample_size; i = i + 1 {
+    if data[i] == first_byte {
+      same_count = same_count + 1
     }
   }
 
-  for i = literal_start; i < data.length(); i = i + 1 {
-    literals.push(data[i])
-  }
-
-  (sequences, literals)
+  (same_count * 10) > (sample_size * 8)
 }
 
-/// 压缩数据 - 支持 Raw / RLE / Compressed 三种块类型
-/// 说明：
-/// - Raw 块：无压缩，直接存储原始数据
-/// - RLE 块：对重复数据进行压缩，可达 2000% 压缩率
-/// - Compressed 块：LZ77 + FSE/Huffman 高级压缩
+/// Check if should try compressed block
+fn should_try_compressed_block(data: Bytes) -> Bool {
+  data.length() >= 64
+}
+
+/// Compress empty data
+fn compress_empty_frame() -> Result[Bytes, @zstd_core.ZSTDError] {
+  let output: Array[Byte] = []
+
+  write_zstd_magic(output)
+  output.push(0x20)
+  output.push(0x00)
+  output.push(0x01)
+  output.push(0x00)
+  output.push(0x00)
+
+  Ok(Bytes::from_array(output))
+}
+
+/// Compress as raw block
+pub fn compress_as_raw_block(data: Bytes, _config: CompressionConfig) -> Result[Bytes, @zstd_core.ZSTDError] {
+  let output: Array[Byte] = []
+  let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
+
+  write_zstd_magic(output)
+  write_frame_header_descriptor(output, data.length())
+
+  let mut pos = 0
+  while pos < data.length() {
+    let remaining = data.length() - pos
+    let chunk_size = remaining.min(max_block)
+    let is_last = (pos + chunk_size >= data.length())
+
+    write_block_header(output, is_last, 0, chunk_size)
+
+    for i = 0; i < chunk_size; i = i + 1 {
+      output.push(data[pos + i])
+    }
+    pos = pos + chunk_size
+  }
+
+  Ok(Bytes::from_array(output))
+}
+
+/// Compress as RLE block
+pub fn compress_as_rle_block(data: Bytes, _config: CompressionConfig) -> Result[Bytes, @zstd_core.ZSTDError] {
+  if data.length() == 0 {
+    return compress_empty_frame()
+  }
+
+  let first_byte = data[0]
+  let mut all_same = true
+  for i = 1; i < data.length(); i = i + 1 {
+    if data[i] != first_byte {
+      all_same = false
+      break
+    }
+  }
+
+  if !all_same {
+    return compress_as_raw_block(data, _config)
+  }
+
+  let output: Array[Byte] = []
+
+  write_zstd_magic(output)
+  write_frame_header_descriptor(output, data.length())
+
+  let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
+  let mut pos = 0
+  while pos < data.length() {
+    let remaining = data.length() - pos
+    let chunk_size = remaining.min(max_block)
+    let is_last = (pos + chunk_size >= data.length())
+    write_block_header(output, is_last, 1, chunk_size)
+    output.push(first_byte)
+    pos = pos + chunk_size
+  }
+
+  Ok(Bytes::from_array(output))
+}
+
+/// Compress as compressed block
+pub fn compress_as_compressed_block(data: Bytes, config: CompressionConfig) -> Result[Bytes, @zstd_core.ZSTDError] {
+  let min_match = config.min_match
+  let window_size = 1 << config.window_log
+
+  let (sequences, literals) = generate_sequences(data, min_match, window_size)
+
+  if sequences.length() == 0 {
+    return Err(@zstd_core.message_error("No compression benefit"))
+  }
+
+  let output: Array[Byte] = []
+  write_zstd_magic(output)
+  write_frame_header_descriptor(output, data.length())
+
+  let block_content: Array[Byte] = []
+  encode_literals_section(literals, block_content)
+
+  let num_sequences = sequences.length()
+  write_sequence_count(block_content, num_sequences)
+
+  if num_sequences > 0 {
+    if num_sequences == 1 {
+      encode_single_sequence_direct(sequences[0], block_content)
+    } else {
+      block_content.push(0x00)
+      match encode_sequences_predefined_fse(sequences, block_content) {
+        Ok(_) => ()
+        Err(e) => return Err(@zstd_core.message_error("Failed to encode sequences: \{e}"))
+      }
+    }
+  }
+
+  write_block_header(output, true, 2, block_content.length())
+  for i = 0; i < block_content.length(); i = i + 1 {
+    output.push(block_content[i])
+  }
+
+  Ok(Bytes::from_array(output))
+}
+
+/// Compress block content as raw
+fn compress_block_content_raw(data: Bytes) -> Result[(Int, Bytes), @zstd_core.ZSTDError] {
+  Ok((0, data))
+}
+
+/// Compress block content as RLE
+fn compress_block_content_rle(data: Bytes) -> Result[(Int, Bytes), @zstd_core.ZSTDError] {
+  let output: Array[Byte] = []
+  output.push(data[0])
+  Ok((1, Bytes::from_array(output)))
+}
+
+/// Compress block content as compressed
+fn compress_block_content_compressed(data: Bytes, config: CompressionConfig) -> Result[Bytes, @zstd_core.ZSTDError] {
+  let min_match = config.min_match
+  let window_size = 1 << config.window_log
+  let (sequences, literals) = generate_sequences(data, min_match, window_size)
+
+  if sequences.length() == 0 {
+    return Err(@zstd_core.message_error("No sequences"))
+  }
+
+  let output: Array[Byte] = []
+  encode_literals_section(literals, output)
+  write_sequence_count(output, sequences.length())
+
+  if sequences.length() > 0 {
+    let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(sequences)
+    if should_use_compressed_fse(ll_symbols, ml_symbols, of_symbols) {
+      output.push(0x01)
+      match encode_sequences_compressed_fse(sequences, output) {
+        Ok(_) => ()
+        Err(e) => return Err(e)
+      }
+    } else {
+      output.push(0x00)
+      match encode_sequences_predefined_fse(sequences, output) {
+        Ok(_) => ()
+        Err(e) => return Err(e)
+      }
+    }
+  }
+  Ok(Bytes::from_array(output))
+}
+
+/// Compress data
 pub fn compress_data(data: Bytes, config: CompressionConfig) -> Result[Bytes, @zstd_core.ZSTDError] {
   compress_data_with_checksum(data, config, false)
 }
@@ -360,7 +286,7 @@ pub fn compress_data_with_checksum(data: Bytes, config: CompressionConfig, with_
   }
 }
 
-/// Compress large data as multiple blocks with optional checksum
+/// Compress large data as multiple blocks
 fn compress_multi_block_with_checksum(data: Bytes, config: CompressionConfig, with_checksum: Bool) -> Result[Bytes, @zstd_core.ZSTDError] {
   let output: Array[Byte] = []
 
@@ -415,191 +341,16 @@ fn compress_multi_block_with_checksum(data: Bytes, config: CompressionConfig, wi
   Ok(Bytes::from_array(output))
 }
 
-/// Compress block content as raw
-fn compress_block_content_raw(data: Bytes) -> Result[(Int, Bytes), @zstd_core.ZSTDError] {
-  Ok((0, data))
-}
-
-/// Compress block content as RLE
-fn compress_block_content_rle(data: Bytes) -> Result[(Int, Bytes), @zstd_core.ZSTDError] {
-  let output: Array[Byte] = []
-  output.push(data[0])
-  Ok((1, Bytes::from_array(output)))
-}
-
-/// Compress block content as compressed
-fn compress_block_content_compressed(data: Bytes, config: CompressionConfig) -> Result[Bytes, @zstd_core.ZSTDError] {
-  let min_match = config.min_match
-  let window_size = 1 << config.window_log
-  let (sequences, literals) = generate_sequences(data, min_match, window_size)
-
-  if sequences.length() == 0 {
-    return Err(@zstd_core.message_error("No sequences"))
-  }
-
-  let output: Array[Byte] = []
-
-  encode_literals_section(literals, output)
-
-  let num_sequences = sequences.length()
-  write_sequence_count(output, num_sequences)
-
-  if num_sequences > 0 {
-    let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(sequences)
-
-    // Decide whether to use compressed FSE mode
-    if should_use_compressed_fse(ll_symbols, ml_symbols, of_symbols) {
-      output.push(0x01)  // Compressed mode flag
-      match encode_sequences_compressed_fse(sequences, output) {
-        Ok(_) => ()
-        Err(e) => return Err(e)
-      }
-    } else {
-      output.push(0x00)  // Predefined mode
-      match encode_sequences_predefined_fse(sequences, output) {
-        Ok(_) => ()
-        Err(e) => return Err(e)
-      }
-    }
-  }
-
-  Ok(Bytes::from_array(output))
-}
-
-/// 判断是否应该尝试 Compressed block
-fn should_try_compressed_block(data: Bytes) -> Bool {
-  // 数据足够大且有一定的重复模式
-  data.length() >= 64
-}
-
-/// Check if RLE compression would be beneficial
-fn is_rle_beneficial(data: Bytes) -> Bool {
-  if data.length() < 4 {
-    return false
-  }
-  
-  // Sample the data to check for repetition
-  let first_byte = data[0]
-  let mut same_count = 0
-  let sample_size = data.length().min(100)
-  
-  for i = 0; i < sample_size; i = i + 1 {
-    if data[i] == first_byte {
-      same_count = same_count + 1
-    }
-  }
-  
-  // If more than 80% are the same, use RLE
-  (same_count * 10) > (sample_size * 8)
-}
-
-/// Compress as RLE (Run Length Encoding) block
-pub fn compress_as_rle_block(data: Bytes, _config: CompressionConfig) -> Result[Bytes, @zstd_core.ZSTDError] {
-  if data.length() == 0 {
-    return compress_empty_frame()
-  }
-  
-  // Check if all bytes are the same
-  let first_byte = data[0]
-  let mut all_same = true
-  for i = 1; i < data.length(); i = i + 1 {
-    if data[i] != first_byte {
-      all_same = false
-      break
-    }
-  }
-  
-  if !all_same {
-    // Fall back to raw block if not all bytes are the same
-    return compress_as_raw_block(data, _config)
-  }
-  
-  let output: Array[Byte] = []
-
-  // ZSTD Magic Number
-  write_zstd_magic(output)
-
-  // Frame Header Descriptor and Content Size
-  write_frame_header_descriptor(output, data.length())
-
-  // Block Header: Last_Block=1, Block_Type=RLE(1), Block_Size (decompressed size ≤ 128KB per chunk)
-  // Splits into multiple RLE blocks if data exceeds ZSTD_MAX_BLOCK_SIZE.
-  let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
-  let mut pos = 0
-  while pos < data.length() {
-    let remaining = data.length() - pos
-    let chunk_size = remaining.min(max_block)
-    let is_last = (pos + chunk_size >= data.length())
-    write_block_header(output, is_last, 1, chunk_size)
-    // RLE block payload: single byte to repeat
-    output.push(first_byte)
-    pos = pos + chunk_size
-  }
-  
-  Ok(Bytes::from_array(output))
-}
-
-/// Compress as raw (uncompressed) block.
-/// Splits data into multiple blocks when it exceeds 128KB (ZSTD_MAX_BLOCK_SIZE).
-pub fn compress_as_raw_block(data: Bytes, _config: CompressionConfig) -> Result[Bytes, @zstd_core.ZSTDError] {
-  let output: Array[Byte] = []
-  let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
-
-  // ZSTD Magic Number
-  write_zstd_magic(output)
-
-  // Frame Header Descriptor and Content Size
-  write_frame_header_descriptor(output, data.length())
-
-  // Emit one or more Raw blocks, each ≤ max_block bytes
-  let mut pos = 0
-  while pos < data.length() {
-    let remaining = data.length() - pos
-    let chunk_size = remaining.min(max_block)
-    let is_last = (pos + chunk_size >= data.length())
-
-    write_block_header(output, is_last, 0, chunk_size)
-
-    for i = 0; i < chunk_size; i = i + 1 {
-      output.push(data[pos + i])
-    }
-    pos = pos + chunk_size
-  }
-  
-  Ok(Bytes::from_array(output))
-}
-
-/// Compress empty data
-fn compress_empty_frame() -> Result[Bytes, @zstd_core.ZSTDError] {
-  let output: Array[Byte] = []
-
-  // ZSTD Magic Number
-  write_zstd_magic(output)
-
-  // Frame Header: Single segment, no checksum, FCS=0
-  output.push(0x20)
-  output.push(0x00)  // Content size = 0
-  
-  // Empty last block
-  output.push(0x01)
-  output.push(0x00)
-  output.push(0x00)
-  
-  Ok(Bytes::from_array(output))
-}
-
-/// 估算压缩大小
+/// Estimate compressed size
 pub fn estimate_compressed_size(data: Bytes, _config: CompressionConfig) -> Int {
   if data.length() == 0 {
-    return 10  // Empty frame overhead
+    return 10
   }
 
-  // Check for RLE (highly compressible)
   if is_rle_beneficial(data) {
-    return 10 + (data.length() / 128000) * 4  // RLE block overhead
+    return 10 + (data.length() / 128000) * 4
   }
 
-  // Analyze data entropy
   let mut unique_bytes = 0
   let byte_counts = Array::make(256, 0)
   let sample_size = data.length().min(1000)
@@ -612,20 +363,19 @@ pub fn estimate_compressed_size(data: Bytes, _config: CompressionConfig) -> Int 
     byte_counts[b] = byte_counts[b] + 1
   }
 
-  // Estimate based on entropy
   let entropy_ratio = unique_bytes.to_double() / 256.0
   let compression_ratio = if entropy_ratio < 0.1 {
-    0.3  // Low entropy, good compression
+    0.3
   } else if entropy_ratio < 0.3 {
-    0.5  // Medium-low entropy
+    0.5
   } else if entropy_ratio < 0.6 {
-    0.7  // Medium entropy
+    0.7
   } else {
-    0.95  // High entropy, poor compression
+    0.95
   }
 
   let estimated = (data.length().to_double() * compression_ratio).to_int()
-  estimated + 12  // Add frame header overhead
+  estimated + 12
 }
 
 /// Simple compress function
@@ -643,27 +393,21 @@ pub fn compress_with_context(comp : Compressor, data : Bytes) -> @zstd_core.ZSTD
   }
 }
 
-// ============================================================================
-// Dictionary Compression Support / 字典压缩支持
-// ============================================================================
-
 /// Compress data with dictionary
 pub fn compress_data_with_dict(
   data: Bytes,
   config: CompressionConfig,
-  dictionary: Bytes,  // 用于在压缩时进行字典匹配
+  dictionary: Bytes,
   dict_id: UInt
 ) -> Result[Bytes, @zstd_core.ZSTDError] {
   if data.length() == 0 {
     return compress_empty_frame()
   }
-  
-  // ✅ 字典匹配实现：将字典内容预加载到哈希表
-  // 这可以显著提高相似数据的压缩比
+
   if dictionary.length() > 0 {
     return compress_with_dictionary_matching(data, config, dictionary, dict_id)
   }
-  
+
   compress_with_dict_id(data, config, dict_id)
 }
 
@@ -676,33 +420,23 @@ fn compress_with_dict_id(
   if data.length() == 0 {
     return compress_empty_frame()
   }
-  
-  // Check if data is RLE beneficial
+
   if is_rle_beneficial(data) {
     return compress_as_rle_block_with_dict(data, dict_id)
   }
-  
-  // Use raw block with dictionary ID
+
   compress_as_raw_block_with_dict(data, dict_id)
 }
 
-/// Compress as raw block with dictionary ID.
-/// Splits data into multiple blocks when it exceeds 128KB.
+/// Compress as raw block with dictionary ID
 fn compress_as_raw_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, @zstd_core.ZSTDError] {
   let output: Array[Byte] = []
   let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
 
-  // ZSTD Magic Number
   write_zstd_magic(output)
-
-  // Frame Header Descriptor with Dictionary_ID_Flag=3 (4 bytes)
-  let fhd: Byte = 0x23  // Single_Segment=1, Dictionary_ID_Flag=3
+  let fhd: Byte = 0x23
   output.push(fhd)
-
-  // Dictionary ID (4 bytes, little-endian)
   write_dict_id(output, dict_id)
-
-  // Frame Content Size
   write_frame_content_size_with_dict(output, data.length(), 4)
 
   let mut pos = 0
@@ -716,882 +450,73 @@ fn compress_as_raw_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, 
     }
     pos = pos + chunk_size
   }
-  
+
   Ok(Bytes::from_array(output))
 }
 
-/// Encode literals section into block content
-/// Automatically selects the best type: RLE (type=1) if all same byte, Raw (type=0) otherwise
-fn encode_literals_section(literals: Array[Byte], output: Array[Byte]) -> Unit {
-  encode_literals_with_huffman(literals, output, true)
-}
-
-/// Enhanced literals encoding with Huffman support
-fn encode_literals_with_huffman(literals: Array[Byte], output: Array[Byte], use_huffman: Bool) -> Unit {
-  let size = literals.length()
-
-  if size == 0 {
-    output.push(b'\x00')
-    return
+/// Compress as RLE block with dictionary ID
+fn compress_as_rle_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, @zstd_core.ZSTDError] {
+  if data.length() == 0 {
+    return compress_empty_frame()
   }
 
-  // Check RLE
-  let first = literals[0]
+  let first_byte = data[0]
   let mut all_same = true
-  for i = 1; i < size; i = i + 1 {
-    if literals[i] != first {
+  for i = 1; i < data.length(); i = i + 1 {
+    if data[i] != first_byte {
       all_same = false
       break
     }
   }
 
-  if all_same {
-    if size < 32 {
-      output.push(((size << 3) | 0x01).to_byte())
-    } else if size < 4096 {
-      output.push((((size & 0xF) << 4) | 0x05).to_byte())
-      output.push(((size >> 4) & 0xFF).to_byte())
-    } else {
-      output.push((((size & 0xF) << 4) | 0x0D).to_byte())
-      output.push(((size >> 4) & 0xFF).to_byte())
-      output.push(((size >> 12) & 0xFF).to_byte())
-    }
-    output.push(first)
-    return
-  }
-
-  // Try Huffman if enabled and beneficial
-  if use_huffman && size >= 32 {
-    match try_huffman_encode(literals) {
-      Ok(huffman_data) => {
-        if huffman_data.length() < size {
-          write_huffman_literals(literals.length(), huffman_data, output)
-          return
-        }
-      }
-      Err(_) => ()
-    }
-  }
-
-  // Fallback to Raw
-  if size < 32 {
-    output.push((size << 3).to_byte())
-  } else if size < 4096 {
-    output.push((((size & 0xF) << 4) | 0x04).to_byte())
-    output.push(((size >> 4) & 0xFF).to_byte())
-  } else {
-    output.push((((size & 0xF) << 4) | 0x0C).to_byte())
-    output.push(((size >> 4) & 0xFF).to_byte())
-    output.push(((size >> 12) & 0xFF).to_byte())
-  }
-  for i = 0; i < size; i = i + 1 {
-    output.push(literals[i])
-  }
-}
-
-fn try_huffman_encode(literals: Array[Byte]) -> Result[Bytes, @zstd_core.ZSTDError] {
-  match @zstd_entropy.huffman_encode(literals) {
-    Ok(v) => Ok(v)
-    Err(msg) => Err(@zstd_core.message_error(msg))
-  }
-}
-
-fn write_huffman_literals(regen_size: Int, compressed: Bytes, output: Array[Byte]) -> Unit {
-  let comp_size = compressed.length()
-  // Type=2 (Compressed, single stream)
-  if regen_size < 32 && comp_size < 512 {
-    output.push(((regen_size << 3) | 0x02).to_byte())
-    output.push((comp_size << 2).to_byte())
-  } else {
-    output.push((((regen_size & 0xF) << 4) | 0x06).to_byte())
-    output.push(((regen_size >> 4) & 0xFF).to_byte())
-    output.push((comp_size & 0xFF).to_byte())
-    output.push(((comp_size >> 8) & 0xFF).to_byte())
-  }
-  for i = 0; i < comp_size; i = i + 1 {
-    output.push(compressed[i])
-  }
-}
-
-/// Compress as compressed block (with LZ77 sequences)
-pub fn compress_as_compressed_block(data: Bytes, config: CompressionConfig) -> Result[Bytes, @zstd_core.ZSTDError] {
-  let min_match = config.min_match
-  let window_size = 1 << config.window_log
-
-  let (sequences, literals) = generate_sequences(data, min_match, window_size)
-
-  if sequences.length() == 0 {
-    return Err(@zstd_core.message_error("No compression benefit - fallback to raw block"))
+  if !all_same {
+    return compress_as_raw_block_with_dict(data, dict_id)
   }
 
   let output: Array[Byte] = []
-
-  // ZSTD Magic Number
   write_zstd_magic(output)
+  let fhd: Byte = 0x23
+  output.push(fhd)
+  write_dict_id(output, dict_id)
+  write_frame_content_size_with_dict(output, data.length(), 4)
 
-  // Frame Header Descriptor and Content Size
-  write_frame_header_descriptor(output, data.length())
-
-  // Build block content: Literals_Section + Sequences_Section
-  let block_content: Array[Byte] = []
-
-  // --- Literals Section ---
-  encode_literals_section(literals, block_content)
-
-  // --- Sequences Section ---
-  let num_sequences = sequences.length()
-  // Sequence count header
-  write_sequence_count(block_content, num_sequences)
-
-  if num_sequences > 0 {
-    if num_sequences == 1 {
-      // RFC 8878: Single sequence uses direct encoding (no FSE, no compression modes byte)
-      encode_single_sequence_direct(sequences[0], block_content)
-    } else {
-      // Compression modes byte: LL=Predefined(0), OF=Predefined(0), ML=Predefined(0)
-      block_content.push(0x00)
-
-      match encode_sequences_predefined_fse(sequences, block_content) {
-        Ok(_) => ()
-        Err(e) => return Err(@zstd_core.message_error("Failed to encode sequences: \{e}"))
-      }
-    }
-  }
-
-  // Block Header: Last_Block=1, Block_Type=Compressed(2), Block_Size
-  let block_size = block_content.length()
-  write_block_header(output, true, 2, block_size)
-
-  for i = 0; i < block_content.length(); i = i + 1 {
-    output.push(block_content[i])
+  let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
+  let mut pos = 0
+  while pos < data.length() {
+    let remaining = data.length() - pos
+    let chunk_size = remaining.min(max_block)
+    let is_last = (pos + chunk_size >= data.length())
+    write_block_header(output, is_last, 1, chunk_size)
+    output.push(first_byte)
+    pos = pos + chunk_size
   }
 
   Ok(Bytes::from_array(output))
 }
 
-// (Huffman literals encoding reserved for future implementation)
-
-// ============================================================================
-// Dictionary Matching Implementation / 字典匹配实现
-// ============================================================================
-
-/// Compress data with dictionary matching
-/// 使用字典进行压缩，预加载字典内容到哈希表以提高压缩比
+/// Compress with dictionary matching
 fn compress_with_dictionary_matching(
   data: Bytes,
   config: CompressionConfig,
   dictionary: Bytes,
   dict_id: UInt
 ) -> Result[Bytes, @zstd_core.ZSTDError] {
-  // 创建哈希表并预加载字典内容
   let hash_table = Array::make(hash_table_size, -1)
-
-  // 将字典内容预加载到哈希表
-  // 这样 LZ77 压缩器就能找到数据和字典内容的匹配
   preload_dictionary_to_hash_table(dictionary, hash_table)
 
-  // 计算窗口大小
   let window_size = 1 << config.window_log
-
-  // 使用预加载了字典的哈希表进行 LZ77 压缩
   let sequences_result = generate_sequences_with_dict(data, dictionary, hash_table, config.min_match, window_size)
-  
+
   match sequences_result {
     Ok((sequences, literals)) => {
-      // 如果找到了足够的匹配，使用压缩块
       if sequences.length() > 0 && should_use_compressed_block(data, sequences, literals) {
-        // 使用完整的 Compressed 块（带字典 ID）
         compress_as_compressed_block_with_dict(data, sequences, literals, dict_id)
       } else {
-        // 降级到 RLE 或 Raw 块
         compress_with_dict_id(data, config, dict_id)
       }
     }
     Err(_) => compress_with_dict_id(data, config, dict_id)
   }
-}
-
-/// Preload dictionary content into hash table
-/// 将字典内容预加载到哈希表，使 LZ77 能找到字典匹配
-fn preload_dictionary_to_hash_table(dictionary: Bytes, hash_table: Array[Int]) -> Unit {
-  // 遍历字典，将所有 4 字节序列添加到哈希表
-  // 使用负数位置表示来自字典的内容
-  let dict_len = dictionary.length()
-  
-  let mut pos = 0
-  while pos + 3 < dict_len {
-    let hash = hash_bytes(dictionary, pos)
-    // 使用负数偏移表示字典位置：-(pos + 1)
-    // 这样可以与数据位置（非负）区分
-    hash_table[hash] = -(pos + 1)
-    pos = pos + 1
-  }
-}
-
-/// Generate sequences with dictionary support
-/// 使用字典增强的 LZ77 序列生成
-fn generate_sequences_with_dict(
-  data: Bytes,
-  dictionary: Bytes,
-  hash_table: Array[Int],
-  min_match: Int,
-  window_size: Int
-) -> Result[(Array[Sequence], Array[Byte]), String] {
-  let sequences: Array[Sequence] = []
-  let literals: Array[Byte] = []
-  
-  let mut pos = 0
-  let mut literal_start = 0
-  
-  while pos < data.length() {
-    // 尝试找到匹配（包括字典匹配）
-    let match_result = find_match_with_dict(data, dictionary, pos, hash_table, min_match, window_size)
-    
-    if match_result.length >= min_match {
-      // 找到匹配！
-      let literal_length = pos - literal_start
-      
-      // 添加匹配前的字面量
-      for i = literal_start; i < pos; i = i + 1 {
-        literals.push(data[i])
-      }
-      
-      // 添加序列
-      sequences.push(Sequence::{
-        literal_length: literal_length,
-        match_length: match_result.length,
-        offset: match_result.offset
-      })
-      
-      // 更新哈希表（只添加数据中的位置）
-      let mut i = pos
-      while i < pos + match_result.length && i + 3 < data.length() {
-        let hash = hash_bytes(data, i)
-        hash_table[hash] = i
-        i = i + 1
-      }
-      
-      pos = pos + match_result.length
-      literal_start = pos
-    } else {
-      // 没有找到匹配，更新哈希表
-      if pos + 3 < data.length() {
-        let hash = hash_bytes(data, pos)
-        hash_table[hash] = pos
-      }
-      pos = pos + 1
-    }
-  }
-  
-  // 添加剩余字面量
-  for i = literal_start; i < data.length(); i = i + 1 {
-    literals.push(data[i])
-  }
-  
-  Ok((sequences, literals))
-}
-
-/// Find match with dictionary support
-/// 在数据和字典中查找匹配
-fn find_match_with_dict(
-  data: Bytes,
-  dictionary: Bytes,
-  pos: Int,
-  hash_table: Array[Int],
-  min_match: Int,
-  window_size: Int
-) -> Match {
-  if pos + min_match > data.length() {
-    return Match::{ offset: 0, length: 0 }
-  }
-
-  let hash = hash_bytes(data, pos)
-  let match_pos = hash_table[hash]
-
-  // 没有匹配
-  if match_pos == -1 || match_pos >= pos {
-    return Match::{ offset: 0, length: 0 }
-  }
-
-  // 区分字典匹配和数据匹配
-  if match_pos < 0 {
-    // 字典匹配（负数位置）
-    let dict_pos = -match_pos - 1
-    let match_length = calculate_match_length_from_dict(data, dictionary, pos, dict_pos)
-
-    if match_length >= min_match {
-      // 字典匹配的偏移计算（ZSTD标准）
-      // offset = 当前位置 + (字典长度 - 匹配位置)
-      let offset = pos + (dictionary.length() - dict_pos)
-      Match::{ offset: offset, length: match_length }
-    } else {
-      Match::{ offset: 0, length: 0 }
-    }
-  } else {
-    // 数据内部匹配
-    let offset = pos - match_pos
-    if offset > window_size {
-      return Match::{ offset: 0, length: 0 }
-    }
-
-    let match_length = calculate_match_length_in_data(data, pos, match_pos)
-
-    if match_length >= min_match {
-      Match::{ offset: offset, length: match_length }
-    } else {
-      Match::{ offset: 0, length: 0 }
-    }
-  }
-}
-
-/// Calculate match length from dictionary
-/// 计算从字典到数据的匹配长度
-fn calculate_match_length_from_dict(
-  data: Bytes,
-  dictionary: Bytes,
-  data_pos: Int,
-  dict_pos: Int
-) -> Int {
-  let mut length = 0
-  let max_length = (data.length() - data_pos).min(dictionary.length() - dict_pos).min(131072)
-  
-  while length < max_length &&
-        dict_pos + length < dictionary.length() &&
-        data_pos + length < data.length() &&
-        dictionary[dict_pos + length] == data[data_pos + length] {
-    length = length + 1
-  }
-  
-  length
-}
-
-/// Calculate match length in data
-/// 计算数据内部的匹配长度
-fn calculate_match_length_in_data(data: Bytes, pos: Int, match_pos: Int) -> Int {
-  let mut length = 0
-  let max_length = (data.length() - pos).min(131072)
-  
-  while length < max_length &&
-        match_pos + length < pos &&
-        pos + length < data.length() &&
-        data[match_pos + length] == data[pos + length] {
-    length = length + 1
-  }
-  
-  length
-}
-
-/// Determine if compressed block should be used
-/// 判断是否应该使用压缩块
-fn should_use_compressed_block(
-  data: Bytes,
-  sequences: Array[Sequence],
-  literals: Array[Byte]
-) -> Bool {
-  // 估算压缩后的大小
-  let literal_size = literals.length()
-  let sequence_size = sequences.length() * 6  // 每个序列约 6 字节
-  let estimated_compressed_size = literal_size + sequence_size + 20  // 加上头部
-  
-  // 如果压缩后小于原始数据的 95%，则使用压缩块
-  estimated_compressed_size < (data.length() * 95 / 100)
-}
-
-// ============================================================================
-// FSE Compressed Mode Implementation
-// ============================================================================
-
-/// Count symbol frequencies
-fn count_frequencies(symbols: Array[Int], max_symbol: Int) -> Array[Int] {
-  let freqs = Array::make(max_symbol + 1, 0)
-  for i = 0; i < symbols.length(); i = i + 1 {
-    let sym = symbols[i]
-    if sym >= 0 && sym <= max_symbol {
-      freqs[sym] = freqs[sym] + 1
-    }
-  }
-  freqs
-}
-
-/// Normalize frequencies to target sum (2^accuracy_log)
-fn normalize_frequencies(freqs: Array[Int], accuracy_log: Int) -> Array[Int] {
-  let target = 1 << accuracy_log
-  let mut total = 0
-  for i = 0; i < freqs.length(); i = i + 1 {
-    total = total + freqs[i]
-  }
-
-  if total == 0 { return freqs }
-
-  let normalized = Array::make(freqs.length(), 0)
-  let mut sum = 0
-
-  for i = 0; i < freqs.length(); i = i + 1 {
-    if freqs[i] > 0 {
-      let norm = (freqs[i] * target / total).max(1)
-      normalized[i] = norm
-      sum = sum + norm
-    }
-  }
-
-  // Adjust to exact target
-  while sum > target {
-    let mut max_idx = 0
-    for i = 0; i < normalized.length(); i = i + 1 {
-      if normalized[i] > normalized[max_idx] {
-        max_idx = i
-      }
-    }
-    normalized[max_idx] = normalized[max_idx] - 1
-    sum = sum - 1
-  }
-
-  while sum < target {
-    let mut max_idx = 0
-    for i = 0; i < normalized.length(); i = i + 1 {
-      if normalized[i] > normalized[max_idx] {
-        max_idx = i
-      }
-    }
-    normalized[max_idx] = normalized[max_idx] + 1
-    sum = sum + 1
-  }
-
-  normalized
-}
-
-/// Serialize FSE table (simplified version)
-fn serialize_fse_table(normalized: Array[Int], accuracy_log: Int, output: Array[Byte]) -> Unit {
-  output.push(accuracy_log.to_byte())
-
-  let mut i = 0
-  while i < normalized.length() {
-    let freq = normalized[i]
-    if freq > 0 {
-      if freq == 1 {
-        output.push((i | 0x80).to_byte())
-      } else {
-        output.push(i.to_byte())
-        output.push(freq.to_byte())
-      }
-    }
-    i = i + 1
-  }
-  output.push(0xFF)
-}
-
-/// Build FSE encoding table from normalized frequencies
-/// Check if custom FSE tables would be beneficial
-fn should_use_compressed_fse(ll_symbols: Array[Int], ml_symbols: Array[Int], of_symbols: Array[Int]) -> Bool {
-  let total = ll_symbols.length()
-  if total < 64 { return false }
-
-  let ll_freqs = count_frequencies(ll_symbols, 35)
-  let ml_freqs = count_frequencies(ml_symbols, 52)
-  let of_freqs = count_frequencies(of_symbols, 31)
-
-  let mut ll_unique = 0
-  let mut ml_unique = 0
-  let mut of_unique = 0
-
-  for i = 0; i < ll_freqs.length(); i = i + 1 {
-    if ll_freqs[i] > 0 { ll_unique = ll_unique + 1 }
-  }
-  for i = 0; i < ml_freqs.length(); i = i + 1 {
-    if ml_freqs[i] > 0 { ml_unique = ml_unique + 1 }
-  }
-  for i = 0; i < of_freqs.length(); i = i + 1 {
-    if of_freqs[i] > 0 { of_unique = of_unique + 1 }
-  }
-
-  // Use compressed mode if distributions are skewed
-  (ll_unique > 4 && ll_unique < 20) || (ml_unique > 4 && ml_unique < 20) || (of_unique > 3 && of_unique < 15)
-}
-
-/// Encode sequences using compressed FSE mode
-fn encode_sequences_compressed_fse(sequences: Array[Sequence], output: Array[Byte]) -> Result[Unit, @zstd_core.ZSTDError] {
-  if sequences.length() == 0 { return Ok(()) }
-
-  let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(sequences)
-
-  // Build custom FSE tables
-  let ll_freqs = count_frequencies(ll_symbols, 35)
-  let ml_freqs = count_frequencies(ml_symbols, 52)
-  let of_freqs = count_frequencies(of_symbols, 31)
-
-  let ll_norm = normalize_frequencies(ll_freqs, 6)
-  let ml_norm = normalize_frequencies(ml_freqs, 6)
-  let of_norm = normalize_frequencies(of_freqs, 5)
-
-  // Serialize FSE tables
-  serialize_fse_table(ll_norm, 6, output)
-  serialize_fse_table(ml_norm, 6, output)
-  serialize_fse_table(of_norm, 5, output)
-
-  // Build FSE encoding tables from normalized frequencies
-  let ll_table = match @zstd_entropy.build_fse_ctable(ll_norm, ll_norm.length() - 1, 6) {
-    Ok(t) => t
-    Err(e) => return Err(@zstd_core.message_error("Failed to build LL FSE table: \{e}"))
-  }
-  let ml_table = match @zstd_entropy.build_fse_ctable(ml_norm, ml_norm.length() - 1, 6) {
-    Ok(t) => t
-    Err(e) => return Err(@zstd_core.message_error("Failed to build ML FSE table: \{e}"))
-  }
-  let of_table = match @zstd_entropy.build_fse_ctable(of_norm, of_norm.length() - 1, 5) {
-    Ok(t) => t
-    Err(e) => return Err(@zstd_core.message_error("Failed to build OF FSE table: \{e}"))
-  }
-
-  let bitstream = @zstd_entropy.create_bitstream()
-  let last_idx = sequences.length() - 1
-
-  // Init states with last sequence symbols
-  let mut ll_state = @zstd_entropy.init_fse_cstate_with_symbol(ll_table, ll_symbols[last_idx])
-  let mut ml_state = @zstd_entropy.init_fse_cstate_with_symbol(ml_table, ml_symbols[last_idx])
-  let mut of_state = @zstd_entropy.init_fse_cstate_with_symbol(of_table, of_symbols[last_idx])
-
-  // Write last sequence extras: LL, ML, OF
-  let last_seq = sequences[last_idx]
-  let (_, last_ll_extra) = @zstd_entropy.encode_ll(last_seq.literal_length)
-  let last_ll_nbits = @zstd_entropy.get_ll_bits(ll_symbols[last_idx])
-  if last_ll_nbits > 0 {
-    @zstd_entropy.add_bits(bitstream, last_ll_extra.to_uint64(), last_ll_nbits)
-  }
-
-  let (_, last_ml_extra) = @zstd_entropy.encode_ml(last_seq.match_length)
-  let last_ml_nbits = @zstd_entropy.get_ml_bits(ml_symbols[last_idx])
-  if last_ml_nbits > 0 {
-    @zstd_entropy.add_bits(bitstream, last_ml_extra.to_uint64(), last_ml_nbits)
-  }
-
-  let (_, last_of_extra) = match @zstd_entropy.encode_of(last_seq.offset) {
-    Ok(result) => result
-    Err(e) => return Err(@zstd_core.message_error("Invalid offset in last sequence: \{e}"))
-  }
-  let last_of_nbits = @zstd_entropy.get_of_bits(of_symbols[last_idx])
-  if last_of_nbits > 0 {
-    @zstd_entropy.add_bits(bitstream, last_of_extra.to_uint64(), last_of_nbits)
-  }
-
-  @zstd_entropy.flush_bits(bitstream)
-
-  // Loop from N-2 down to 0
-  let mut n = last_idx - 1
-  while n >= 0 {
-    let seq = sequences[n]
-
-    // State transitions: OF → ML → LL
-    of_state = @zstd_entropy.encode_symbol_fse(of_state, of_symbols[n], of_table, bitstream)
-    ml_state = @zstd_entropy.encode_symbol_fse(ml_state, ml_symbols[n], ml_table, bitstream)
-    ll_state = @zstd_entropy.encode_symbol_fse(ll_state, ll_symbols[n], ll_table, bitstream)
-
-    // Extra bits: LL, ML, OF
-    let (_, ll_extra) = @zstd_entropy.encode_ll(seq.literal_length)
-    let ll_nbits = @zstd_entropy.get_ll_bits(ll_symbols[n])
-    if ll_nbits > 0 {
-      @zstd_entropy.add_bits(bitstream, ll_extra.to_uint64(), ll_nbits)
-    }
-
-    let (_, ml_extra) = @zstd_entropy.encode_ml(seq.match_length)
-    let ml_nbits = @zstd_entropy.get_ml_bits(ml_symbols[n])
-    if ml_nbits > 0 {
-      @zstd_entropy.add_bits(bitstream, ml_extra.to_uint64(), ml_nbits)
-    }
-
-    let (_, of_extra) = match @zstd_entropy.encode_of(seq.offset) {
-      Ok(result) => result
-      Err(e) => return Err(@zstd_core.message_error("Invalid offset in sequence: \{e}"))
-    }
-    let of_nbits = @zstd_entropy.get_of_bits(of_symbols[n])
-    if of_nbits > 0 {
-      @zstd_entropy.add_bits(bitstream, of_extra.to_uint64(), of_nbits)
-    }
-
-    @zstd_entropy.flush_bits(bitstream)
-    n = n - 1
-  }
-
-  // Flush final states: ML → OF → LL
-  @zstd_entropy.flush_final_state(bitstream, ml_state, 6)
-  @zstd_entropy.flush_final_state(bitstream, of_state, 5)
-  @zstd_entropy.flush_final_state(bitstream, ll_state, 6)
-
-  @zstd_entropy.close_bitstream(bitstream)
-
-  let encoded = @zstd_entropy.get_bytes(bitstream)
-  for i = 0; i < encoded.length(); i = i + 1 {
-    output.push(encoded[i])
-  }
-
-  Ok(())
-}
-
-// ============================================================================
-// Compressed Block Implementation / Compressed 块实现
-// ============================================================================
-
-
-
-
-
-
-
-
-
-/// 获取预定义的 Literal Lengths 归一化频率
-
-/// 获取预定义的 LL 权重表
-fn get_predefined_ll_weights_compressor() -> Array[Int] {
-  [
-    4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1,
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1,
-    -1, -1, -1, -1
-  ]
-}
-
-/// 获取预定义的 ML 权重表
-fn get_predefined_ml_weights_compressor() -> Array[Int] {
-  [
-    1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1,
-    -1, -1, -1, -1, -1
-  ]
-}
-
-/// 获取预定义的 OF 权重表
-fn get_predefined_of_weights_compressor() -> Array[Int] {
-  [
-    1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1
-  ]
-}
-
-/// 编码 Literal Length 为符号（使用 RFC 8878 标准表）
-fn encode_ll_symbol(ll: Int) -> Int {
-  let (code, _) = @zstd_entropy.encode_ll(ll)
-  code
-}
-
-/// 编码 Match Length 为符号（使用 RFC 8878 标准表）
-fn encode_ml_symbol(ml: Int) -> Int {
-  let (code, _) = @zstd_entropy.encode_ml(ml)
-  code
-}
-
-/// Encode Offset symbol with repeat offset support
-fn encode_of_symbol(offset: Int) -> Int {
-  if offset == -1 {
-    return 0  // rep[0]
-  } else if offset == -2 {
-    return 1  // rep[1]
-  } else if offset == -3 {
-    return 1  // rep[2] (will need extra bit)
-  }
-  // Validate offset before encoding to avoid abort
-  if offset < 1 {
-    abort("Invalid offset: must be >= 1")
-  }
-  match @zstd_entropy.encode_of(offset) {
-    Ok((code, _)) => code
-    Err(e) => abort("encode_of failed: " + e)
-  }
-}
-
-/// 提取序列符号（用于 FSE 编码）
-fn extract_sequence_symbols(sequences: Array[Sequence]) -> (Array[Int], Array[Int], Array[Int]) {
-  let ll_symbols: Array[Int] = []
-  let ml_symbols: Array[Int] = []
-  let of_symbols: Array[Int] = []
-
-  for i = 0; i < sequences.length(); i = i + 1 {
-    let seq = sequences[i]
-    ll_symbols.push(encode_ll_symbol(seq.literal_length))
-    ml_symbols.push(encode_ml_symbol(seq.match_length))
-    of_symbols.push(encode_of_symbol(seq.offset))
-  }
-
-  (ll_symbols, ml_symbols, of_symbols)
-}
-
-/// Encode sequences using predefined FSE tables
-/// Matches official ZSTD_encodeSequences_body order exactly
-/// Encode single sequence directly (RFC 8878: no FSE for single sequence)
-fn encode_single_sequence_direct(seq: Sequence, output: Array[Byte]) -> Unit {
-  let ll = seq.literal_length
-  let ml = seq.match_length
-  let max_value = 16777216
-  if ll < 0 || ll >= max_value { abort("LL out of bounds") }
-  if ml < 3 || ml >= max_value { abort("ML out of bounds") }
-
-  // Handle repeat offset markers: convert to actual offset values
-  // For single sequence, we use initial repeat offsets [1, 4, 8]
-  let of = if seq.offset == -1 {
-    1  // rep[0]
-  } else if seq.offset == -2 {
-    4  // rep[1]
-  } else if seq.offset == -3 {
-    8  // rep[2]
-  } else {
-    seq.offset
-  }
-  if of < 1 || of >= max_value { abort("OF out of bounds") }
-
-  // Check for integer overflow: LL + ML + OF must not overflow Int
-  // First check ML + OF to avoid underflow in the second check
-  if ml > 2147483647 - of { abort("Integer overflow: ML + OF exceeds Int max") }
-  if ll > 2147483647 - ml - of { abort("Integer overflow: LL + ML + OF exceeds Int max") }
-
-  // Encode Literal_Length
-  if ll < 128 {
-    output.push(ll.to_byte())
-  } else if ll < 0x7F00 {
-    output.push(((ll >> 8) + 128).to_byte())
-    output.push((ll & 0xFF).to_byte())
-  } else {
-    output.push(0xFF)
-    let adjusted = ll - 0x7F00
-    output.push((adjusted & 0xFF).to_byte())
-    output.push(((adjusted >> 8) & 0xFF).to_byte())
-  }
-
-  // Encode Offset (stored as offset-1)
-  let of_minus_1 = of - 1
-  if of_minus_1 < 128 {
-    output.push(of_minus_1.to_byte())
-  } else if of_minus_1 < 0x7F00 {
-    output.push(((of_minus_1 >> 8) + 128).to_byte())
-    output.push((of_minus_1 & 0xFF).to_byte())
-  } else {
-    output.push(0xFF)
-    let adjusted = of_minus_1 - 0x7F00
-    output.push((adjusted & 0xFF).to_byte())
-    output.push(((adjusted >> 8) & 0xFF).to_byte())
-  }
-
-  // Encode Match_Length (stored as ml-3)
-  let ml_minus_3 = ml - 3
-  if ml_minus_3 < 128 {
-    output.push(ml_minus_3.to_byte())
-  } else if ml_minus_3 < 0x7F00 {
-    output.push(((ml_minus_3 >> 8) + 128).to_byte())
-    output.push((ml_minus_3 & 0xFF).to_byte())
-  } else {
-    output.push(0xFF)
-    let adjusted = ml_minus_3 - 0x7F00
-    output.push((adjusted & 0xFF).to_byte())
-    output.push(((adjusted >> 8) & 0xFF).to_byte())
-  }
-}
-
-fn encode_sequences_predefined_fse(sequences: Array[Sequence], output: Array[Byte]) -> Result[Unit, @zstd_core.ZSTDError] {
-  if sequences.length() == 0 {
-    return Ok(())
-  }
-
-  let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(sequences)
-
-  let ll_predefined = @zstd_entropy.normalize_counts(get_predefined_ll_weights_compressor(), 6)
-  let ml_predefined = @zstd_entropy.normalize_counts(get_predefined_ml_weights_compressor(), 6)
-  let of_predefined = @zstd_entropy.normalize_counts(get_predefined_of_weights_compressor(), 5)
-
-  let ll_table = match @zstd_entropy.build_fse_ctable(ll_predefined, ll_predefined.length() - 1, 6) {
-    Ok(t) => t
-    Err(e) => return Err(@zstd_core.message_error("Failed to build LL FSE table: \{e}"))
-  }
-  let ml_table = match @zstd_entropy.build_fse_ctable(ml_predefined, ml_predefined.length() - 1, 6) {
-    Ok(t) => t
-    Err(e) => return Err(@zstd_core.message_error("Failed to build ML FSE table: \{e}"))
-  }
-  let of_table = match @zstd_entropy.build_fse_ctable(of_predefined, of_predefined.length() - 1, 5) {
-    Ok(t) => t
-    Err(e) => return Err(@zstd_core.message_error("Failed to build OF FSE table: \{e}"))
-  }
-
-  let bitstream = @zstd_entropy.create_bitstream()
-  let last_idx = sequences.length() - 1
-
-  // Step 1: Init states with seqN-1 (last sequence) symbols
-  let mut ll_state = @zstd_entropy.init_fse_cstate_with_symbol(ll_table, ll_symbols[last_idx])
-  let mut ml_state = @zstd_entropy.init_fse_cstate_with_symbol(ml_table, ml_symbols[last_idx])
-  let mut of_state = @zstd_entropy.init_fse_cstate_with_symbol(of_table, of_symbols[last_idx])
-
-  // Step 2: Write seqN-1 (last sequence) extras BEFORE the loop: LL, ML, OF
-  let last_seq = sequences[last_idx]
-
-  let (_, last_ll_extra) = @zstd_entropy.encode_ll(last_seq.literal_length)
-  let last_ll_nbits = @zstd_entropy.get_ll_bits(ll_symbols[last_idx])
-  if last_ll_nbits > 0 {
-    @zstd_entropy.add_bits(bitstream, last_ll_extra.to_uint64(), last_ll_nbits)
-  }
-
-  let (_, last_ml_extra) = @zstd_entropy.encode_ml(last_seq.match_length)
-  let last_ml_nbits = @zstd_entropy.get_ml_bits(ml_symbols[last_idx])
-  if last_ml_nbits > 0 {
-    @zstd_entropy.add_bits(bitstream, last_ml_extra.to_uint64(), last_ml_nbits)
-  }
-
-  let (_, last_of_extra) = match @zstd_entropy.encode_of(last_seq.offset) {
-    Ok(result) => result
-    Err(e) => return Err(@zstd_core.message_error("Invalid offset in last sequence: \{e}"))
-  }
-  let last_of_nbits = @zstd_entropy.get_of_bits(of_symbols[last_idx])
-  if last_of_nbits > 0 {
-    @zstd_entropy.add_bits(bitstream, last_of_extra.to_uint64(), last_of_nbits)
-  }
-
-  @zstd_entropy.flush_bits(bitstream)
-
-  // Step 3: Loop from N-2 down to 0 — encode state transitions + extras
-  let mut n = last_idx - 1
-  while n >= 0 {
-    let seq = sequences[n]
-
-    // State transitions: OF → ML → LL so decoder reads LL → ML → OF (RFC 8878 order)
-    of_state = @zstd_entropy.encode_symbol_fse(of_state, of_symbols[n], of_table, bitstream)
-    ml_state = @zstd_entropy.encode_symbol_fse(ml_state, ml_symbols[n], ml_table, bitstream)
-    ll_state = @zstd_entropy.encode_symbol_fse(ll_state, ll_symbols[n], ll_table, bitstream)
-
-    // Extra bits: LL, ML, OF (official order)
-    let (_, ll_extra) = @zstd_entropy.encode_ll(seq.literal_length)
-    let ll_nbits = @zstd_entropy.get_ll_bits(ll_symbols[n])
-    if ll_nbits > 0 {
-      @zstd_entropy.add_bits(bitstream, ll_extra.to_uint64(), ll_nbits)
-    }
-
-    let (_, ml_extra) = @zstd_entropy.encode_ml(seq.match_length)
-    let ml_nbits = @zstd_entropy.get_ml_bits(ml_symbols[n])
-    if ml_nbits > 0 {
-      @zstd_entropy.add_bits(bitstream, ml_extra.to_uint64(), ml_nbits)
-    }
-
-    let (_, of_extra) = match @zstd_entropy.encode_of(seq.offset) {
-      Ok(result) => result
-      Err(e) => return Err(@zstd_core.message_error("Invalid offset in sequence: \{e}"))
-    }
-    let of_nbits = @zstd_entropy.get_of_bits(of_symbols[n])
-    if of_nbits > 0 {
-      @zstd_entropy.add_bits(bitstream, of_extra.to_uint64(), of_nbits)
-    }
-
-    @zstd_entropy.flush_bits(bitstream)
-    n = n - 1
-  }
-
-  // Step 4: Flush final states: ML → OF → LL (official order)
-  @zstd_entropy.flush_final_state(bitstream, ml_state, 6)
-  @zstd_entropy.flush_final_state(bitstream, of_state, 5)
-  @zstd_entropy.flush_final_state(bitstream, ll_state, 6)
-
-  // Step 5: Close bitstream (padding bit)
-  @zstd_entropy.close_bitstream(bitstream)
-
-  let encoded = @zstd_entropy.get_bytes(bitstream)
-  for i = 0; i < encoded.length(); i = i + 1 {
-    output.push(encoded[i])
-  }
-
-  Ok(())
 }
 
 /// Compress as compressed block with dictionary ID
@@ -1603,26 +528,15 @@ fn compress_as_compressed_block_with_dict(
 ) -> Result[Bytes, @zstd_core.ZSTDError] {
   let output: Array[Byte] = []
 
-  // ZSTD Magic Number
   write_zstd_magic(output)
-
-  // Frame Header with Dictionary ID
   let fhd: Byte = 0x23
   output.push(fhd)
-
-  // Dictionary ID (4 bytes, little-endian)
   write_dict_id(output, dict_id)
-
-  // Frame Content Size
   write_frame_content_size_with_dict(output, data.length(), 4)
 
-  // Build block content: Literals_Section + Sequences_Section
   let block_content: Array[Byte] = []
-
-  // Literals Section
   encode_literals_section(literals, block_content)
 
-  // Sequences Section
   let num_sequences = sequences.length()
   write_sequence_count(block_content, num_sequences)
 
@@ -1634,62 +548,10 @@ fn compress_as_compressed_block_with_dict(
     }
   }
 
-  // Block Header
-  let block_size = block_content.length()
-  write_block_header(output, true, 2, block_size)
-
+  write_block_header(output, true, 2, block_content.length())
   for i = 0; i < block_content.length(); i = i + 1 {
     output.push(block_content[i])
   }
 
-  Ok(Bytes::from_array(output))
-}
-
-/// Compress as RLE block with dictionary ID
-fn compress_as_rle_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, @zstd_core.ZSTDError] {
-  if data.length() == 0 {
-    return compress_empty_frame()
-  }
-  
-  let first_byte = data[0]
-  let mut all_same = true
-  for i = 1; i < data.length(); i = i + 1 {
-    if data[i] != first_byte {
-      all_same = false
-      break
-    }
-  }
-  
-  if !all_same {
-    return compress_as_raw_block_with_dict(data, dict_id)
-  }
-  
-  let output: Array[Byte] = []
-
-  // ZSTD Magic Number
-  write_zstd_magic(output)
-
-  // Frame Header with Dictionary ID
-  let fhd: Byte = 0x23
-  output.push(fhd)
-  
-  // Dictionary ID
-  write_dict_id(output, dict_id)
-
-  // Frame Content Size
-  write_frame_content_size_with_dict(output, data.length(), 4)
-
-  // Emit one or more RLE blocks, each with decompressed size ≤ ZSTD_MAX_BLOCK_SIZE
-  let max_block = @zstd_core.ZSTD_MAX_BLOCK_SIZE
-  let mut pos = 0
-  while pos < data.length() {
-    let remaining = data.length() - pos
-    let chunk_size = remaining.min(max_block)
-    let is_last = (pos + chunk_size >= data.length())
-    write_block_header(output, is_last, 1, chunk_size)
-    output.push(first_byte)
-    pos = pos + chunk_size
-  }
-  
   Ok(Bytes::from_array(output))
 }
