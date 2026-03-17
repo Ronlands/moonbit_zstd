@@ -15,8 +15,11 @@ pub fn run_all_basic_tests() -> Bool {
     ("RLE Literals", test_rle_literals_block()),
     ("FSE Bitstream", test_fse_bitstream()),
     ("FSE Encode Simple", test_fse_encode_simple()),
+    ("Single Byte", test_single_byte()),
+    ("Invalid Magic", test_invalid_magic()),
+    ("Large Offset", test_large_offset()),
   ]
-  
+
   run_test_suite("Basic tests", tests)
 }
 
@@ -369,3 +372,33 @@ fn test_fse_encode_simple() -> Bool {
   }
 }
 
+/// Test 1-byte data compression
+fn test_single_byte() -> Bool {
+  let data = Bytes::from_array([0x42])
+  match @zstd.compress(data) {
+    Ok(compressed) => {
+      let decompressed = @zstd.decompress(compressed)
+      decompressed.length() == 1 && decompressed[0] == 0x42
+    }
+    Err(_) => false
+  }
+}
+
+/// Test invalid magic number handling
+fn test_invalid_magic() -> Bool {
+  let invalid = Bytes::from_array([0x00, 0x00, 0x00, 0x00])
+  let result = @zstd.decompress(invalid)
+  result.length() == 0  // Should fail gracefully
+}
+
+/// Test very large offset encoding
+fn test_large_offset() -> Bool {
+  let offset = 1048576  // 1MB offset
+  match @zstd_entropy.encode_of(offset) {
+    Ok((code, extra_bits)) => {
+      let decoded = @zstd_entropy.decode_of(code, extra_bits)
+      decoded == offset
+    }
+    Err(_) => false
+  }
+}

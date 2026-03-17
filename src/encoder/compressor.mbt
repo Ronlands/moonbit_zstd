@@ -13,6 +13,43 @@ let fcs_threshold_2byte : Int = 65792    // < 65792: 2-byte FCS, else 4-byte FCS
 /// Default window size (64KB)
 let default_window_size : Int = 65536
 
+/// Helper: Write 16-bit value in little-endian
+fn write_u16_le(output: Array[Byte], value: Int) -> Unit {
+  output.push((value & 0xFF).to_byte())
+  output.push(((value >> 8) & 0xFF).to_byte())
+}
+
+/// Helper: Write 32-bit value in little-endian
+fn write_u32_le(output: Array[Byte], value: UInt) -> Unit {
+  output.push((value & 0xFFU).to_byte())
+  output.push(((value >> 8) & 0xFFU).to_byte())
+  output.push(((value >> 16) & 0xFFU).to_byte())
+  output.push(((value >> 24) & 0xFFU).to_byte())
+}
+
+/// Helper: Write 24-bit block header (last_block | block_type | block_size)
+fn write_block_header(output: Array[Byte], last_block: Bool, block_type: Int, block_size: Int) -> Unit {
+  let last = if last_block { 0x01 } else { 0x00 }
+  let header = last | (block_type << 1) | (block_size << 3)
+  output.push((header & 0xFF).to_byte())
+  output.push(((header >> 8) & 0xFF).to_byte())
+  output.push(((header >> 16) & 0xFF).to_byte())
+}
+
+/// Helper: Write sequence count header (variable-length encoding)
+fn write_sequence_count(output: Array[Byte], count: Int) -> Unit {
+  if count < 128 {
+    output.push(count.to_byte())
+  } else if count < 32768 {
+    output.push(((count >> 8) + 128).to_byte())
+    output.push((count & 0xFF).to_byte())
+  } else {
+    output.push(0xFF)
+    output.push((count & 0xFF).to_byte())
+    output.push(((count >> 8) & 0xFF).to_byte())
+  }
+}
+
 /// Simple XXH32-like checksum
 fn calculate_checksum(data: Bytes) -> UInt {
   let mut hash = 0x9E3779B1U
@@ -26,10 +63,7 @@ fn calculate_checksum(data: Bytes) -> UInt {
 
 /// Write 32-bit checksum in little-endian
 fn write_checksum(output: Array[Byte], checksum: UInt) -> Unit {
-  output.push((checksum & 0xFFU).to_byte())
-  output.push(((checksum >> 8) & 0xFFU).to_byte())
-  output.push(((checksum >> 16) & 0xFFU).to_byte())
-  output.push(((checksum >> 24) & 0xFFU).to_byte())
+  write_u32_le(output, checksum)
 }
 
 /// Write ZSTD magic number (0xFD2FB528 in little-endian)
@@ -42,10 +76,7 @@ fn write_zstd_magic(output: Array[Byte]) -> Unit {
 
 /// Write 32-bit dictionary ID in little-endian format
 fn write_dict_id(output: Array[Byte], dict_id: UInt) -> Unit {
-  output.push((dict_id & 0xFFU).to_byte())
-  output.push(((dict_id >> 8) & 0xFFU).to_byte())
-  output.push(((dict_id >> 16) & 0xFFU).to_byte())
-  output.push(((dict_id >> 24) & 0xFFU).to_byte())
+  write_u32_le(output, dict_id)
 }
 
 /// Write frame header descriptor and content size with optional checksum
@@ -56,15 +87,10 @@ fn write_frame_header_descriptor_with_checksum(output: Array[Byte], data_length:
     output.push(data_length.to_byte())
   } else if data_length < fcs_threshold_2byte {
     output.push((0x60 | checksum_flag).to_byte())
-    let size_minus_256 = data_length - fcs_threshold_1byte
-    output.push((size_minus_256 & 0xFF).to_byte())
-    output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
+    write_u16_le(output, data_length - fcs_threshold_1byte)
   } else {
     output.push((0xA0 | checksum_flag).to_byte())
-    output.push((data_length & 0xFF).to_byte())
-    output.push(((data_length >> 8) & 0xFF).to_byte())
-    output.push(((data_length >> 16) & 0xFF).to_byte())
-    output.push(((data_length >> 24) & 0xFF).to_byte())
+    write_u32_le(output, data_length.to_uint())
   }
 }
 
@@ -76,21 +102,13 @@ fn write_frame_header_descriptor(output: Array[Byte], data_length: Int) -> Unit 
 /// Write frame content size for dictionary frames (updates FHD byte if needed)
 fn write_frame_content_size_with_dict(output: Array[Byte], data_length: Int, fhd_index: Int) -> Unit {
   if data_length < fcs_threshold_1byte {
-    // FCS_flag=0: FHD = 0x23, 1-byte FCS
     output.push(data_length.to_byte())
   } else if data_length < fcs_threshold_2byte {
-    // FCS_flag=1: FHD = 0x63, 2-byte FCS (value - 256)
     output[fhd_index] = 0x63
-    let size_minus_256 = data_length - fcs_threshold_1byte
-    output.push((size_minus_256 & 0xFF).to_byte())
-    output.push(((size_minus_256 >> 8) & 0xFF).to_byte())
+    write_u16_le(output, data_length - fcs_threshold_1byte)
   } else {
-    // FCS_flag=2: FHD = 0xA3, 4-byte FCS
     output[fhd_index] = 0xA3
-    output.push((data_length & 0xFF).to_byte())
-    output.push(((data_length >> 8) & 0xFF).to_byte())
-    output.push(((data_length >> 16) & 0xFF).to_byte())
-    output.push(((data_length >> 24) & 0xFF).to_byte())
+    write_u32_le(output, data_length.to_uint())
   }
 }
 
@@ -379,7 +397,7 @@ fn compress_multi_block_with_checksum(data: Bytes, config: CompressionConfig, wi
 
     match block_result {
       Ok((block_type, block_content)) => {
-        write_block_header(output, block_type, block_content.length(), is_last)
+        write_block_header(output, is_last, block_type, block_content.length())
         for i = 0; i < block_content.length(); i = i + 1 {
           output.push(block_content[i])
         }
@@ -395,15 +413,6 @@ fn compress_multi_block_with_checksum(data: Bytes, config: CompressionConfig, wi
   }
 
   Ok(Bytes::from_array(output))
-}
-
-/// Write block header
-fn write_block_header(output: Array[Byte], block_type: Int, size: Int, is_last: Bool) -> Unit {
-  let last_bit = if is_last { 1 } else { 0 }
-  let header = last_bit | (block_type << 1) | (size << 3)
-  output.push((header & 0xFF).to_byte())
-  output.push(((header >> 8) & 0xFF).to_byte())
-  output.push(((header >> 16) & 0xFF).to_byte())
 }
 
 /// Compress block content as raw
@@ -433,16 +442,7 @@ fn compress_block_content_compressed(data: Bytes, config: CompressionConfig) -> 
   encode_literals_section(literals, output)
 
   let num_sequences = sequences.length()
-  if num_sequences < 128 {
-    output.push(num_sequences.to_byte())
-  } else if num_sequences < 32768 {
-    output.push(((num_sequences >> 8) + 128).to_byte())
-    output.push((num_sequences & 0xFF).to_byte())
-  } else {
-    output.push(0xFF)
-    output.push((num_sequences & 0xFF).to_byte())
-    output.push(((num_sequences >> 8) & 0xFF).to_byte())
-  }
+  write_sequence_count(output, num_sequences)
 
   if num_sequences > 0 {
     let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(sequences)
@@ -530,11 +530,7 @@ pub fn compress_as_rle_block(data: Bytes, _config: CompressionConfig) -> Result[
     let remaining = data.length() - pos
     let chunk_size = remaining.min(max_block)
     let is_last = (pos + chunk_size >= data.length())
-    let last_flag = if is_last { 1 } else { 0 }
-    let block_header = last_flag | (1 << 1) | (chunk_size << 3)
-    output.push((block_header & 0xFF).to_byte())
-    output.push(((block_header >> 8) & 0xFF).to_byte())
-    output.push(((block_header >> 16) & 0xFF).to_byte())
+    write_block_header(output, is_last, 1, chunk_size)
     // RLE block payload: single byte to repeat
     output.push(first_byte)
     pos = pos + chunk_size
@@ -562,11 +558,7 @@ pub fn compress_as_raw_block(data: Bytes, _config: CompressionConfig) -> Result[
     let chunk_size = remaining.min(max_block)
     let is_last = (pos + chunk_size >= data.length())
 
-    let last_flag = if is_last { 1 } else { 0 }
-    let block_header = last_flag | (0 << 1) | (chunk_size << 3)
-    output.push((block_header & 0xFF).to_byte())
-    output.push(((block_header >> 8) & 0xFF).to_byte())
-    output.push(((block_header >> 16) & 0xFF).to_byte())
+    write_block_header(output, is_last, 0, chunk_size)
 
     for i = 0; i < chunk_size; i = i + 1 {
       output.push(data[pos + i])
@@ -721,11 +713,7 @@ fn compress_as_raw_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, 
     let remaining = data.length() - pos
     let chunk_size = remaining.min(max_block)
     let is_last = (pos + chunk_size >= data.length())
-    let last_flag = if is_last { 1 } else { 0 }
-    let block_header = last_flag | (0 << 1) | (chunk_size << 3)
-    output.push((block_header & 0xFF).to_byte())
-    output.push(((block_header >> 8) & 0xFF).to_byte())
-    output.push(((block_header >> 16) & 0xFF).to_byte())
+    write_block_header(output, is_last, 0, chunk_size)
     for i = 0; i < chunk_size; i = i + 1 {
       output.push(data[pos + i])
     }
@@ -853,16 +841,7 @@ pub fn compress_as_compressed_block(data: Bytes, config: CompressionConfig) -> R
   // --- Sequences Section ---
   let num_sequences = sequences.length()
   // Sequence count header
-  if num_sequences < 128 {
-    block_content.push(num_sequences.to_byte())
-  } else if num_sequences < 32768 {
-    block_content.push(((num_sequences >> 8) + 128).to_byte())
-    block_content.push((num_sequences & 0xFF).to_byte())
-  } else {
-    block_content.push(0xFF)
-    block_content.push((num_sequences & 0xFF).to_byte())
-    block_content.push(((num_sequences >> 8) & 0xFF).to_byte())
-  }
+  write_sequence_count(block_content, num_sequences)
 
   if num_sequences > 0 {
     if num_sequences == 1 {
@@ -881,10 +860,7 @@ pub fn compress_as_compressed_block(data: Bytes, config: CompressionConfig) -> R
 
   // Block Header: Last_Block=1, Block_Type=Compressed(2), Block_Size
   let block_size = block_content.length()
-  let block_header = 0x01 | (2 << 1) | (block_size << 3)
-  output.push((block_header & 0xFF).to_byte())
-  output.push(((block_header >> 8) & 0xFF).to_byte())
-  output.push(((block_header >> 16) & 0xFF).to_byte())
+  write_block_header(output, true, 2, block_size)
 
   for i = 0; i < block_content.length(); i = i + 1 {
     output.push(block_content[i])
@@ -1648,16 +1624,7 @@ fn compress_as_compressed_block_with_dict(
 
   // Sequences Section
   let num_sequences = sequences.length()
-  if num_sequences < 128 {
-    block_content.push(num_sequences.to_byte())
-  } else if num_sequences < 32768 {
-    block_content.push(((num_sequences >> 8) + 128).to_byte())
-    block_content.push((num_sequences & 0xFF).to_byte())
-  } else {
-    block_content.push(0xFF)
-    block_content.push((num_sequences & 0xFF).to_byte())
-    block_content.push(((num_sequences >> 8) & 0xFF).to_byte())
-  }
+  write_sequence_count(block_content, num_sequences)
 
   if num_sequences > 0 {
     block_content.push(0x00)
@@ -1669,10 +1636,7 @@ fn compress_as_compressed_block_with_dict(
 
   // Block Header
   let block_size = block_content.length()
-  let block_header = 0x01 | (2 << 1) | (block_size << 3)
-  output.push((block_header & 0xFF).to_byte())
-  output.push(((block_header >> 8) & 0xFF).to_byte())
-  output.push(((block_header >> 16) & 0xFF).to_byte())
+  write_block_header(output, true, 2, block_size)
 
   for i = 0; i < block_content.length(); i = i + 1 {
     output.push(block_content[i])
@@ -1722,11 +1686,7 @@ fn compress_as_rle_block_with_dict(data: Bytes, dict_id: UInt) -> Result[Bytes, 
     let remaining = data.length() - pos
     let chunk_size = remaining.min(max_block)
     let is_last = (pos + chunk_size >= data.length())
-    let last_flag = if is_last { 1 } else { 0 }
-    let block_header = last_flag | (1 << 1) | (chunk_size << 3)
-    output.push((block_header & 0xFF).to_byte())
-    output.push(((block_header >> 8) & 0xFF).to_byte())
-    output.push(((block_header >> 16) & 0xFF).to_byte())
+    write_block_header(output, is_last, 1, chunk_size)
     output.push(first_byte)
     pos = pos + chunk_size
   }
