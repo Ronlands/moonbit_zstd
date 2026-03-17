@@ -12,14 +12,6 @@ pub enum CompressionLevel {
   Best
 }
 
-// Helper function to convert Result[T, String] to Result[T, ZSTDError]
-fn[T] to_zstd_error(result: Result[T, String]) -> Result[T, @zstd_core.ZSTDError] {
-  match result {
-    Ok(v) => Ok(v)
-    Err(msg) => Err(@zstd_core.message_error(msg))
-  }
-}
-
 /// Result of analyzing a ZSTD compressed file's structure.
 ///
 /// Contains frame header information, block metadata, and validation status.

@@ -41,12 +41,14 @@ fn encode_ml_symbol(ml: Int) -> Int {
 
 /// Encode OF symbol with repeat offset support
 fn encode_of_symbol(offset: Int) -> Int {
+  // Note: Repeat offset encoding in ZSTD is complex and depends on literal_length
+  // For now, we use a simplified mapping that ensures unique codes
   if offset == -1 {
-    return 0
+    return 0  // rep[0]
   } else if offset == -2 {
-    return 1
+    return 1  // rep[1]
   } else if offset == -3 {
-    return 1
+    return 2  // rep[2] - simplified encoding
   }
   if offset < 1 {
     abort("Invalid offset: must be >= 1")
@@ -77,23 +79,23 @@ pub fn extract_sequence_symbols(sequences: Array[Sequence]) -> (Array[Int], Arra
 pub fn encode_single_sequence_direct(seq: Sequence, output: Array[Byte]) -> Unit {
   let ll = seq.literal_length
   let ml = seq.match_length
-  let max_value = 16777216
-  if ll < 0 || ll >= max_value { abort("LL out of bounds") }
-  if ml < 3 || ml >= max_value { abort("ML out of bounds") }
+  // RFC 8878 single sequence encoding limit: 2^24 - 1
+  let max_single_seq = 16777215
 
+  if ll < 0 || ll >= max_single_seq { abort("LL out of bounds") }
+  if ml < 3 || ml >= max_single_seq { abort("ML out of bounds") }
+
+  // Handle repeat offset markers: convert to actual offset values
   let of = if seq.offset == -1 {
-    1
+    1  // rep[0]
   } else if seq.offset == -2 {
-    4
+    4  // rep[1]
   } else if seq.offset == -3 {
-    8
+    8  // rep[2]
   } else {
     seq.offset
   }
-  if of < 1 || of >= max_value { abort("OF out of bounds") }
-
-  if ml > 2147483647 - of { abort("Integer overflow: ML + OF exceeds Int max") }
-  if ll > 2147483647 - ml - of { abort("Integer overflow: LL + ML + OF exceeds Int max") }
+  if of < 1 || of >= max_single_seq { abort("OF out of bounds") }
 
   // Encode LL
   if ll < 128 {

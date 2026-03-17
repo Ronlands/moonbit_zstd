@@ -72,7 +72,12 @@ pub fn find_match_with_dict(
     let match_length = calculate_match_length_from_dict(data, dictionary, pos, dict_pos)
 
     if match_length >= min_match {
-      let offset = pos + (dictionary.length() - dict_pos)
+      let dict_offset = dictionary.length() - dict_pos
+      // Check for overflow: pos + dict_offset must not exceed Int max
+      if dict_offset > 2147483647 - pos {
+        return Match::{ offset: 0, length: 0 }
+      }
+      let offset = pos + dict_offset
       Match::{ offset: offset, length: match_length }
     } else {
       Match::{ offset: 0, length: 0 }

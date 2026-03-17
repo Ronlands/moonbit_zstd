@@ -47,7 +47,8 @@ pub fn find_match(data: Bytes, pos: Int, hash_table: Array[Int], min_match: Int,
 
   let mut i = 0
   while i < min_match && pos + i < data_len {
-    if data[match_pos + (i % offset)] != data[pos + i] {
+    let match_idx = match_pos + (i % offset)
+    if match_idx >= data_len || data[match_idx] != data[pos + i] {
       return Match::{ offset: 0, length: 0 }
     }
     i = i + 1
@@ -56,9 +57,11 @@ pub fn find_match(data: Bytes, pos: Int, hash_table: Array[Int], min_match: Int,
   let mut match_length = min_match
   let max_match = (data_len - pos).min(131072)
 
-  while match_length < max_match &&
-        pos + match_length < data_len &&
-        data[match_pos + (match_length % offset)] == data[pos + match_length] {
+  while match_length < max_match && pos + match_length < data_len {
+    let match_idx = match_pos + (match_length % offset)
+    if match_idx >= data_len || data[match_idx] != data[pos + match_length] {
+      break
+    }
     match_length = match_length + 1
   }
 
