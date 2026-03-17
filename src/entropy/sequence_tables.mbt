@@ -170,22 +170,22 @@ pub fn encode_ml(match_length: Int) -> (Int, Int) {
 }
 
 /// Encode Offset to code (finds the matching code for a given offset value)
-/// Note: offset must be >= 1. Invalid offsets are clamped to 1 (minimum valid offset).
-pub fn encode_of(offset: Int) -> (Int, Int) {
-  // Clamp invalid offsets to minimum valid value (1)
-  // This prevents generating of_code=0 (repeat offset sentinel)
-  let valid_offset = if offset < 1 { 1 } else { offset }
+/// Note: offset must be >= 1. Returns error for invalid offsets.
+pub fn encode_of(offset: Int) -> Result[(Int, Int), String] {
+  if offset < 1 {
+    return Err("Invalid offset: must be >= 1")
+  }
 
-  // Find the largest code where of_base[code] <= valid_offset
+  // Find the largest code where of_base[code] <= offset
   let mut code = 0
   for i = 0; i < of_base.length(); i = i + 1 {
-    if of_base[i] <= valid_offset {
+    if of_base[i] <= offset {
       code = i
     } else {
       break
     }
   }
-  let extra_bits = valid_offset - of_base[code]
-  (code, extra_bits)
+  let extra_bits = offset - of_base[code]
+  Ok((code, extra_bits))
 }
 

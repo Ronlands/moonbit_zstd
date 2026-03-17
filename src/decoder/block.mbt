@@ -871,6 +871,11 @@ fn decode_single_sequence_direct(data: Bytes, offset: Int) -> Result[Array[@zstd
     return Err("ML out of bounds")
   }
 
+  // Check for integer overflow: LL + ML + OF must not overflow Int
+  if literal_length > 2147483647 - match_length - offset_value {
+    return Err("Integer overflow: LL + ML + OF exceeds Int max")
+  }
+
   Ok([@zstd_core.make_sequence(literal_length, match_length, offset_value)])
 }
 

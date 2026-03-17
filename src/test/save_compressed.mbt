@@ -39,7 +39,13 @@ pub fn test_save_and_verify() -> Unit {
   println("  内容: \{text} (重复 10 次)")
   
   // 压缩
-  let compressed = @zstd.compress(original_data)
+  let compressed = match @zstd.compress(original_data) {
+    Ok(c) => c
+    Err(e) => {
+      println("压缩失败: \{e}")
+      return
+    }
+  }
   println("\n压缩后:")
   println("  大小: \{compressed.length()} bytes")
   println("  压缩比: \{original_data.length() * 100 / compressed.length()}%")

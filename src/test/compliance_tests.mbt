@@ -16,7 +16,10 @@ pub fn run_all_compatibility_tests() -> Bool {
 /// Test magic number compliance
 fn test_magic_number_compliance() -> Bool {
   let test_data = @encoding/utf8.encode("Magic number test")
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   
   if compressed.length() < 4 {
     return false
@@ -33,7 +36,10 @@ fn test_magic_number_compliance() -> Bool {
 /// Test frame header format compliance
 fn test_frame_header_compliance() -> Bool {
   let test_data = @encoding/utf8.encode("Frame header test")
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   let analysis = @zstd.analyze_file(compressed)
   
   analysis.is_valid && analysis.magic_number == @zstd_core.ZSTD_MAGIC_NUMBER
@@ -43,7 +49,10 @@ fn test_frame_header_compliance() -> Bool {
 fn test_block_type_support() -> Bool {
   // Test that compressed data can be analyzed and includes block type info
   let test_data = @encoding/utf8.encode("Block type test")
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   let analysis = @zstd.analyze_file(compressed)
   
   // Verify block type is one of the valid types
@@ -62,7 +71,10 @@ fn test_block_type_support() -> Bool {
 fn test_checksum_support() -> Bool {
   // Test that checksum flag can be read from analysis
   let test_data = @encoding/utf8.encode("Checksum test")
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   let analysis = @zstd.analyze_file(compressed)
   
   // Checksum flag should be a boolean value
@@ -73,7 +85,10 @@ fn test_checksum_support() -> Bool {
 fn test_byte_order_handling() -> Bool {
   // Verify magic number is correctly read in little-endian
   let test_data = @encoding/utf8.encode("Byte order test")
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   
   if compressed.length() < 4 {
     return false

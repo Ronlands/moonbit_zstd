@@ -22,7 +22,10 @@ fn test_text_compression() -> Unit {
   
   let text = "The quick brown fox jumps over the lazy dog. Hello, MoonBit ZSTD!"
   let original = @encoding/utf8.encode(text)
-  let compressed = @zstd.compress(original)
+  let compressed = match @zstd.compress(original) {
+    Ok(c) => c
+    Err(e) => { println("压缩失败: \{e}"); return }
+  }
   let decompressed = @zstd.decompress(compressed)
   
   println("原始数据大小: \{original.length()} 字节")
@@ -42,7 +45,10 @@ fn test_binary_compression() -> Unit {
   println(@zstd_test.repeat_string("-", 40))
   
   let original = create_binary_data(1000)
-  let compressed = @zstd.compress(original)
+  let compressed = match @zstd.compress(original) {
+    Ok(c) => c
+    Err(e) => { println("压缩失败: \{e}"); return }
+  }
   let decompressed = @zstd.decompress(compressed)
   
   let savings = if compressed.length() < original.length() {
@@ -67,7 +73,10 @@ fn test_large_data_compression() -> Unit {
   println(@zstd_test.repeat_string("-", 40))
   
   let original = create_binary_data(10000)
-  let compressed = @zstd.compress(original)
+  let compressed = match @zstd.compress(original) {
+    Ok(c) => c
+    Err(e) => { println("压缩失败: \{e}"); return }
+  }
   let decompressed = @zstd.decompress(compressed)
   
   let ratio = original.length().to_double() / compressed.length().to_double()
@@ -97,7 +106,10 @@ fn test_compression_round_trip() -> Unit {
   let mut passed = 0
   for i = 0; i < tests.length(); i = i + 1 {
     let (name, data) = tests[i]
-    let compressed = @zstd.compress(data)
+    let compressed = match @zstd.compress(data) {
+      Ok(c) => c
+      Err(_) => { println("  \{name}: 压缩失败"); continue }
+    }
     let decompressed = @zstd.decompress(compressed)
     
     if data == decompressed {

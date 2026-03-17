@@ -1252,7 +1252,10 @@ fn encode_sequences_compressed_fse(sequences: Array[Sequence], output: Array[Byt
     @zstd_entropy.add_bits(bitstream, last_ml_extra.to_uint64(), last_ml_nbits)
   }
 
-  let (_, last_of_extra) = @zstd_entropy.encode_of(last_seq.offset)
+  let (_, last_of_extra) = match @zstd_entropy.encode_of(last_seq.offset) {
+    Ok(result) => result
+    Err(e) => return Err("Invalid offset in last sequence: \{e}")
+  }
   let last_of_nbits = @zstd_entropy.get_of_bits(of_symbols[last_idx])
   if last_of_nbits > 0 {
     @zstd_entropy.add_bits(bitstream, last_of_extra.to_uint64(), last_of_nbits)
@@ -1283,7 +1286,10 @@ fn encode_sequences_compressed_fse(sequences: Array[Sequence], output: Array[Byt
       @zstd_entropy.add_bits(bitstream, ml_extra.to_uint64(), ml_nbits)
     }
 
-    let (_, of_extra) = @zstd_entropy.encode_of(seq.offset)
+    let (_, of_extra) = match @zstd_entropy.encode_of(seq.offset) {
+      Ok(result) => result
+      Err(e) => return Err("Invalid offset in sequence: \{e}")
+    }
     let of_nbits = @zstd_entropy.get_of_bits(of_symbols[n])
     if of_nbits > 0 {
       @zstd_entropy.add_bits(bitstream, of_extra.to_uint64(), of_nbits)
@@ -1370,8 +1376,10 @@ fn encode_of_symbol(offset: Int) -> Int {
   } else if offset == -3 {
     return 1  // rep[2] (will need extra bit)
   }
-  let (code, _) = @zstd_entropy.encode_of(offset)
-  code
+  match @zstd_entropy.encode_of(offset) {
+    Ok((code, _)) => code
+    Err(_) => abort("Invalid offset in get_of_code")
+  }
 }
 
 /// 提取序列符号（用于 FSE 编码）
@@ -1412,6 +1420,9 @@ fn encode_single_sequence_direct(seq: Sequence, output: Array[Byte]) -> Unit {
     seq.offset
   }
   if of < 1 || of >= max_value { abort("OF out of bounds") }
+
+  // Check for integer overflow: LL + ML + OF must not overflow Int
+  if ll > 2147483647 - ml - of { abort("Integer overflow: LL + ML + OF exceeds Int max") }
 
   // Encode Literal_Length
   if ll < 128 {
@@ -1502,7 +1513,10 @@ fn encode_sequences_predefined_fse(sequences: Array[Sequence], output: Array[Byt
     @zstd_entropy.add_bits(bitstream, last_ml_extra.to_uint64(), last_ml_nbits)
   }
 
-  let (_, last_of_extra) = @zstd_entropy.encode_of(last_seq.offset)
+  let (_, last_of_extra) = match @zstd_entropy.encode_of(last_seq.offset) {
+    Ok(result) => result
+    Err(e) => return Err("Invalid offset in last sequence: \{e}")
+  }
   let last_of_nbits = @zstd_entropy.get_of_bits(of_symbols[last_idx])
   if last_of_nbits > 0 {
     @zstd_entropy.add_bits(bitstream, last_of_extra.to_uint64(), last_of_nbits)
@@ -1533,7 +1547,10 @@ fn encode_sequences_predefined_fse(sequences: Array[Sequence], output: Array[Byt
       @zstd_entropy.add_bits(bitstream, ml_extra.to_uint64(), ml_nbits)
     }
 
-    let (_, of_extra) = @zstd_entropy.encode_of(seq.offset)
+    let (_, of_extra) = match @zstd_entropy.encode_of(seq.offset) {
+      Ok(result) => result
+      Err(e) => return Err("Invalid offset in sequence: \{e}")
+    }
     let of_nbits = @zstd_entropy.get_of_bits(of_symbols[n])
     if of_nbits > 0 {
       @zstd_entropy.add_bits(bitstream, of_extra.to_uint64(), of_nbits)

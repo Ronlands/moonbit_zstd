@@ -15,6 +15,22 @@ pub enum ZSTDError {
   ValidationError(String)  // Validation errors
 } derive(Eq)
 
+/// Convert ZSTDError to String
+pub fn ZSTDError::to_string(self: ZSTDError) -> String {
+  match self {
+    InvalidData => "Invalid data"
+    InvalidMagicNumber => "Invalid magic number"
+    InvalidFrameHeader => "Invalid frame header"
+    UnknownBlockType => "Unknown block type"
+    InsufficientData => "Insufficient data"
+    CompressionError => "Compression error"
+    DecompressionError => "Decompression error"
+    Message(msg) => msg
+    ParseError(msg) => "Parse error: \{msg}"
+    ValidationError(msg) => "Validation error: \{msg}"
+  }
+}
+
 /// Error constructors
 pub fn invalid_data_error() -> ZSTDError { InvalidData }
 pub fn invalid_magic_number_error() -> ZSTDError { InvalidMagicNumber }

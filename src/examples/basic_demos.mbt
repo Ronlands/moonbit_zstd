@@ -8,7 +8,10 @@ pub fn demo_basic_compression() -> Unit {
   let test_data = @encoding/utf8.encode("Hello, ZSTD!")
   let original_size = test_data.length()
   
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(e) => { println("压缩失败: \{e}"); return }
+  }
   let compressed_size = compressed.length()
   let ratio = compressed_size.to_double() / original_size.to_double()
   
@@ -29,7 +32,10 @@ pub fn demo_file_analysis() -> Unit {
   println("   " + @zstd_test.repeat_string("-", 30))
   
   let test_data = @encoding/utf8.encode("Analysis test data")
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(e) => { println("压缩失败: \{e}"); return }
+  }
   let analysis = @zstd.analyze_file(compressed)
   let magic_str = analysis.magic_number.reinterpret_as_int().to_string()
   let file_size = test_data.length()
@@ -68,7 +74,10 @@ pub fn demo_format_detection() -> Unit {
   println("   " + @zstd_test.repeat_string("-", 30))
   
   let test_data = @encoding/utf8.encode("Format test")
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(e) => { println("压缩失败: \{e}"); return }
+  }
   let non_zstd = @encoding/utf8.encode("Not ZSTD data")
   let empty = Bytes::new(0)
   
@@ -90,7 +99,10 @@ pub fn demo_compression_levels() -> Unit {
   println("   " + @zstd_test.repeat_string("-", 30))
   
   let test_data = @encoding/utf8.encode("Compression level test data")
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(e) => { println("压缩失败: \{e}"); return }
+  }
   let compressed_size = compressed.length()
   let ratio = compressed.length().to_double() / test_data.length().to_double()
   

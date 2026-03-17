@@ -104,8 +104,14 @@ fn test_reserved_bit_rejected() -> Bool {
 fn test_concatenated_frames_decoded() -> Bool {
   let abc = @encoding/utf8.encode("ABC")
   let def_bytes = @encoding/utf8.encode("DEF")
-  let frame1 = @zstd.compress(abc)
-  let frame2 = @zstd.compress(def_bytes)
+  let frame1 = match @zstd.compress(abc) {
+    Ok(c) => c
+    Err(_) => return false
+  }
+  let frame2 = match @zstd.compress(def_bytes) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   // Concatenate two valid frames
   let concat_arr: Array[Byte] = []
   for i = 0; i < frame1.length(); i = i + 1 {
@@ -168,7 +174,13 @@ fn test_large_raw_block_properly_split() -> Bool {
     arr.push(b'A')
   }
   let input      = Bytes::from_array(arr)
-  let compressed = @zstd.compress(input)
+  let compressed = match @zstd.compress(input) {
+    Ok(c) => c
+    Err(_) => {
+      println("  Large block: compress failed")
+      return false
+    }
+  }
   if compressed.length() == 0 {
     println("  Large block: compress returned empty")
     return false
@@ -250,7 +262,13 @@ fn test_cross_decode_repeat() -> Bool {
     }
   }
   let input = Bytes::from_array(input_arr)
-  let compressed = @zstd.compress(input)
+  let compressed = match @zstd.compress(input) {
+    Ok(c) => c
+    Err(_) => {
+      println("  Repeat round-trip: compress failed")
+      return false
+    }
+  }
   match @zstd_decoder.decompress(compressed) {
     Ok(out) => {
       if out.length() != 150 {

@@ -23,53 +23,68 @@ pub fn run_all_basic_tests() -> Bool {
 /// Test basic compression and decompression
 fn test_basic_compression() -> Bool {
   let test_data = @encoding/utf8.encode("Hello, MoonBit ZSTD!")
-  
-  let compressed = @zstd.compress(test_data)
+
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   if compressed.length() == 0 {
     return false
   }
-  
+
   let decompressed = @zstd.decompress(compressed)
   if decompressed.length() != test_data.length() {
     return false
   }
-  
+
   verify_data_equal(test_data, decompressed)
 }
 
 /// Test ZSTD format detection
 fn test_format_detection() -> Bool {
   let test_data = @encoding/utf8.encode("Hello, World!")
-  let compressed = @zstd.compress(test_data)
-  
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
+
   @zstd.is_zstd_format(compressed)
 }
 
 /// Test file analysis
 fn test_file_analysis() -> Bool {
   let test_data = @encoding/utf8.encode("Test data for analysis")
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   let analysis = @zstd.analyze_file(compressed)
-  
+
   analysis.is_valid
 }
 
 /// Test different compression levels
 fn test_compression_levels() -> Bool {
   let test_data = @encoding/utf8.encode("Test data for different compression levels")
-  
+
   // Use default compression since CompressionLevel enum cannot be constructed
-  let compressed = @zstd.compress(test_data)
-  
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
+
   compressed.length() > 0
 }
 
 /// Test empty data handling
 fn test_empty_data() -> Bool {
   let empty_data = Bytes::new(0)
-  let compressed = @zstd.compress(empty_data)
+  let compressed = match @zstd.compress(empty_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   let decompressed = @zstd.decompress(compressed)
-  
+
   decompressed.length() == 0
 }
 
@@ -90,7 +105,10 @@ fn test_compressed_block() -> Bool {
   }
   let test_data = @encoding/utf8.encode(test_text)
 
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
 
   if compressed.length() == 0 {
     return false
@@ -124,7 +142,10 @@ fn test_multi_sequence_block() -> Bool {
   }
   let test_data = @encoding/utf8.encode(test_text)
 
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   if compressed.length() == 0 { return false }
 
   let decompressed = @zstd.decompress(compressed)
@@ -148,7 +169,10 @@ fn test_rle_literals_block() -> Bool {
   }
   let test_data = Bytes::from_array(arr)
 
-  let compressed = @zstd.compress(test_data)
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   if compressed.length() == 0 { return false }
 
   // RLE block should be very small

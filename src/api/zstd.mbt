@@ -55,24 +55,24 @@ pub struct SlidingWindowDecoder {
 /// ```moonbit no-check
 /// let compressed = @zstd.compress_with_level_int(data, 9)
 /// ```
-pub fn compress_with_level_int(data: Bytes, level: Int) -> Bytes {
+pub fn compress_with_level_int(data: Bytes, level: Int) -> Result[Bytes, String] {
   compress_advanced(data, CompressionMethod::Auto, level)
 }
 
 /// Compress using a Raw block (no compression, just ZSTD frame wrapping).
-pub fn compress_as_raw(data: Bytes, level: Int) -> Bytes {
+pub fn compress_as_raw(data: Bytes, level: Int) -> Result[Bytes, String] {
   compress_advanced(data, CompressionMethod::Raw, level)
 }
 
 /// Compress using an RLE block (ideal for highly repetitive data).
-pub fn compress_as_rle(data: Bytes, level: Int) -> Bytes {
+pub fn compress_as_rle(data: Bytes, level: Int) -> Result[Bytes, String] {
   compress_advanced(data, CompressionMethod::RLE, level)
 }
 
 /// Compress using a Compressed block (LZ77 + FSE entropy coding).
 ///
 /// Produces the best compression ratio for most data.
-pub fn compress_as_compressed(data: Bytes, level: Int) -> Bytes {
+pub fn compress_as_compressed(data: Bytes, level: Int) -> Result[Bytes, String] {
   compress_advanced(data, CompressionMethod::Compressed, level)
 }
 
@@ -85,14 +85,17 @@ pub fn compress_as_compressed(data: Bytes, level: Int) -> Bytes {
 ///
 /// ```moonbit no-check
 /// let original = @encoding/utf8.encode("Hello, ZSTD!")
-/// let compressed = @zstd.compress(original)
-/// let decompressed = @zstd.decompress(compressed)
+/// match @zstd.compress(original) {
+///   Ok(compressed) => {
+///     let decompressed = @zstd.decompress(compressed)
+///   }
+///   Err(e) => println("Compression failed: \{e}")
+/// }
 /// ```
-pub fn compress(data: Bytes) -> Bytes {
-  let result = @zstd_encoder.compress(data)
-  match result {
-    Ok(compressed) => compressed
-    Err(_) => Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00])
+pub fn compress(data: Bytes) -> Result[Bytes, String] {
+  match @zstd_encoder.compress(data) {
+    Ok(bytes) => Ok(bytes)
+    Err(e) => Err(e.to_string())
   }
 }
 
@@ -103,7 +106,7 @@ pub fn compress(data: Bytes) -> Bytes {
 /// ```moonbit no-check
 /// let compressed = @zstd.compress_with_level(data, CompressionLevel::Better)
 /// ```
-pub fn compress_with_level(data: Bytes, level: CompressionLevel) -> Bytes {
+pub fn compress_with_level(data: Bytes, level: CompressionLevel) -> Result[Bytes, String] {
   // 将 API 级别映射到压缩器级别
   let compression_level = match level {
     CompressionLevel::Fast => 1
@@ -111,16 +114,11 @@ pub fn compress_with_level(data: Bytes, level: CompressionLevel) -> Bytes {
     CompressionLevel::Better => 6
     CompressionLevel::Best => 9
   }
-  
+
   let config = @zstd_encoder.create_config_with_level(compression_level)
-  let result = @zstd_encoder.compress_data(data, config)
-  
-  match result {
-    Ok(compressed) => compressed
-    Err(_) => {
-      // 回退到基本压缩
-      compress(data)
-    }
+  match @zstd_encoder.compress_data(data, config) {
+    Ok(bytes) => Ok(bytes)
+    Err(e) => Err(e.to_string())
   }
 }
 
@@ -166,72 +164,27 @@ fn is_suitable_for_rle(data: Bytes) -> Bool {
 /// ```moonbit no-check
 /// let compressed = @zstd.compress_advanced(data, Compressed, 5)
 /// ```
-pub fn compress_advanced(data: Bytes, mode: CompressionMethod, level: Int) -> Bytes {
+pub fn compress_advanced(data: Bytes, mode: CompressionMethod, level: Int) -> Result[Bytes, String] {
   let actual_level = if level < 1 { 2 } else if level > 22 { 22 } else { level }
   let config = @zstd_encoder.create_config_with_level(actual_level)
-  
-  match mode {
+
+  let result = match mode {
     CompressionMethod::Auto => {
-      // 自动选择最佳压缩方法
-      // 先检查是否特别适合 RLE 压缩
       let (compression_type, _byte, _size) = choose_compression_method(data)
       if compression_type == "rle" {
-        // 使用 RLE 块压缩
-        let result = @zstd_encoder.compress_as_rle_block(data, config)
-        match result {
-          Ok(compressed) => compressed
-          Err(_) => {
-            // RLE 失败，回退到通用压缩
-            let fallback = @zstd_encoder.compress_data(data, config)
-            match fallback {
-              Ok(c) => c
-              Err(_) => Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00])
-            }
-          }
-        }
+        @zstd_encoder.compress_as_rle_block(data, config)
       } else {
-        // 使用通用压缩逻辑（已包含 Raw/Compressed 智能选择）
-        let result = @zstd_encoder.compress_data(data, config)
-        match result {
-          Ok(compressed) => compressed
-          Err(_) => {
-            // 回退到空帧
-            Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00])
-          }
-        }
+        @zstd_encoder.compress_data(data, config)
       }
     }
-    CompressionMethod::Raw => {
-      // 强制使用 Raw 块
-      let result = @zstd_encoder.compress_as_raw_block(data, config)
-      match result {
-        Ok(compressed) => compressed
-        Err(_) => Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00])
-      }
-    }
-    CompressionMethod::RLE => {
-      // 强制使用 RLE 块
-      let result = @zstd_encoder.compress_as_rle_block(data, config)
-      match result {
-        Ok(compressed) => compressed
-        Err(_) => Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00])
-      }
-    }
-    CompressionMethod::Compressed => {
-      // 强制使用 Compressed 块（LZ77 + 熵编码）
-      let result = @zstd_encoder.compress_as_compressed_block(data, config)
-      match result {
-        Ok(compressed) => compressed
-        Err(_) => {
-          // 如果失败，回退到 Raw 块
-          let fallback = @zstd_encoder.compress_as_raw_block(data, config)
-          match fallback {
-            Ok(c) => c
-            Err(_) => Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00])
-          }
-        }
-      }
-    }
+    CompressionMethod::Raw => @zstd_encoder.compress_as_raw_block(data, config)
+    CompressionMethod::RLE => @zstd_encoder.compress_as_rle_block(data, config)
+    CompressionMethod::Compressed => @zstd_encoder.compress_as_compressed_block(data, config)
+  }
+
+  match result {
+    Ok(bytes) => Ok(bytes)
+    Err(e) => Err(e.to_string())
   }
 }
 
@@ -698,34 +651,40 @@ pub fn run_all_compatibility_tests() -> Bool {
 /// 测试基础压缩和解压缩
 fn test_basic_compression() -> Bool {
   let test_data = @encoding/utf8.encode("Hello, MoonBit ZSTD!")
-  
+
   // Test compression
-  let compressed = compress(test_data)
+  let compressed = match compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   if compressed.length() == 0 {
     return false
   }
-  
+
   // Test decompression
   let decompressed = decompress(compressed)
   if decompressed.length() != test_data.length() {
     return false
   }
-  
+
   // Verify data integrity
   for i = 0; i < test_data.length(); i = i + 1 {
     if test_data[i] != decompressed[i] {
       return false
     }
   }
-  
+
   true
 }
 
 /// 测试ZSTD格式检测
 fn test_format_detection() -> Bool {
   let test_data = @encoding/utf8.encode("Hello, World!")
-  let compressed = compress(test_data)
-  
+  let compressed = match compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
+
   // Should detect as valid ZSTD format
   is_zstd_format(compressed)
 }
@@ -733,9 +692,12 @@ fn test_format_detection() -> Bool {
 /// 测试文件分析
 fn test_file_analysis() -> Bool {
   let test_data = @encoding/utf8.encode("Test data for analysis")
-  let compressed = compress(test_data)
+  let compressed = match compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   let analysis = analyze_file(compressed)
-  
+
   // Should be valid
   analysis.is_valid
 }
@@ -743,26 +705,41 @@ fn test_file_analysis() -> Bool {
 /// 测试不同压缩级别
 fn test_compression_levels() -> Bool {
   let test_data = @encoding/utf8.encode("Test data for different compression levels")
-  
+
   // Test all compression levels
-  let fast_compressed = compress_with_level(test_data, CompressionLevel::Fast)
-  let default_compressed = compress_with_level(test_data, CompressionLevel::Default)
-  let better_compressed = compress_with_level(test_data, CompressionLevel::Better)
-  let best_compressed = compress_with_level(test_data, CompressionLevel::Best)
-  
+  let fast_compressed = match compress_with_level(test_data, CompressionLevel::Fast) {
+    Ok(c) => c
+    Err(_) => return false
+  }
+  let default_compressed = match compress_with_level(test_data, CompressionLevel::Default) {
+    Ok(c) => c
+    Err(_) => return false
+  }
+  let better_compressed = match compress_with_level(test_data, CompressionLevel::Better) {
+    Ok(c) => c
+    Err(_) => return false
+  }
+  let best_compressed = match compress_with_level(test_data, CompressionLevel::Best) {
+    Ok(c) => c
+    Err(_) => return false
+  }
+
   // All should be valid
-  fast_compressed.length() > 0 && 
-  default_compressed.length() > 0 && 
-  better_compressed.length() > 0 && 
+  fast_compressed.length() > 0 &&
+  default_compressed.length() > 0 &&
+  better_compressed.length() > 0 &&
   best_compressed.length() > 0
 }
 
 /// 测试空数据处理
 fn test_empty_data() -> Bool {
   let empty_data = Bytes::from_array([])
-  let compressed = compress(empty_data)
+  let compressed = match compress(empty_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   let decompressed = decompress(compressed)
-  
+
   // Should handle empty data gracefully
   decompressed.length() == 0
 }
@@ -779,27 +756,33 @@ fn test_data_integrity() -> Bool {
 /// 测试魔数兼容性
 fn test_magic_number_compliance() -> Bool {
   let test_data = @encoding/utf8.encode("Magic number test")
-  let compressed = compress(test_data)
-  
+  let compressed = match compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
+
   if compressed.length() < 4 {
     return false
   }
-  
+
   // Check magic number (little-endian)
   let magic = (compressed[3].to_int() << 24) |
               (compressed[2].to_int() << 16) |
               (compressed[1].to_int() << 8) |
               compressed[0].to_int()
-  
+
   magic == @zstd_core.ZSTD_MAGIC_NUMBER_INT
 }
 
 /// 测试帧头格式兼容性
 fn test_frame_header_compliance() -> Bool {
   let test_data = @encoding/utf8.encode("Frame header test")
-  let compressed = compress(test_data)
+  let compressed = match compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   let analysis = analyze_file(compressed)
-  
+
   // Should have valid frame header
   analysis.is_valid && analysis.magic_number == @zstd_core.ZSTD_MAGIC_NUMBER
 }
@@ -823,9 +806,12 @@ fn test_large_data_handling() -> Bool {
   }
   
   let test_data = Bytes::from_array(large_data)
-  let compressed = compress(test_data)
+  let compressed = match compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   let decompressed = decompress(compressed)
-  
+
   // Should handle large data correctly
   decompressed.length() == test_data.length()
 }
@@ -837,11 +823,14 @@ fn test_rle_optimization() -> Bool {
   for _i = 0; _i < 100; _i = _i + 1 {
     repeated_data.push(0x41)  // 'A'
   }
-  
+
   let test_data = Bytes::from_array(repeated_data)
-  let compressed = compress(test_data)
+  let compressed = match compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
   let decompressed = decompress(compressed)
-  
+
   // Should compress and decompress repeated data correctly
   decompressed.length() == test_data.length()
 }

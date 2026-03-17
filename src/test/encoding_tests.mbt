@@ -30,7 +30,10 @@ pub fn test_encode_of() -> Bool {
   println("\n=== Offset 编码测试 ===")
   for i = 0; i < test_cases.length(); i = i + 1 {
     let (offset, expected_code, expected_extra) = test_cases[i]
-    let (code, extra) = @zstd_entropy.encode_of(offset)
+    let (code, extra) = match @zstd_entropy.encode_of(offset) {
+      Ok(result) => result
+      Err(e) => { println("❌ encode_of failed: \{e}"); return false }
+    }
     let decoded = @zstd_entropy.decode_of(code, extra)
     
     println("OF=\{offset}: code=\{code} (期望:\{expected_code}), extra=\{extra} (期望:\{expected_extra}), 解码=\{decoded}")
@@ -132,7 +135,10 @@ pub fn diagnose_of_base_table() -> Unit {
   println("差异: \{@zstd_entropy.of_base[5] - 32}")
   
   println("\n对于 OF=45 的编码:")
-  let (code, extra) = @zstd_entropy.encode_of(45)
+  let (code, extra) = match @zstd_entropy.encode_of(45) {
+    Ok(result) => result
+    Err(e) => { println("❌ encode_of failed: \{e}"); return }
+  }
   println("当前: code=\{code}, extra=\{extra}")
   println("of_base[\{code}] = \{@zstd_entropy.of_base[code]}")
   println("计算: \{@zstd_entropy.of_base[code]} + \{extra} = \{@zstd_entropy.of_base[code] + extra}")
@@ -162,7 +168,10 @@ pub fn test_sequence_roundtrip() -> Bool {
     // 编码
     let (ll_code, ll_extra) = @zstd_entropy.encode_ll(ll)
     let (ml_code, ml_extra) = @zstd_entropy.encode_ml(ml)
-    let (of_code, of_extra) = @zstd_entropy.encode_of(of)
+    let (of_code, of_extra) = match @zstd_entropy.encode_of(of) {
+      Ok(result) => result
+      Err(e) => { println("❌ encode_of failed: \{e}"); return false }
+    }
     
     println("  编码: LL(\{ll_code}, \{ll_extra}), ML(\{ml_code}, \{ml_extra}), OF(\{of_code}, \{of_extra})")
     
@@ -202,7 +211,13 @@ pub fn save_compressed_for_official_tool() -> Unit {
   println("内容: \{text} (重复 10 次)")
   
   // 压缩
-  let compressed = @zstd.compress(data)
+  let compressed = match @zstd.compress(data) {
+    Ok(c) => c
+    Err(e) => {
+      println("压缩失败: \{e}")
+      return
+    }
+  }
   println("压缩后: \{compressed.length()} bytes")
   
   // 输出十六进制（方便保存到文件）

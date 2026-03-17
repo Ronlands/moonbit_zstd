@@ -86,7 +86,10 @@ fn run_compression_compatibility_tests() -> Unit {
   for i = 0; i < tests.length(); i = i + 1 {
     let (name, data) = tests[i]
     println("  " + name + " ... ")
-    let compressed = @zstd.compress(data)
+    let compressed = match @zstd.compress(data) {
+      Ok(c) => c
+      Err(_) => { println("压缩失败"); continue }
+    }
     let decompressed = @zstd.decompress(compressed)
     if data == decompressed {
       println("兼容")
