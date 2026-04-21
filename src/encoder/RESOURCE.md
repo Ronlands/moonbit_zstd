@@ -3,8 +3,15 @@
 ## 1. 模块定位
 
 - 路径：`src/encoder`
-- 主文件：`src/encoder/compressor.mbt`
+- 关键文件：`compressor.mbt`、`compressor_streaming.mbt`、`compressor_dictionary.mbt`、`compressor_entropy.mbt`
 - 职责：压缩配置、LZ77 匹配、帧头/块头写出、带字典压缩。
+
+## 1.1 文件拆分说明
+
+- `compressor.mbt`：保留基础压缩、块构建、FSE/Huffman 编码、普通压缩入口。
+- `compressor_streaming.mbt`：承载流式压缩状态机、统计快照和流式块写出逻辑。
+- `compressor_dictionary.mbt`：承载字典匹配、历史窗口预加载和带字典帧写出逻辑。
+- `compressor_entropy.mbt`：承载字面量编码、压缩块负载拼装、单序列编码与 FSE 序列编码辅助。
 
 ## 2. 核心类型索引
 

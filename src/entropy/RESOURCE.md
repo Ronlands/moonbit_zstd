@@ -3,8 +3,15 @@
 ## 1. 模块定位
 
 - 路径：`src/entropy`
-- 关键文件：`fse.mbt`、`huffman.mbt`、`sequence_tables.mbt`
+- 关键文件：`fse.mbt`、`fse_codec.mbt`、`huffman.mbt`、`huffman_codec.mbt`、`sequence_tables.mbt`
 - 职责：FSE、Huffman 和 ZSTD 序列字段映射表。
+
+## 1.1 文件拆分说明
+
+- `fse.mbt`：保留基础 FSE 类型、表头解析、基础解码入口与只读包装函数。
+- `fse_codec.mbt`：承载 FSE 位流、编码表、tANS 编码状态机与完整序列解码实现。
+- `huffman.mbt`：保留基础 Huffman 类型、权重解析、基础解码入口与轻量测试。
+- `huffman_codec.mbt`：承载 Huffman 编码表、位流、完整编码器与反向流解码实现。
 
 ## 2. 核心类型索引
 

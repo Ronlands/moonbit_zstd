@@ -34,9 +34,17 @@
 - `moonbit_zstd.mbt`：源码根说明文件。
 - `api/zstd.mbt`：对外 API 入口。
 - `encoder/compressor.mbt`：压缩主实现。
+- `encoder/compressor_streaming.mbt`：流式压缩状态机与统计输出。
+- `encoder/compressor_dictionary.mbt`：带字典压缩与历史窗口匹配辅助。
+- `encoder/compressor_entropy.mbt`：压缩块负载构建、字面量编码与 FSE/Huffman 编码辅助。
 - `decoder/decompressor.mbt`：解压主实现。
 - `decoder/frame.mbt`：帧头解析。
 - `decoder/analyzer.mbt`：文件结构分析。
+- `decoder/analyzer_structure.mbt`：分析器结构解析与块验证辅助。
+- `decoder/analyzer_heuristics.mbt`：分析器启发式错误检测与完整性分析。
+- `decoder/block_sequences.mbt`：块内序列解析、FSE 序列解码与序列执行。
+- `entropy/fse_codec.mbt`：FSE 编码表、位流与完整 tANS 编码/解码辅助。
+- `entropy/huffman_codec.mbt`：Huffman 编码表、位流与完整 Huffman codec 实现。
 - `entropy/sequence_tables.mbt`：序列编码表。
 
 ## 5. 当前源码根对象说明

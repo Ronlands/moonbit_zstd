@@ -3,8 +3,16 @@
 ## 1. 模块定位
 
 - 路径：`src/decoder`
-- 关键文件：`frame.mbt`、`decompressor.mbt`、`block.mbt`、`analyzer.mbt`、`dictionary.mbt`
+- 关键文件：`frame.mbt`、`decompressor.mbt`、`block.mbt`、`block_sequences.mbt`、`analyzer.mbt`、`analyzer_structure.mbt`、`analyzer_heuristics.mbt`、`dictionary.mbt`
 - 职责：帧头解析、块解压、滑动窗口管理、文件分析、字典解压支持。
+
+## 1.1 文件拆分说明
+
+- `analyzer.mbt`：保留分析器入口、结果对象和公开包装函数。
+- `analyzer_structure.mbt`：承载帧头解析、块结构分析、字面量/序列区结构校验。
+- `analyzer_heuristics.mbt`：承载启发式错误检测、完整性分析和错误样本模式识别。
+- `block.mbt`：保留块头解析、字面量区解压、块级上下文与主块解压入口。
+- `block_sequences.mbt`：承载序列区解析、一序列兼容处理、FSE 序列解码与序列执行。
 
 ## 2. 核心类型索引
 
@@ -105,6 +113,8 @@
 ## 7. 分析器口径
 
 - 文件：`analyzer.mbt`
+- 结构辅助：`analyzer_structure.mbt`
+- 启发式辅助：`analyzer_heuristics.mbt`
 - 支持识别 `Skippable Frame`。
 - 可跳过帧规则：
   - magic 处于 `0x184D2A50 ~ 0x184D2A5F`
