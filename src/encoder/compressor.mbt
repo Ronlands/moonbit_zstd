@@ -6,8 +6,8 @@ let hash_table_size : Int = 65536
 /// Maximum block size (128KB)
 let max_block_size : Int = 131072
 
-/// Streaming block size (64KB)
-let streaming_block_size : Int = 65536
+/// Streaming block size (128KB)
+let streaming_block_size : Int = max_block_size
 
 /// 单序列直写路径当前变长编码可承载的最大基础值。
 ///
@@ -245,6 +245,15 @@ fn append_bytes_to_output(output: Array[Byte], data: Bytes) -> Unit {
   }
 }
 
+/// 把字节数组复制成 `Bytes`。
+fn bytes_from_byte_array(data: Array[Byte]) -> Bytes {
+  let copied: Array[Byte] = []
+  for i = 0; i < data.length(); i = i + 1 {
+    copied.push(data[i])
+  }
+  Bytes::from_array(copied)
+}
+
 /// 增量更新 checksum。
 ///
 /// 这里复用与 `calculate_checksum` 相同的按字节更新逻辑，
@@ -371,80 +380,46 @@ fn take_pending_prefix(compressor: StreamingCompressor, size: Int) -> Bytes {
   Bytes::from_array(block_bytes)
 }
 
-/// 基于同帧历史窗口尝试构建压缩块负载。
+/// 基于同帧历史窗口生成真正的增量 LZ77 序列。
 ///
-/// 这里不再直接复用通用的字典序列生成器，而是使用更保守的
-/// “历史窗口前缀复用”策略：
-/// - 只寻找当前块开头在历史窗口中的最长匹配
-/// - 成功后用单序列直写编码
-/// - 剩余数据作为尾部 literals 追加
+/// 这里直接复用“预加载字典 + 当前位置继续建哈希”的序列生成逻辑：
+/// - `history_window` 作为可回溯历史前缀
+/// - `block_data` 在扫描过程中持续加入哈希表
+/// - 因此后续匹配既可以命中历史窗口，也可以命中当前块前面已经处理过的数据
 ///
-/// 这样能显著降低流式路径和复杂 FSE 状态机的耦合面，
-/// 优先保证跨 chunk 历史继承的稳定性与可解码性。
+/// 这比“只找一个最长前缀匹配再机械拆分”更接近真正的增量 LZ77。
 fn build_streaming_compressed_payload_with_history(
   block_data: Bytes,
   config: CompressionConfig,
   history_window: Array[Byte]
 ) -> Result[Bytes, @zstd_core.ZSTDError] {
-  let window_size = 1 << config.window_log
   if history_window.length() < config.min_match || block_data.length() < config.min_match {
     return Err(@zstd_core.message_error("History too short for streaming reuse"))
   }
 
-  let history_len = history_window.length()
-  let search_start = (history_len - streaming_block_size).max(0)
-  let mut best_match_pos = -1
-  let mut best_match_length = 0
+  let history = bytes_from_byte_array(history_window)
+  let hash_table = Array::make(hash_table_size, -1)
+  preload_streaming_history_to_hash_table(history, hash_table)
+  let window_size = 1 << config.window_log
 
-  for dict_pos = search_start; dict_pos + config.min_match <= history_len; dict_pos = dict_pos + 1 {
-    let offset = history_len - dict_pos
-    if offset <= 0 || offset > window_size {
-      continue
-    }
+  match generate_sequences_with_dict(block_data, history, hash_table, config.min_match, window_size) {
+    Ok((sequences, literals)) => {
+      if sequences.length() == 0 || !should_use_compressed_block(block_data, sequences, literals) {
+        return Err(@zstd_core.message_error("No compression benefit from history"))
+      }
 
-    let max_match = (history_len - dict_pos).min(block_data.length()).min(131072)
-    let mut length = 0
-    while length < max_match && history_window[dict_pos + length] == block_data[length] {
-      length = length + 1
-    }
-
-    if length > best_match_length || (length == best_match_length && dict_pos > best_match_pos) {
-      best_match_length = length
-      best_match_pos = dict_pos
-    }
-  }
-
-  if best_match_length < config.min_match || best_match_pos < 0 {
-    return Err(@zstd_core.message_error("No reusable history prefix found"))
-  }
-
-  let offset = history_len - best_match_pos
-  if offset <= 0 || offset > window_size {
-    return Err(@zstd_core.message_error("Reusable history offset exceeds window"))
-  }
-
-  let sequences = [
-    LZSequence::{
-      literal_length: 0,
-      match_length: best_match_length,
-      offset: offset,
-    }
-  ]
-  let literals: Array[Byte] = []
-  for i = best_match_length; i < block_data.length(); i = i + 1 {
-    literals.push(block_data[i])
-  }
-
-  let payload = build_predefined_compressed_block_payload_from_sequences(sequences, literals)
-  match payload {
-    Ok(bytes) => {
-      if bytes.length() < block_data.length() {
-        Ok(bytes)
-      } else {
-        Err(@zstd_core.message_error("History payload not smaller than raw block"))
+      match build_predefined_compressed_block_payload_from_sequences(sequences, literals) {
+        Ok(bytes) => {
+          if bytes.length() < block_data.length() {
+            Ok(bytes)
+          } else {
+            Err(@zstd_core.message_error("History payload not smaller than raw block"))
+          }
+        }
+        Err(e) => Err(e)
       }
     }
-    Err(e) => Err(e)
+    Err(e) => Err(@zstd_core.message_error(e))
   }
 }
 
@@ -966,7 +941,7 @@ fn resolve_sequence_offset_for_direct_encoding(seq: LZSequence) -> Int {
   }
 }
 
-/// 判断单序列是否能被当前直写编码稳定承载。
+/// 判断单序列是否能被当前旧直写编码稳定承载。
 fn can_encode_single_sequence_direct(seq: LZSequence) -> Bool {
   let ll = seq.literal_length
   let ml_minus_3 = seq.match_length - 3
@@ -981,76 +956,14 @@ fn can_encode_single_sequence_direct(seq: LZSequence) -> Bool {
   of_minus_1 >= 0 && of_minus_1 <= single_sequence_varint_max
 }
 
-/// 将超出单序列直写上限的单个序列切分为多个序列。
+/// 标准一序列编码。
 ///
-/// 规则：
-/// - 第一段保留原始 `literal_length`
-/// - 后续段 `literal_length = 0`
-/// - `offset` 保持一致
-/// - 每段 `match_length >= 3`
-///
-/// 这样可以把原本必须走单序列直写的情况，转换为多序列预定义 FSE 路径。
-fn split_large_single_sequence(seq: LZSequence) -> Result[Array[LZSequence], @zstd_core.ZSTDError] {
-  if can_encode_single_sequence_direct(seq) {
-    return Ok([seq])
-  }
-
-  if seq.match_length < 6 {
-    return Err(@zstd_core.message_error("Single sequence exceeds direct encoding range and cannot be safely split"))
-  }
-
-  let max_chunk_match_length = single_sequence_varint_max + 3
-  let chunk_lengths: Array[Int] = []
-  let mut remaining_match = seq.match_length
-
-  while remaining_match > max_chunk_match_length {
-    chunk_lengths.push(max_chunk_match_length)
-    remaining_match = remaining_match - max_chunk_match_length
-  }
-
-  if remaining_match >= 3 {
-    chunk_lengths.push(remaining_match)
-  } else {
-    if chunk_lengths.length() == 0 {
-      return Err(@zstd_core.message_error("Unable to split single sequence into valid chunks"))
-    }
-    let last_index = chunk_lengths.length() - 1
-    let borrow = 3 - remaining_match
-    let previous_chunk = chunk_lengths[last_index]
-    if previous_chunk - borrow < 3 {
-      return Err(@zstd_core.message_error("Unable to rebalance split single sequence chunks"))
-    }
-    chunk_lengths[last_index] = previous_chunk - borrow
-    chunk_lengths.push(3)
-  }
-
-  let split_sequences: Array[LZSequence] = []
-  for i = 0; i < chunk_lengths.length(); i = i + 1 {
-    split_sequences.push(LZSequence::{
-      literal_length: if i == 0 { seq.literal_length } else { 0 },
-      match_length: chunk_lengths[i],
-      offset: seq.offset,
-    })
-  }
-
-  Ok(split_sequences)
-}
-
-/// 为块编码准备序列。
-///
-/// 当前只在一个场景下做转换：
-/// - 原始序列数为 1
-/// - 该序列超出单序列直写编码能力
-///
-/// 转换后让块走多序列路径，从而继续使用预定义 FSE 表编码。
-fn normalize_sequences_for_block_encoding(
-  sequences: Array[LZSequence]
-) -> Result[Array[LZSequence], @zstd_core.ZSTDError] {
-  if sequences.length() != 1 {
-    return Ok(sequences)
-  }
-
-  split_large_single_sequence(sequences[0])
+/// RFC 8878 并没有“单序列不写 modes byte”的规则，
+/// 因此当旧直写表示力不够时，编码侧应回退到标准序列段表示。
+/// 这里使用最保守的 `Predefined_Mode`。
+fn encode_single_sequence_standard(seq: LZSequence, output: Array[Byte]) -> Result[Unit, @zstd_core.ZSTDError] {
+  output.push(0x00)
+  encode_sequences_predefined_fse([seq], output)
 }
 
 /// 从序列和字面量构建压缩块负载。
@@ -1067,34 +980,37 @@ fn build_compressed_block_payload_from_sequences(
     return Err(@zstd_core.message_error("No compression benefit - fallback to raw block"))
   }
 
-  let normalized_sequences = match normalize_sequences_for_block_encoding(sequences) {
-    Ok(v) => v
-    Err(e) => return Err(e)
-  }
-
   let output: Array[Byte] = []
 
   encode_literals_section(literals, output)
 
-  let num_sequences = normalized_sequences.length()
+  let num_sequences = sequences.length()
   write_sequence_count(output, num_sequences)
 
   if num_sequences > 0 {
     if num_sequences == 1 {
-      encode_single_sequence_direct(normalized_sequences[0], output)
+      let seq = sequences[0]
+      if can_encode_single_sequence_direct(seq) {
+        encode_single_sequence_direct(seq, output)
+      } else {
+        match encode_single_sequence_standard(seq, output) {
+          Ok(_) => ()
+          Err(e) => return Err(e)
+        }
+      }
     } else {
-      let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(normalized_sequences)
+      let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(sequences)
 
       // Decide whether to use compressed FSE mode
       if should_use_compressed_fse(ll_symbols, ml_symbols, of_symbols) {
         output.push(0x01)  // Compressed mode flag
-        match encode_sequences_compressed_fse(normalized_sequences, output) {
+        match encode_sequences_compressed_fse(sequences, output) {
           Ok(_) => ()
           Err(e) => return Err(e)
         }
       } else {
         output.push(0x00)  // Predefined mode
-        match encode_sequences_predefined_fse(normalized_sequences, output) {
+        match encode_sequences_predefined_fse(sequences, output) {
           Ok(_) => ()
           Err(e) => return Err(e)
         }
@@ -1120,23 +1036,26 @@ fn build_predefined_compressed_block_payload_from_sequences(
     return Err(@zstd_core.message_error("No compression benefit - fallback to raw block"))
   }
 
-  let normalized_sequences = match normalize_sequences_for_block_encoding(sequences) {
-    Ok(v) => v
-    Err(e) => return Err(e)
-  }
-
   let output: Array[Byte] = []
   encode_literals_section(literals, output)
 
-  let num_sequences = normalized_sequences.length()
+  let num_sequences = sequences.length()
   write_sequence_count(output, num_sequences)
 
   if num_sequences > 0 {
     if num_sequences == 1 {
-      encode_single_sequence_direct(normalized_sequences[0], output)
+      let seq = sequences[0]
+      if can_encode_single_sequence_direct(seq) {
+        encode_single_sequence_direct(seq, output)
+      } else {
+        match encode_single_sequence_standard(seq, output) {
+          Ok(_) => ()
+          Err(e) => return Err(e)
+        }
+      }
     } else {
       output.push(0x00)
-      match encode_sequences_predefined_fse(normalized_sequences, output) {
+      match encode_sequences_predefined_fse(sequences, output) {
         Ok(_) => ()
         Err(e) => return Err(e)
       }
@@ -1599,9 +1518,27 @@ fn preload_dictionary_to_hash_table(dictionary: Bytes, hash_table: Array[Int]) -
   let mut pos = 0
   while pos + 3 < dict_len {
     let hash = hash_bytes(dictionary, pos)
-    // 使用负数偏移表示字典位置：-(pos + 1)
-    // 这样可以与数据位置（非负）区分
-    hash_table[hash] = -(pos + 1)
+    // 使用负数偏移表示字典位置：-(pos + 2)
+    // 其中 -1 保留给“空槽位”，避免字典位置 0 与空值冲突。
+    hash_table[hash] = -(pos + 2)
+    pos = pos + 1
+  }
+}
+
+/// 预加载流式历史窗口到哈希表。
+///
+/// 与普通字典预加载不同，这里保留每个 hash 的“最早出现位置”，
+/// 这样在高度重复的历史窗口里能优先命中更长的可复用前缀，
+/// 避免退化成大量很短的 8-byte 序列。
+fn preload_streaming_history_to_hash_table(history: Bytes, hash_table: Array[Int]) -> Unit {
+  let history_len = history.length()
+
+  let mut pos = 0
+  while pos + 3 < history_len {
+    let hash = hash_bytes(history, pos)
+    if hash_table[hash] == -1 {
+      hash_table[hash] = -(pos + 2)
+    }
     pos = pos + 1
   }
 }
@@ -1694,7 +1631,7 @@ fn find_match_with_dict(
   // 区分字典匹配和数据匹配
   if match_pos < 0 {
     // 字典匹配（负数位置）
-    let dict_pos = -match_pos - 1
+    let dict_pos = -match_pos - 2
     let match_length = calculate_match_length_from_dict(data, dictionary, pos, dict_pos)
 
     if match_length >= min_match {

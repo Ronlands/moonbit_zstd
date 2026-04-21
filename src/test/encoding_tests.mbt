@@ -17,7 +17,8 @@ fn to_hex(value: Int) -> String {
 
 /// 测试 Offset 编码
 pub fn test_encode_of() -> Bool {
-  // 测试几个关键值 (官方表: of_base = [0,1,1,5,0xD,0x1D...])
+  // 测试几个关键值。
+  // 注意：这里验证的是最终 Offset，不是 RFC 文中的 Offset_Value。
   let test_cases = [
     (1, 2, 0),      // OF=1  → code=2, extra=0, of_base[2]=1, 1+0=1
     (2, 2, 1),      // OF=2  → code=2, extra=1, of_base[2]=1, 1+1=2
@@ -25,6 +26,9 @@ pub fn test_encode_of() -> Bool {
     (8, 3, 3),      // OF=8  → code=3, extra=3, of_base[3]=5, 5+3=8
     (16, 4, 3),     // OF=16 → code=4, extra=3, of_base[4]=0xD(13), 13+3=16
     (45, 5, 16),    // OF=45 → code=5, extra=16, of_base[5]=0x1D(29), 29+16=45
+    (29, 5, 0),     // OF=29 → code=5, extra=0, code 5 的最终 Offset 基线就是 29
+    (60, 5, 31),    // OF=60 → code=5, extra=31, code 5 覆盖 29-60
+    (61, 6, 0),     // OF=61 → code=6, extra=0, code 6 从 61 开始
   ]
   
   println("\n=== Offset 编码测试 ===")
@@ -110,16 +114,16 @@ pub fn test_encode_ml() -> Bool {
 /// 详细诊断：打印 OF base 表
 pub fn diagnose_of_base_table() -> Unit {
   println("\n=== OF Base Table 诊断 ===")
-  println("ZSTD 标准 Offset 编码:")
-  println("Code  Base   Bits   Range")
+  println("ZSTD RFC Offset 编码（最终 Offset 口径）:")
+  println("Code  Base   Bits   Final Range")
   println("--------------------------------")
-  println("0     1      0      1")
-  println("1     2      1      2-3")
-  println("2     4      2      4-7")
-  println("3     8      3      8-15")
-  println("4     16     4      16-31")
-  println("5     29     5      29-60   ← OF=45 应该在这里")
-  println("6     64     6      64-127")
+  println("0     0      0      repeat sentinel")
+  println("1     1      1      repeat codes")
+  println("2     1      2      1-4")
+  println("3     5      3      5-12")
+  println("4     13     4      13-28")
+  println("5     29     5      29-60   ← OF=45 在这里")
+  println("6     61     6      61-124")
   
   println("\n当前实现的 of_base 表 (前10个):")
   for i = 0; i < 10; i = i + 1 {
@@ -129,10 +133,10 @@ pub fn diagnose_of_base_table() -> Unit {
     println("Code \{i}: Base=\{base} (0x\{to_hex(base)}), Bits=\{bits}, Range=\{base}-\{range_end}")
   }
   
-  println("\n问题分析:")
+  println("\nRFC 口径说明:")
   println("of_base[5] = \{@zstd_entropy.of_base[5]} (0x1D = 29)")
-  println("标准应该是: 32 (0x20)")
-  println("差异: \{@zstd_entropy.of_base[5] - 32}")
+  println("RFC 里的 32 指的是 Offset_Value 起点，不是最终 Offset 起点")
+  println("最终 Offset = Offset_Value - 3，所以 code 5 的最终基线是 29")
   
   println("\n对于 OF=45 的编码:")
   let (code, extra) = match @zstd_entropy.encode_of(45) {

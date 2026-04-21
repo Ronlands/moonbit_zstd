@@ -707,41 +707,83 @@ fn parse_sequences_section(
   size: Int,
   context: BlockContext
 ) -> Result[Array[@zstd_core.Sequence], String] {
-  // Parse sequence header
-  let header_result = parse_sequence_header(data, offset)
-  match header_result {
+  let count_result = parse_sequence_count(data, offset)
+  match count_result {
     Err(e) => Err(e)
-    Ok((header, header_size)) => {
-      // 深度验证：零序列多余数据检测
-      if header.num_sequences == 0 {
-        // 零序列时，序列部分应该只有头部，不应有额外数据
-        let expected_size = header_size
-        if size > expected_size {
-          let extra_bytes = size - expected_size
-          return Err("Extraneous zero sequence data: found " + extra_bytes.to_string() + 
-                    " extra bytes after zero sequence header")
+    Ok((num_sequences, _count_size)) => {
+      if num_sequences == 1 {
+        match decode_legacy_single_sequence_section(data, offset, size) {
+          Ok(seqs) => Ok(seqs)
+          Err(_) => decode_standard_sequence_section(data, offset, size, context)
         }
-        return Ok([])
-      }
-      
-      // 验证序列数据大小合理性
-      if size < header_size {
-        return Err("Insufficient sequence data: block size smaller than header")
-      }
-      
-      // Decode sequences (full implementation with FSE)
-      // Pass the sequences section end so the FSE decoder doesn't read beyond the block boundary
-      let result = decode_sequences_simple(data, offset + header_size, header, offset + size, context)
-      match result {
-        Ok(seqs) => Ok(seqs)
-        Err(e) => Err(e)
+      } else {
+        decode_standard_sequence_section(data, offset, size, context)
       }
     }
   }
 }
 
-/// Parse sequence header
-fn parse_sequence_header(data: Bytes, offset: Int) -> Result[(@zstd_core.SequencesSectionInfo, Int), String] {
+/// Parse sequence count only.
+fn parse_sequence_count(data: Bytes, offset: Int) -> Result[(Int, Int), String] {
+  if offset >= data.length() {
+    return Err("Insufficient sequence header data")
+  }
+
+  let first_byte = data[offset].to_int()
+  let mut current_offset = offset + 1
+
+  let num_sequences = if first_byte < 128 {
+    first_byte
+  } else if first_byte == 255 {
+    if current_offset + 1 >= data.length() {
+      return Err("Insufficient sequence count data")
+    }
+    let count = data[current_offset].to_int() | (data[current_offset + 1].to_int() << 8)
+    current_offset = current_offset + 2
+    count + 0x7F00
+  } else {
+    if current_offset >= data.length() {
+      return Err("Insufficient sequence count data")
+    }
+    let count = ((first_byte - 128) << 8) + data[current_offset].to_int()
+    current_offset = current_offset + 1
+    count
+  }
+
+  Ok((num_sequences, current_offset - offset))
+}
+
+/// Decode standard RFC sequence section.
+fn decode_standard_sequence_section(
+  data: Bytes,
+  offset: Int,
+  size: Int,
+  context: BlockContext
+) -> Result[Array[@zstd_core.Sequence], String] {
+  let standard_header_result = parse_sequence_header_standard(data, offset)
+  match standard_header_result {
+    Ok((header, header_size)) => {
+      if size < header_size {
+        return Err("Insufficient sequence data: block size smaller than header")
+      }
+
+      if header.num_sequences == 0 {
+        if size > header_size {
+          let extra_bytes = size - header_size
+          return Err("Extraneous zero sequence data: found " + extra_bytes.to_string() +
+                    " extra bytes after zero sequence header")
+        }
+        return Ok([])
+      }
+
+      decode_sequences_simple(data, offset + header_size, header, offset + size, context)
+    }
+    Err(e) => Err(e)
+  }
+}
+
+/// Parse sequence header using the standard RFC layout.
+fn parse_sequence_header_standard(data: Bytes, offset: Int) -> Result[(@zstd_core.SequencesSectionInfo, Int), String] {
   if offset >= data.length() {
     return Err("Insufficient sequence header data")
   }
@@ -768,17 +810,14 @@ fn parse_sequence_header(data: Bytes, offset: Int) -> Result[(@zstd_core.Sequenc
     count
   }
 
-  // Parse sequence modes (RFC 8878: no modes byte when num_sequences == 1)
-  if num_sequences == 1 {
-    // Single sequence: no compression modes byte, return header size
-    let header_size = current_offset - offset
+  if num_sequences == 0 {
     let info = @zstd_core.make_sequences_section_info(
       num_sequences,
       @zstd_core.predefined_mode(),
       @zstd_core.predefined_mode(),
       @zstd_core.predefined_mode()
     )
-    return Ok((info, header_size))
+    return Ok((info, current_offset - offset))
   }
 
   if current_offset >= data.length() {
@@ -821,8 +860,77 @@ fn parse_sequence_header(data: Bytes, offset: Int) -> Result[(@zstd_core.Sequenc
   Ok((info, current_offset - offset))
 }
 
+/// Parse legacy sequence header.
+///
+/// 历史实现对 `num_sequences == 1` 使用了非 RFC 的“无 modes byte 直写”格式。
+/// 这里只用于兼容旧数据。
+fn parse_sequence_header_legacy(data: Bytes, offset: Int) -> Result[(@zstd_core.SequencesSectionInfo, Int), String] {
+  if offset >= data.length() {
+    return Err("Insufficient legacy sequence header data")
+  }
+
+  let first_byte = data[offset].to_int()
+  let mut current_offset = offset + 1
+
+  let num_sequences = if first_byte < 128 {
+    first_byte
+  } else if first_byte == 255 {
+    if current_offset + 1 >= data.length() {
+      return Err("Insufficient legacy sequence count data")
+    }
+    let count = data[current_offset].to_int() | (data[current_offset + 1].to_int() << 8)
+    current_offset = current_offset + 2
+    count + 0x7F00
+  } else {
+    if current_offset >= data.length() {
+      return Err("Insufficient legacy sequence count data")
+    }
+    let count = ((first_byte - 128) << 8) + data[current_offset].to_int()
+    current_offset = current_offset + 1
+    count
+  }
+
+  if num_sequences != 1 {
+    return Err("Legacy single-sequence format only supports one sequence")
+  }
+
+  let info = @zstd_core.make_sequences_section_info(
+    1,
+    @zstd_core.predefined_mode(),
+    @zstd_core.predefined_mode(),
+    @zstd_core.predefined_mode()
+  )
+  Ok((info, current_offset - offset))
+}
+
+/// Decode legacy single-sequence section.
+fn decode_legacy_single_sequence_section(
+  data: Bytes,
+  offset: Int,
+  size: Int
+) -> Result[Array[@zstd_core.Sequence], String] {
+  let header_result = parse_sequence_header_legacy(data, offset)
+  match header_result {
+    Ok((_header, header_size)) => {
+      if size < header_size {
+        return Err("Insufficient legacy sequence data: block size smaller than header")
+      }
+      match decode_single_sequence_direct(data, offset + header_size) {
+        Ok((seqs, consumed_size)) => {
+          if header_size + consumed_size != size {
+            return Err("Legacy single-sequence payload size mismatch")
+          }
+          Ok(seqs)
+        }
+        Err(e) => Err(e)
+      }
+    }
+    Err(e) => Err(e)
+  }
+}
+
 /// Decode single sequence directly (RFC 8878 Section 3.1.1.3.2.2)
-fn decode_single_sequence_direct(data: Bytes, offset: Int) -> Result[Array[@zstd_core.Sequence], String] {
+fn decode_single_sequence_direct(data: Bytes, offset: Int) -> Result[(Array[@zstd_core.Sequence], Int), String] {
   let mut pos = offset
 
   // Read Literal_Length (variable length encoding)
@@ -868,13 +976,18 @@ fn decode_single_sequence_direct(data: Bytes, offset: Int) -> Result[Array[@zstd
   if pos >= data.length() { return Err("Insufficient data for ML") }
   let ml_byte = data[pos].to_int()
   let match_length = if ml_byte < 128 {
+    pos = pos + 1
     ml_byte + 3
   } else if ml_byte < 255 {
     if pos + 1 >= data.length() { return Err("Insufficient data for ML") }
-    ((ml_byte - 128) << 8) + data[pos + 1].to_int() + 3
+    let value = ((ml_byte - 128) << 8) + data[pos + 1].to_int() + 3
+    pos = pos + 2
+    value
   } else {
     if pos + 2 >= data.length() { return Err("Insufficient data for ML") }
-    (data[pos + 1].to_int() | (data[pos + 2].to_int() << 8)) + 0x7F03
+    let value = (data[pos + 1].to_int() | (data[pos + 2].to_int() << 8)) + 0x7F03
+    pos = pos + 3
+    value
   }
   if match_length < 3 || match_length >= max_value {
     return Err("ML out of bounds")
@@ -889,7 +1002,7 @@ fn decode_single_sequence_direct(data: Bytes, offset: Int) -> Result[Array[@zstd
     return Err("Integer overflow: LL + ML + OF exceeds Int max")
   }
 
-  Ok([@zstd_core.make_sequence(literal_length, match_length, offset_value)])
+  Ok(([@zstd_core.make_sequence(literal_length, match_length, offset_value)], pos - offset))
 }
 
 /// Decode sequences using FSE
@@ -902,11 +1015,6 @@ fn decode_sequences_simple(
 ) -> Result[Array[@zstd_core.Sequence], String] {
   if header.num_sequences == 0 {
     return Ok([])
-  }
-
-  // RFC 8878: When num_sequences == 1, encode directly without FSE
-  if header.num_sequences == 1 {
-    return decode_single_sequence_direct(data, offset)
   }
 
   let current_offset = offset

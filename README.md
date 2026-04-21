@@ -130,9 +130,11 @@ let compressed = part1 + part2 + tail
 - 当前是最小可用版流式压缩器。
 - 支持 `write / flush / finish / reset` 生命周期。
 - 支持基于同帧历史窗口的跨 chunk LZ77 继承。
-- 当前流式路径维持 `64KB` 自动落块粒度。
-- 当单序列直写超出当前变长编码上限时，会自动拆成多序列再走预定义 FSE。
-- 当前历史复用优先走“安全前缀复用 + 单序列直写”路径，不是完整通用增量 LZ77 解析器。
+- 当前流式路径已恢复 `128KB` 自动落块粒度。
+- 当前历史复用不再只是“最长前缀机械拆分”，而是基于历史窗口和当前块前缀生成真正的增量 LZ77 序列。
+- 一序列块当前支持两种解码路径：
+  - 旧的仓库自定义直写格式
+  - 标准序列段格式（编码侧在大值场景下优先使用）
 
 ### 3.2 流式统计
 
@@ -174,7 +176,7 @@ match @zstd_dictionary.compress_with_dictionary(data, dict) {
 - `DataIntegrityAnalysis` 当前是启发式分析结果，不是严格统计模型
 - 校验和实现当前为简化版 `XXH32-like`，不是完整官方 `XXH32`
 - 流式压缩帧当前使用非 `single_segment` 头部，不预写 `Frame_Content_Size`
-- 流式压缩器当前按 `64KB` 粒度自动落块，并暴露输入/输出、块类型分布、checksum、history/pending 统计
+- 流式压缩器当前按 `128KB` 粒度自动落块，并暴露输入/输出、块类型分布、checksum、history/pending 统计
 
 ## 项目结构
 

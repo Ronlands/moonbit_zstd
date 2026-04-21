@@ -44,12 +44,14 @@
 ### 4.2 Match Length
 
 - `decode_ml(code, extra_bits) = ml_base[code] + extra_bits`
-- 说明：当前实现中 `ml_base` 已包含最终 `matchLength`，不再额外加 `MINMATCH`。
+- 说明：当前实现中 `ml_base` 已按 RFC 8878 表保存最终 `matchLength` 基线值，不再额外加 `MINMATCH`。
 - `encode_ml(match_length)`：寻找满足 `ml_base[code] <= match_length` 的最大 `code`。
 
 ### 4.3 Offset
 
 - `decode_of(code, extra_bits) = of_base[code] + extra_bits`
+- `of_base` 保存的是最终 `Offset` 基线，不是 RFC 文中的 `Offset_Value`
+- 对 `of_code >= 2`：`of_base[code] = (1 << code) - 3`
 - `encode_of(offset)` 要求 `offset >= 1`
 - 特殊语义：
   - `of_code = 0` 可作为重复偏移相关特殊值

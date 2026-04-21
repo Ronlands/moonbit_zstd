@@ -30,12 +30,12 @@ let ll_bits : Array[Int] = [
 /// Baseline values for Match Length codes (0-52)
 let ml_base : Array[Int] = [
   3,4,5,6,7,8,9,10,         // 0-7: 0 bits
- 11,12,13,14,15,16,17,18,    // 8-15: 0 bits
- 19,20,21,22,23,24,25,26,    // 16-23: 0 bits
- 27,28,29,30,31,32,33,34,    // 24-31: 0 bits
- 35,37,39,41,43,47,51,59,    // 32-39: 1-3 bits
- 67,83,115,171,259,499,995,1987, // 40-47: 4-11 bits
-3751,7925,16331,32763,65531       // 48-52: 12-16 bits
+  11,12,13,14,15,16,17,18,    // 8-15: 0 bits
+  19,20,21,22,23,24,25,26,    // 16-23: 0 bits
+  27,28,29,30,31,32,33,34,    // 24-31: 0 bits
+  35,37,39,41,43,47,51,59,    // 32-39: 1-3 bits
+  67,83,99,131,259,515,1027,2051, // 40-47: 4-11 bits
+ 4099,8195,16387,32771,65539      // 48-52: 12-16 bits
 ]
 
 /// Number of additional bits to read for Match Length codes
@@ -53,9 +53,26 @@ let ml_bits : Array[Int] = [
 // Offset Tables
 // ============================================================================
 
-/// Baseline values for Offset codes (0-31)
-/// 官方 ZSTD 库的 OF_base 表 (zstd_decompress_internal.h line 37-41)
-/// 公式: OF_base[n] = (1 << n) + (1 << n) - 3 (for n >= 2)
+/// Baseline values for Offset codes (0-31).
+///
+/// 这里保存的是“最终 Offset”的基线值，不是 RFC 里的 `Offset_Value`。
+/// RFC 8878 的公式是：
+///
+/// ```text
+/// Offset_Value = (1 << offsetCode) + readNBits(offsetCode)
+/// if (Offset_Value > 3) Offset = Offset_Value - 3
+/// ```
+///
+/// 因此对 `of_code >= 2`，本表记录的是：
+///
+/// ```text
+/// of_base[code] = (1 << code) - 3
+/// ```
+///
+/// 例如：
+/// - `of_code = 5` 时，`Offset_Value` 范围是 `32..63`
+/// - 对应最终 `Offset` 范围是 `29..60`
+/// - 所以 `of_base[5] = 29` 是符合 RFC 的
 pub let of_base : Array[Int] = [
   0,        1,       1,       5,     0xD,     0x1D,     0x3D,     0x7D,
   0xFD,   0x1FD,   0x3FD,   0x7FD,   0xFFD,   0x1FFD,   0x3FFD,   0x7FFD,
@@ -96,8 +113,13 @@ pub fn decode_ml(code: Int, extra_bits: Int) -> Int {
 }
 
 /// Decode Offset from code (FSE symbol).
-/// Returns the raw offset value: 0 for the special repeat sentinel (of_code=0),
-/// 1 or 2 for repeat codes (of_code=1), or the copy distance for direct offsets (of_code>=2).
+///
+/// 返回值语义：
+/// - `0`：特殊 repeat sentinel（`of_code = 0`）
+/// - `1` 或 `2`：repeat code（`of_code = 1`）
+/// - `>= 1` 的直接复制距离：`of_code >= 2`
+///
+/// 注意：这里返回的是最终 `Offset`，不是 RFC 文中的 `Offset_Value`。
 pub fn decode_of(code: Int, extra_bits: Int) -> Int {
   if code < 0 || code >= of_base.length() {
     0
@@ -169,8 +191,13 @@ pub fn encode_ml(match_length: Int) -> (Int, Int) {
   (code, extra_bits)
 }
 
-/// Encode Offset to code (finds the matching code for a given offset value)
-/// Note: offset must be >= 1. Returns error for invalid offsets.
+/// Encode Offset to code.
+///
+/// 输入 `offset` 必须是最终复制距离，而不是 `Offset_Value`。
+/// 例如 `offset = 45` 时：
+/// - 会命中 `of_code = 5`
+/// - 因为 `of_base[5] = 29`
+/// - 额外位 `extra_bits = 16`
 pub fn encode_of(offset: Int) -> Result[(Int, Int), String] {
   if offset < 1 {
     return Err("Invalid offset: must be >= 1")
