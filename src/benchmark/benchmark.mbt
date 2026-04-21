@@ -18,7 +18,7 @@ pub fn run_benchmark(name: String, data: Bytes, level: Int) -> Result[BenchmarkR
 
   match @encoder.compress_data(data, config) {
     Ok(compressed) => {
-      match @decoder.decompress_zstd_data(compressed) {
+      match @zstd_core.result_from_string(@decoder.decompress_zstd_data(compressed)) {
         Ok(_decompressed) => {
           let ratio = data.length().to_double() / compressed.length().to_double()
           Ok(BenchmarkResult::{

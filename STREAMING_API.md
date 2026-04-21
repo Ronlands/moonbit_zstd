@@ -1,263 +1,291 @@
-# ZSTD 流式 API 文档
+# ZSTD 流式与分块 API 说明
 
 ## 概述
 
-moonbit_zstd 提供了高效的流式压缩和解压缩 API，适用于处理大文件和网络流。
+当前仓库已经具备以下与“流式/大数据处理”相关的能力：
 
-## 基本用法
+- 一次性压缩与解压
+- 大于 `128KB` 数据时自动多块压缩
+- 拼接帧解压
+- 带全局输出上限的安全解压
+- 基于滑动窗口上下文的解压辅助接口
+- 带字典压缩与解压
 
-### 一次性压缩/解压缩
+当前仓库 **没有** 完整的“增量式流式压缩器对象”，也没有类似 `write/flush/finalize` 的正式压缩流接口。
 
-```moonbit
-// 压缩
-let data = b"Hello, ZSTD!"
-let compressed = @zstd.compress(data)?
-println("压缩率: \{data.length()}/\{compressed.length()}")
+因此，本文件以“当前真实存在的分块与滑窗能力”为准，而不是描述一个尚未实现的完整流式框架。
 
-// 解压缩
-let decompressed = @zstd.decompress(compressed)?
-```
+## 一次性 API
 
-### 多块压缩（大数据）
-
-对于超过 128KB 的数据，编码器自动使用多块模式：
-
-```moonbit
-let large_data = Bytes::make(1024 * 1024, 0x42)  // 1MB
-let compressed = @zstd.compress(large_data)?
-// 自动分割为多个 128KB 块
-```
-
-## 压缩配置
-
-### 压缩级别
-
-```moonbit
-let config = @compressor.create_config_with_level(5)
-let ctx = @compressor.create_compression_context(config)
-let compressed = @compressor.compress_data(data, config)?
-```
-
-压缩级别范围：1-22
-- 1-3: 快速（默认 3）
-- 4-9: 平衡
-- 10-18: 高压缩率
-- 19-22: 最大压缩率
-
-### 带校验和压缩
-
-```moonbit
-let compressed = @compressor.compress_data_with_checksum(data, config, true)?
-```
-
-## 字典压缩
-
-### 使用预训练字典
-
-```moonbit
-// 创建字典
-let dict_data = b"common patterns..."
-let dict = @dictionary.create_dictionary(dict_data, 0x12345678U)?
-
-// 压缩
-let compressed = @compressor.compress_with_dictionary(data, config, dict)?
-
-// 解压缩
-let decompressed = @decompressor.decompress_with_dictionary(compressed, dict)?
-```
-
-## 错误处理
+### 压缩
 
 ```moonbit
 match @zstd.compress(data) {
-  Ok(compressed) => println("成功: \{compressed.length()} 字节")
-  Err(e) => println("错误: \{e}")
+  Ok(compressed) => println("ok: \{compressed.length()}")
+  Err(e) => println("compress failed: \{e}")
 }
 ```
 
-常见错误：
-- "Invalid magic number": 不是有效的 ZSTD 数据
-- "Truncated frame": 数据不完整
-- "Dictionary mismatch": 字典 ID 不匹配
+可选接口：
 
-## 性能特性
+- `@zstd.compress`
+- `@zstd.compress_with_level_int`
+- `@zstd.compress_with_level`
+- `@zstd.compress_advanced`
 
-### 内存使用
-
-- 压缩器：~256KB（哈希表 + 缓冲区）
-- 解压缩器：~128KB（窗口缓冲区）
-- 字典：额外 64KB-128KB
-
-### 块大小
-
-- 默认块大小：128KB
-- 最大块大小：128KB（RFC 8878 推荐）
-- 小数据（<128KB）：单块压缩
-
-## 高级用法
-
-### 分析压缩数据
+### 解压
 
 ```moonbit
-let info = @analyzer.analyze_frame(compressed)?
-println("块数: \{info.num_blocks}")
-println("原始大小: \{info.decompressed_size}")
+let restored = @zstd.decompress(compressed)
 ```
 
-### 自定义窗口大小
+说明：
+
+- `@zstd.decompress` 是高层便捷接口。
+- 失败时返回空 `Bytes`，不直接暴露错误。
+- 如果需要拿到错误，请使用 decoder 层 `Result` 风格接口。
+
+## 大数据与多块压缩
+
+编码器会在数据超过最大块大小时自动切分为多个块。
+
+- 最大块大小：`131072` 字节，即 `128KB`
+- 对超大输入会自动走多块压缩路径
+
+示例：
 
 ```moonbit
-let config = @compressor.CompressionConfig::{
-  level: 5,
-  window_log: 18,  // 256KB 窗口
-  min_match: 4,
-  search_depth: 24
+let large_data = Bytes::make(1024 * 1024, 0x42)
+match @zstd.compress(large_data) {
+  Ok(compressed) => println("compressed size = \{compressed.length()}")
+  Err(e) => println("compress failed: \{e}")
 }
 ```
 
-## 最佳实践
+说明：
 
-1. **选择合适的压缩级别**
-   - 实时应用：级别 1-3
-   - 存储：级别 5-9
-   - 归档：级别 10+
+- 不需要手工按 `128KB` 切块，默认压缩器会自动切分。
+- 每个块会在 `RLE / Compressed / Raw` 路径间选择或回退。
 
-2. **使用字典压缩小数据**
-   - 对于 <1KB 的重复数据，字典可提升 2-5 倍压缩率
+## 带配置压缩
 
-3. **批量处理**
-   - 累积小数据到 128KB 再压缩，减少开销
-
-4. **错误恢复**
-   - 始终检查 Result 类型
-   - 对损坏数据使用 try-catch
-
-## 示例：文件压缩
+如果需要显式控制压缩参数，可直接使用 encoder 层接口。
 
 ```moonbit
-fn compress_file(input_path: String, output_path: String) -> Result[Unit, String] {
-  // 读取文件（实际应用中使用流式读取）
-  let data = read_file(input_path)?
-
-  // 压缩
-  let config = @compressor.create_default_config()
-  let compressed = @compressor.compress_data(data, config)?
-
-  // 写入
-  write_file(output_path, compressed)?
-  Ok(())
+let config = @zstd_encoder.create_config_with_level(5)
+match @zstd_encoder.compress_data(data, config) {
+  Ok(compressed) => println("ok: \{compressed.length()}")
+  Err(e) => println("compress failed: \{e}")
 }
 ```
 
-## 示例：网络流
+常用配置函数：
+
+- `@zstd_encoder.create_default_config()`
+- `@zstd_encoder.create_config_with_level(level)`
+- `@zstd_encoder.create_compression_context(config)`
+
+当前级别范围：`1..22`
+
+典型映射：
+
+- `1-2`：更快
+- `3-5`：默认与平衡
+- `6-9`：更高压缩率
+- `10-22`：更深搜索，更偏向压缩率
+
+更细的 `window_log / min_match / search_depth` 对应关系见：`src/encoder/RESOURCE.md`
+
+## 带校验和压缩
+
+encoder 层提供可选内容校验和写出接口。
 
 ```moonbit
-fn compress_stream(input_stream: Stream) -> Result[Stream, String] {
-  let buffer = Buffer::new()
-  let config = @compressor.create_default_config()
-
-  while input_stream.has_data() {
-    let chunk = input_stream.read(128 * 1024)?  // 128KB 块
-    let compressed = @compressor.compress_data(chunk, config)?
-    buffer.write(compressed)?
-  }
-
-  Ok(buffer.to_stream())
+let config = @zstd_encoder.create_default_config()
+match @zstd_encoder.compress_data_with_checksum(data, config, true) {
+  Ok(compressed) => println("ok: \{compressed.length()}")
+  Err(e) => println("compress failed: \{e}")
 }
 ```
 
-## 兼容性
+注意：
 
-- 完全兼容 RFC 8878 标准
-- 可解压 zstd v1.5.6 生成的数据
-- 生成的数据可被官方 zstd 工具解压
+- 当前 checksum 实现是简化版 `XXH32-like`。
+- 不应在对外文档中宣称其为完整官方 `XXH32`。
 
-## 限制
+## 安全解压与拼接帧
 
-- 最大帧大小：受内存限制
-- 不支持 Skippable Frames（可通过 analyzer 检测）
-- 字典大小：建议 <128KB
-
-## 常见问题
-
-### Q: 如何选择压缩级别？
-A: 级别 1-3 适合实时应用，5-9 适合存储，10+ 适合归档。
-
-### Q: 为什么压缩后反而变大？
-A: 小数据或高熵数据可能无法压缩。使用字典或累积到更大块。
-
-### Q: 如何处理大文件？
-A: 使用 128KB 块分段压缩，自动处理多块模式。
-
-### Q: 字典何时有用？
-A: 对于 <1KB 的重复小数据，字典可提升 2-5 倍压缩率。
-
-## 性能优化建议
-
-1. **批量处理**: 累积小数据到 128KB 再压缩
-2. **选择合适级别**: 不要盲目使用最高级别
-3. **复用配置**: 创建一次配置对象，多次使用
-4. **预分配缓冲区**: 减少内存分配开销
-
-## 实际使用示例
-
-### 文件压缩
+decoder 层提供带错误返回和带输出上限的解压接口。
 
 ```moonbit
-fn compress_file(input: String, output: String) -> Result[Unit, String] {
-  let data = read_file(input)?
-  let config = @compressor.create_config_with_level(5)
-  let compressed = @compressor.compress_data(data, config)?
-  write_file(output, compressed)?
-  Ok(())
+match @zstd_decoder.decompress(data) {
+  Ok(restored) => println("ok: \{restored.length()}")
+  Err(e) => println("decompress failed: \{e}")
 }
 ```
 
-### 网络流压缩
-
 ```moonbit
-fn compress_network_stream(stream: NetworkStream) -> Result[Bytes, String] {
-  let buffer: Array[Byte] = []
-  let config = @compressor.create_default_config()
-
-  while stream.available() {
-    let chunk = stream.read(128 * 1024)?
-    let compressed = @compressor.compress_data(chunk, config)?
-    for i = 0; i < compressed.length(); i = i + 1 {
-      buffer.push(compressed[i])
-    }
-  }
-
-  Ok(Bytes::from_array(buffer))
+let max_output = 128 * 1024 * 1024
+match @zstd_decoder.decompress_with_limit(data, max_output) {
+  Ok(restored) => println("ok: \{restored.length()}")
+  Err(e) => println("decompress failed: \{e}")
 }
 ```
 
-### 错误处理最佳实践
+说明：
+
+- `@zstd_decoder.decompress` 支持拼接帧解压。
+- `@zstd_decoder.decompress_with_limit` 可限制累计输出大小。
+- 高层 `@zstd.decompress` 内部也使用了 `128MB` 全局输出限制。
+
+## 滑动窗口解压辅助接口
+
+当前仓库对“流式解压”最接近的公开接口是 `SlidingWindowDecoder`。
+
+### 创建滑窗解码器
 
 ```moonbit
-fn safe_compress(data: Bytes) -> Result[Bytes, String] {
-  // 验证输入
-  if data.length() == 0 {
-    return Err("Empty data")
-  }
+let decoder = @zstd.create_sliding_window_decoder(65536)
+```
 
-  // 压缩
-  let config = @compressor.create_default_config()
-  match @compressor.compress_data(data, config) {
-    Ok(compressed) => {
-      // 验证输出
-      match @decompressor.decompress_data(compressed) {
-        Ok(decompressed) => {
-          if decompressed.length() == data.length() {
-            Ok(compressed)
-          } else {
-            Err("Decompression size mismatch")
-          }
-        }
-        Err(e) => Err("Verification failed: \{e}")
-      }
-    }
-    Err(e) => Err("Compression failed: \{e}")
-  }
+### 使用滑窗解压
+
+```moonbit
+match @zstd.decompress_with_sliding_window(decoder, compressed_frame) {
+  Ok(chunk) => println("decoded = \{chunk.length()}")
+  Err(e) => println("decode failed: \{e}")
 }
+```
+
+### 重置滑窗状态
+
+```moonbit
+@zstd.reset_sliding_window_decoder(decoder)
+```
+
+说明：
+
+- `SlidingWindowDecoder` 内部持有 `DecoderContext`。
+- `decompress_with_sliding_window` 会更新上下文，允许历史窗口跨调用保留。
+- 当前实现仍要求传入的是合法 ZSTD 帧数据。
+- 这更接近“带状态的解压辅助接口”，还不是完整的网络流增量解压框架。
+
+## 字典压缩与解压
+
+### 创建原始字典
+
+```moonbit
+let dict = @zstd_dictionary.create_raw_dictionary(dict_bytes, 0x12345678U)
+```
+
+### 解析 ZSTD 格式字典
+
+```moonbit
+match @zstd_dictionary.parse_zstd_dictionary(dict_file_bytes) {
+  Ok(dict) => println("dict id = \{dict.dict_id}")
+  Err(e) => println("parse failed: \{e}")
+}
+```
+
+### 带字典压缩
+
+```moonbit
+match @zstd_dictionary.compress_with_dictionary(data, dict) {
+  Ok(compressed) => println("ok: \{compressed.length()}")
+  Err(e) => println("compress failed: \{e}")
+}
+```
+
+### 带字典解压
+
+```moonbit
+match @zstd_dictionary.decompress_with_dictionary(compressed, dict) {
+  Ok(restored) => println("ok: \{restored.length()}")
+  Err(e) => println("decompress failed: \{e}")
+}
+```
+
+### 构建字典
+
+```moonbit
+match @zstd_dictionary.build_dictionary_with_cover(samples, 8192, 6) {
+  Ok(dict) => println("dict size = \{dict.content.length()}")
+  Err(e) => println("build failed: \{e}")
+}
+```
+
+说明：
+
+- `build_dictionary_with_cover` 的 `ngram_size` 会被约束到 `[4, 16]`
+- 字典 ID 会避开保留区，详细规则见 `src/dictionary/RESOURCE.md`
+
+## 分析与估算接口
+
+### 文件结构分析
+
+```moonbit
+let analysis = @zstd.analyze_file(compressed)
+println("valid = \{analysis.is_valid}")
+println("window = \{analysis.window_size}")
+println("first block = \{analysis.first_block_type}")
+```
+
+### 完整性启发式分析
+
+```moonbit
+let integrity = @zstd.analyze_data_integrity(data)
+println("density = \{integrity.data_density}")
+println("entropy = \{integrity.entropy_level}")
+```
+
+### 压缩大小估算
+
+```moonbit
+let estimated = @zstd.estimate_compressed_size(data, CompressionLevel::Better)
+println("estimated = \{estimated}")
+```
+
+注意：
+
+- `analyze_data_integrity` 当前是启发式结果，不是严格统计模型。
+- `estimate_compressed_size` 是粗略估算，不是实际压缩输出。
+
+## 性能与内存口径
+
+- 最大块大小：`128KB`
+- 高层解压全局输出限制：`128MB`
+- 窗口大小由帧头或配置决定
+- `CompressionConfig.window_log` 满足：`window_size = 1 << window_log`
+
+## 当前限制
+
+### 已支持
+
+- 一次性压缩 / 解压
+- 多块压缩
+- 拼接帧解压
+- 带状态滑窗解压辅助
+- 带字典压缩 / 解压
+
+### 暂未提供统一高层接口
+
+- 增量式压缩器对象
+- `write / flush / finish` 风格流式压缩 API
+- 正式的异步或网络流抽象
+
+## 推荐阅读
+
+- `AGENTS.md`
+- `CODE-TYPE.md`
+- `src/api/RESOURCE.md`
+- `src/encoder/RESOURCE.md`
+- `src/decoder/RESOURCE.md`
+- `src/dictionary/RESOURCE.md`
+
+## 常用检查命令
+
+```powershell
+moon run src/cmd
+rg "create_sliding_window_decoder|decompress_with_sliding_window|compress_data_with_checksum" src
+rg "compress_with_dictionary|decompress_with_dictionary|build_dictionary_with_cover" src
 ```

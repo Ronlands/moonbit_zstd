@@ -1,225 +1,190 @@
 # MoonBit ZSTD
 
-Pure MoonBit implementation of Zstandard (ZSTD) compression algorithm following RFC 8878.
+基于 `MoonBit` 实现的 `Zstandard (ZSTD)` 压缩库，目标对齐 `RFC 8878`。
 
-## Highlights
+## 概述
 
-- **Full Compression & Decompression** — LZ77 + FSE/Huffman entropy coding
-- **RFC 8878 Compliant** — Decoder verified with official zstd v1.5.6 output
-- **26/26 Tests Passing** — Basic, compatibility, dictionary, and cross-compat tests
-- **Pure MoonBit** — No C dependencies, compiles to WASM
+- 纯 `MoonBit` 实现，不依赖 C 库。
+- 支持压缩、解压、文件结构分析、字典压缩与基础基准测试。
+- 覆盖 `Raw`、`RLE`、`Compressed` 三类块。
+- 包含 FSE、Huffman、序列表和滑动窗口等核心实现。
 
-## Quick Start
+## 快速开始
 
-```bash
-moon run src/cmd    # Run demos + full test suite
+```powershell
+moon run src/cmd
 ```
 
-### Basic Usage
+说明：该命令会运行当前仓库里的演示与测试入口。
+
+## 文档入口
+
+- 协作索引：`AGENTS.md`
+- 代码规范：`CODE-TYPE.md`
+- 源码总索引：`src/RESOURCE.md`
+- API 说明：`src/api/RESOURCE.md`
+- Core 说明：`src/core/RESOURCE.md`
+- Encoder 说明：`src/encoder/RESOURCE.md`
+- Decoder 说明：`src/decoder/RESOURCE.md`
+- Entropy 说明：`src/entropy/RESOURCE.md`
+- Dictionary 说明：`src/dictionary/RESOURCE.md`
+
+## 主要能力
+
+### 压缩
+
+- 默认压缩入口：`@zstd.compress`
+- 数值级别压缩：`@zstd.compress_with_level_int`
+- 枚举级别压缩：`@zstd.compress_with_level`
+- 显式方法压缩：`@zstd.compress_advanced`
+- 指定块策略：`Raw` / `RLE` / `Compressed`
+- 多块压缩
+- 可选内容校验和
+- 带字典压缩
+
+### 解压
+
+- 高层解压入口：`@zstd.decompress`
+- 底层 `Result` 风格解压：`@zstd_decoder.decompress` / `decompress_with_limit`
+- 拼接帧解压
+- 带字典解压
+- 滑动窗口支持
+
+### 分析
+
+- `@zstd.analyze_file`：轻量结构分析
+- `@zstd.is_zstd_format`：魔数快速判断
+- `@zstd.analyze_data_integrity`：启发式完整性分析
+- `@zstd.estimate_compressed_size`：粗略压缩估算
+
+### 字典
+
+- 原始字典与 ZSTD 格式字典解析
+- Cover 算法构建字典
+- 字典收益统计
+
+## 基本用法
+
+### 1. 压缩与解压
 
 ```moonbit
-// Compress and decompress
 let original = @encoding/utf8.encode("Hello, ZSTD!")
-let compressed = @zstd.compress(original)
-let decompressed = @zstd.decompress(compressed)
 
-// Compress with specific level (1-22)
+match @zstd.compress(original) {
+  Ok(compressed) => {
+    let decompressed = @zstd.decompress(compressed)
+    println("compressed size = \{compressed.length()}")
+    println("decompressed size = \{decompressed.length()}")
+  }
+  Err(e) => println("compression failed: \{e}")
+}
+```
+
+### 2. 指定压缩级别
+
+```moonbit
 let compressed = @zstd.compress_with_level_int(data, 9)
 
-// Compress with specific method
-let compressed = @zstd.compress_advanced(data, Auto, 3)
+let compressed2 = @zstd.compress_with_level(
+  data,
+  CompressionLevel::Better,
+)
+```
 
-// Analyze ZSTD file structure
+当前 `CompressionLevel` 映射：
+
+- `Fast -> 1`
+- `Default -> 3`
+- `Better -> 6`
+- `Best -> 9`
+
+### 3. 指定压缩方法
+
+```moonbit
+let compressed = @zstd.compress_advanced(data, CompressionMethod::Compressed, 5)
+```
+
+可选方法：
+
+- `Auto`
+- `Raw`
+- `RLE`
+- `Compressed`
+
+### 4. 文件结构分析
+
+```moonbit
 let analysis = @zstd.analyze_file(data)
+println("valid = \{analysis.is_valid}")
+println("blocks = \{analysis.total_blocks}")
+println("first block type = \{analysis.first_block_type}")
 ```
 
-## Features
+### 5. 字典压缩
 
-### Compression
+```moonbit
+let dict = @zstd_dictionary.create_raw_dictionary(dict_bytes, 0x12345678U)
 
-| Block Type | Description                             | Typical Compression Ratio |
-| ---------- | --------------------------------------- | ------------------------- |
-| Raw        | Uncompressed storage                    | 1:1                       |
-| RLE        | Run-length encoding for repetitive data | Up to 20:1                |
-| Compressed | LZ77 + FSE/Huffman entropy coding       | 3:1 ~ 10:1 (data-dependent) |
-
-- 22 compression levels with configurable window size and search depth
-- Automatic block type selection (Raw/RLE/Compressed)
-- Multi-sequence LZ77 matching
-- Predefined FSE tables per RFC 8878
-- Huffman and RLE literals encoding
-- Byte-compatible decoder with official `zstd` output
-
-### Decompression
-
-- All block types: Raw, RLE, Compressed
-- FSE (tANS) decoding with backward bitstream
-- Huffman literals decoding
-- Sliding window with overlapping match copy
-- Multi-block frame support
-- Dictionary support
-
-### Entropy Coding
-
-- **FSE (tANS)**: Encoder + decoder with official spread algorithm
-- **Huffman**: Encoder + decoder with canonical codes
-
-### Dictionary
-
-- Raw and ZSTD-format dictionary support
-- Dictionary ID management
-- Cover algorithm for dictionary building
-- Dictionary-enhanced compression
-
-## Test Results
-
-```
-Basic tests passed:                      11/11
-Compatibility tests passed:               5/5
-Dictionary tests passed:                  5/5
-Non-compliance & cross-compat tests:      7/7
-All tests passed! ✓
+match @zstd_dictionary.compress_with_dictionary(data, dict) {
+  Ok(compressed) => {
+    match @zstd_dictionary.decompress_with_dictionary(compressed, dict) {
+      Ok(restored) => println("ok: \{restored.length()}")
+      Err(e) => println("decompress failed: \{e}")
+    }
+  }
+  Err(e) => println("compress failed: \{e}")
+}
 ```
 
-| Test Category               | Count | Status |
-| --------------------------- | ----- | ------ |
-| Basic Compression           | 11    | Passed |
-| Compatibility tests         | 5     | Passed |
-| Dictionary tests            | 5     | Passed |
-| Non-compliance & cross-compat | 7   | Passed |
-| **Total**                   | **26** | **All Passed** |
+## 关键实现口径
 
-### Decoder Compatibility Verification
+- 最大块大小：`131072` 字节
+- 高层解压全局输出限制：`128MB`
+- `compression_ratio` 统一按 `original_size / compressed_size` 理解，值越大越好，展示为 `x`
+- `DataIntegrityAnalysis` 当前是启发式分析结果，不是严格统计模型
+- 校验和实现当前为简化版 `XXH32-like`，不是完整官方 `XXH32`
 
-```bash
-# Official zstd encoder → our decoder
-echo "test" | zstd | moon run src/cmd    # ✓ Decompresses correctly
+## 项目结构
 
-# Our encoder → official zstd decoder
-# Note: Output format is valid RFC 8878 but may differ from official encoder
-zstd -d moonbit_compressed.zst -o output.txt    # ✓ Decompresses correctly
-```
-
-## Compression Benchmark
-
-Test data: `"The quick brown fox jumps over the lazy dog. "` repeated 10x (450 bytes)
-
-| Method                    | Output Size | Ratio   | Notes |
-| ------------------------- | ----------- | ------- | ----- |
-| Raw Block                 | 459 bytes   | 0.98:1  | No compression overhead |
-| RLE Block (all-same data) | 10 bytes    | 20:1    | Optimal for repetitive data |
-| Compressed Block          | 62 bytes    | **7.3:1** | LZ77 + Huffman encoding |
-
-Note: Compression ratios are data-dependent. Actual results vary based on content characteristics.
-
-## Project Structure
-
-```
+```text
 src/
-├── api/          # Public API (compress, decompress, analyze)
-├── core/         # Core types (FrameHeader, BlockType, Sequence, etc.)
-├── encoder/      # Compressor (LZ77 + FSE encoding)
-├── decoder/      # Decompressor (block parsing, sequence execution)
-├── entropy/      # FSE (tANS) + Huffman encoder/decoder
-├── dictionary/   # Dictionary support (Cover algorithm, format parsing)
-├── cmd/          # CLI entry point (demos + tests)
-├── examples/     # Demo programs
-├── test/         # Test suite (basic, compatibility, encoding, golden)
-└── test-data/    # Golden test files from official ZSTD suite
+├── api/          # 对外高层 API
+├── core/         # 核心类型、错误、常量、bitstream
+├── encoder/      # 压缩主实现
+├── decoder/      # 解压主实现、帧头解析、分析器
+├── entropy/      # FSE / Huffman / 序列表
+├── dictionary/   # 字典构建、字典收益、字典格式
+├── cmd/          # 演示与测试总入口
+├── examples/     # 示例
+├── test/         # 测试套件
+├── benchmark/    # 基准测试
+└── test-data/    # 金标样本与错误样本
 ```
 
-## API Reference
+## 当前源码入口
 
-### Compression
+- 对外 API：`src/api/zstd.mbt`
+- 压缩主实现：`src/encoder/compressor.mbt`
+- 解压主实现：`src/decoder/decompressor.mbt`
+- 帧头解析：`src/decoder/frame.mbt`
+- 文件分析：`src/decoder/analyzer.mbt`
+- 序列表：`src/entropy/sequence_tables.mbt`
 
-```moonbit
-fn compress(data: Bytes) -> Bytes
-fn compress_with_level(data: Bytes, level: CompressionLevel) -> Bytes
-fn compress_with_level_int(data: Bytes, level: Int) -> Bytes
-fn compress_advanced(data: Bytes, mode: CompressionMethod, level: Int) -> Bytes
-fn compress_as_raw(data: Bytes, level: Int) -> Bytes
-fn compress_as_rle(data: Bytes, level: Int) -> Bytes
-fn compress_as_compressed(data: Bytes, level: Int) -> Bytes
+## 常用检查命令
+
+```powershell
+moon run src/cmd
+rg --files src
+rg "^pub (struct|enum|type|fn)" src
+rg "CompressionConfig|ZSTDFileAnalysis|DictionaryBenefitStats" src
 ```
 
-### Decompression
+## 注意事项
 
-```moonbit
-fn decompress(data: Bytes) -> Bytes
-fn decompress_with_sliding_window(decoder: SlidingWindowDecoder, data: Bytes) -> Result[Bytes, String]
-fn create_sliding_window_decoder(window_size: Int) -> SlidingWindowDecoder
-```
-
-### Analysis
-
-```moonbit
-fn analyze_file(data: Bytes) -> ZSTDFileAnalysis
-fn is_zstd_format(data: Bytes) -> Bool
-fn analyze_data_integrity(data: Bytes) -> DataIntegrityAnalysis
-```
-
-### Dictionary
-
-```moonbit
-fn compress_with_dictionary(data: Bytes, dictionary: Dictionary) -> Result[Bytes, String]
-fn decompress_with_dictionary(data: Bytes, dictionary: Dictionary) -> Result[Bytes, String]
-fn build_dictionary_with_cover(samples: Array[Bytes], target_size: Int, ngram_size: Int) -> Result[Dictionary, String]
-```
-
-## Implementation Status
-
-### Completed
-
-- [x] Full compression: Raw + RLE + Compressed blocks
-- [x] Full decompression: All block types
-- [x] FSE (tANS) encoder/decoder
-- [x] Huffman encoder/decoder
-- [x] Dictionary compression and decompression
-- [x] Decoder compatible with official `zstd` output
-- [x] 22 compression levels
-- [x] Multi-sequence LZ77
-- [x] Repeat Offset optimization
-- [x] Multi-block frame compression
-- [x] FSE Compressed mode (custom tables)
-- [x] Performance optimization
-- [x] Content checksum support
-
-### Known Limitations
-
-- Encoder output may differ from official `zstd` (both are valid RFC 8878)
-- Performance benchmarking requires browser/Node.js environment for timing
-
-## Technical Details
-
-### ZSTD Bitstream Format
-
-Standard ZSTD bitstream structure:
-
-1. **Frame Header**: Magic (0xFD2FB528) + FHD + Frame Content Size
-2. **Block Header**: Last_Block flag + Block_Type + Block_Size
-3. **Compressed Block**:
-   - Literals Section (Raw or RLE)
-   - Sequences Section (FSE-encoded)
-
-FSE bitstream encoding order:
-- **Encoder**: init seqN-1, extras LL→ML→OF, states ML→OF→LL
-- **Decoder**: read states LL→OF→ML, extras OF→ML→LL, update LL→OF→ML
-
-## Contributing
-
-Contributions welcome! Areas of interest:
-
-- Performance optimization
-- Huffman Literals compression
-- Additional test cases
-- Repeat Offset optimization
+- 以 `src/` 下源码与 `RESOURCE.md` 为准，不以旧文档片段为准。
+- `@zstd.decompress` 是高层便捷接口，失败时返回空字节串；如果要拿到错误，使用 decoder 层 `Result` 风格接口。
+- 当前仓库文档已按模块拆分，新增类型、字段、公式或统计结果时，应同步更新对应 `RESOURCE.md`。
 
 ## License
 
-[Apache-2.0](LICENSE)
-
-## Acknowledgments
-
-- [RFC 8878](https://www.rfc-editor.org/rfc/rfc8878.html) — ZSTD specification
-- [Facebook ZSTD](https://github.com/facebook/zstd) — Reference implementation
-- [MoonBit](https://www.moonbitlang.com/) — The language
+`Apache-2.0`
