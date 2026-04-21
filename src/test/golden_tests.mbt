@@ -260,7 +260,7 @@ fn test_block_types() -> Bool { true }
 fn test_checksum() -> Bool { true }
 fn test_byte_order() -> Bool { true }
 
-fn create_text_data() -> Bytes { @encoding/utf8.encode("Text data") }
+fn create_text_data() -> Bytes { @utf8.encode("Text data") }
 fn create_binary_data() -> Bytes { Bytes::from_array([0x00, 0xFF, 0x7F, 0x80]) }
 fn create_repetitive_data() -> Bytes { 
   let arr : Array[Byte] = []

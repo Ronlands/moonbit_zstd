@@ -1,5 +1,10 @@
 {
-  "import": [],
+  "import": [
+    {
+      "path": "Ronlands/moonbit_zstd/core",
+      "alias": "zstd_core"
+    }
+  ],
   "test-import": [],
   "link": {
     "wasm": {

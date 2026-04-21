@@ -8,7 +8,7 @@
 
 ## 2. 核心类型索引
 
-- `Sequence`
+- `Sequence`（复用 `@zstd_core.Sequence`）
 - `FSETable`
 - `FSEState`
 - `BitStream`
@@ -57,6 +57,7 @@
 
 ## 5. FSE 相关说明
 
+- `Sequence`：当前直接复用 `core` 模块定义，避免在 `entropy` 层重复维护相同字段语义。
 - `FSETable`：FSE 解码表。
 - `FSEState`：FSE 状态机状态。
 - `FSEEncodeTable` / `FSECTable`：编码侧表结构。

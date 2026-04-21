@@ -5,7 +5,7 @@ pub fn demo_basic_compression() -> Unit {
   println("\n1. 基本压缩和解压缩测试")
   println("   " + @zstd_test.repeat_string("-", 30))
   
-  let test_data = @encoding/utf8.encode("Hello, ZSTD!")
+  let test_data = @utf8.encode("Hello, ZSTD!")
   let original_size = test_data.length()
   
   let compressed = match @zstd.compress(test_data) {
@@ -31,7 +31,7 @@ pub fn demo_file_analysis() -> Unit {
   println("\n2. ZSTD文件分析")
   println("   " + @zstd_test.repeat_string("-", 30))
   
-  let test_data = @encoding/utf8.encode("Analysis test data")
+  let test_data = @utf8.encode("Analysis test data")
   let compressed = match @zstd.compress(test_data) {
     Ok(c) => c
     Err(e) => { println("压缩失败: \{e}"); return }
@@ -73,12 +73,12 @@ pub fn demo_format_detection() -> Unit {
   println("\n4. 格式检测测试")
   println("   " + @zstd_test.repeat_string("-", 30))
   
-  let test_data = @encoding/utf8.encode("Format test")
+  let test_data = @utf8.encode("Format test")
   let compressed = match @zstd.compress(test_data) {
     Ok(c) => c
     Err(e) => { println("压缩失败: \{e}"); return }
   }
-  let non_zstd = @encoding/utf8.encode("Not ZSTD data")
+  let non_zstd = @utf8.encode("Not ZSTD data")
   let empty = Bytes::new(0)
   
   let is_valid = @zstd.is_zstd_format(compressed)
@@ -98,7 +98,7 @@ pub fn demo_compression_levels() -> Unit {
   println("\n5. 压缩级别比较")
   println("   " + @zstd_test.repeat_string("-", 30))
   
-  let test_data = @encoding/utf8.encode("Compression level test data")
+  let test_data = @utf8.encode("Compression level test data")
   let compressed = match @zstd.compress(test_data) {
     Ok(c) => c
     Err(e) => { println("压缩失败: \{e}"); return }

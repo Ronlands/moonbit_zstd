@@ -9,11 +9,68 @@
 - 拼接帧解压
 - 带全局输出上限的安全解压
 - 基于滑动窗口上下文的解压辅助接口
+- 最小可用的流式压缩器对象
 - 带字典压缩与解压
 
-当前仓库 **没有** 完整的“增量式流式压缩器对象”，也没有类似 `write/flush/finalize` 的正式压缩流接口。
+当前仓库已经提供最小可用的流式压缩生命周期接口，但仍然不是“完整高优化增量式压缩框架”。
 
-因此，本文件以“当前真实存在的分块与滑窗能力”为准，而不是描述一个尚未实现的完整流式框架。
+因此，本文件以“当前真实存在的分块、滑窗和流式帧写出能力”为准。
+
+## 流式压缩生命周期
+
+当前高层 API 已支持：
+
+- `@zstd.create_streaming_compressor(level)`
+- `@zstd.create_streaming_compressor_with_checksum(level, with_checksum)`
+- `@zstd.write_streaming_chunk(compressor, chunk)`
+- `@zstd.flush_streaming_compressor(compressor)`
+- `@zstd.finish_streaming_compressor(compressor)`
+- `@zstd.reset_streaming_compressor(compressor)`
+
+### 基本示例
+
+```moonbit
+let compressor = @zstd.create_streaming_compressor(3)
+
+let out1 = @zstd.write_streaming_chunk(compressor, chunk1)?
+let out2 = @zstd.write_streaming_chunk(compressor, chunk2)?
+let flushed = @zstd.flush_streaming_compressor(compressor)?
+let tail = @zstd.finish_streaming_compressor(compressor)?
+
+let compressed = out1 + out2 + flushed + tail
+```
+
+### 当前实现特征
+
+- 首次写入时输出帧头
+- 写入过程中会在内部缓存达到 `64KB` 时自动落块
+- `flush` 会强制把当前 pending 数据写成非最后块
+- `finish` 会写出最后块并在需要时追加 checksum
+- 返回值始终是“本次新增产出的字节”，适合顺序拼接或直接发送
+- 可通过统计接口读取输入/输出大小、块分布、history/pending 和 checksum 状态
+- 当单序列直写超出当前变长编码能力时，流式路径会自动拆成多序列并改走预定义 FSE
+
+### 当前限制
+
+- 当前采用“安全前缀复用”方式做跨 chunk 历史继承，不是完整通用增量 LZ77 解析器
+- 当前仍维持 `64KB` 自动落块；超出单序列直写上限时会自动拆多序列
+- 当前没有异步 IO、网络流抽象或背压控制
+
+### 统计接口
+
+- `@zstd.get_streaming_compressor_stats(compressor)`
+- `@zstd.format_streaming_compressor_stats(stats)`
+
+统计字段包括：
+
+- 输入字节数
+- 输出字节数
+- 已发块总数
+- `raw / rle / compressed` 块分布
+- `flush / auto_flush` 次数
+- `pending / history` 大小
+- 当前 checksum 与最终 checksum
+- 是否已写帧头、是否已完成
 
 ## 一次性 API
 
@@ -256,6 +313,7 @@ println("estimated = \{estimated}")
 - 高层解压全局输出限制：`128MB`
 - 窗口大小由帧头或配置决定
 - `CompressionConfig.window_log` 满足：`window_size = 1 << window_log`
+- 流式压缩器当前内部自动落块大小：`64KB`
 
 ## 当前限制
 
@@ -264,13 +322,14 @@ println("estimated = \{estimated}")
 - 一次性压缩 / 解压
 - 多块压缩
 - 拼接帧解压
+- 最小流式压缩生命周期
+- 流式统计快照与 checksum 输出
 - 带状态滑窗解压辅助
 - 带字典压缩 / 解压
 
 ### 暂未提供统一高层接口
 
-- 增量式压缩器对象
-- `write / flush / finish` 风格流式压缩 API
+- 跨 chunk 的完整通用 LZ77 增量解析器
 - 正式的异步或网络流抽象
 
 ## 推荐阅读

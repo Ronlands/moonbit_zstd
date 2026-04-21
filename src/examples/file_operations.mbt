@@ -21,7 +21,7 @@ fn test_text_compression() -> Unit {
   println(@zstd_test.repeat_string("-", 40))
   
   let text = "The quick brown fox jumps over the lazy dog. Hello, MoonBit ZSTD!"
-  let original = @encoding/utf8.encode(text)
+  let original = @utf8.encode(text)
   let compressed = match @zstd.compress(original) {
     Ok(c) => c
     Err(e) => { println("压缩失败: \{e}"); return }
@@ -98,9 +98,9 @@ fn test_compression_round_trip() -> Unit {
   
   let tests = [
     ("空文件", Bytes::new(0)),
-    ("小文件", @encoding/utf8.encode("Small")),
+    ("小文件", @utf8.encode("Small")),
     ("中等文件", create_binary_data(500)),
-    ("特殊字符", @encoding/utf8.encode("😀🎉✓✗→"))
+    ("特殊字符", @utf8.encode("😀🎉✓✗→"))
   ]
   
   let mut passed = 0

@@ -102,8 +102,8 @@ fn test_reserved_bit_rejected() -> Bool {
 /// Two back-to-back ZSTD frames ("ABC" + "DEF") must decompress to "ABCDEF".
 /// We compress each string with our own encoder to guarantee valid frames.
 fn test_concatenated_frames_decoded() -> Bool {
-  let abc = @encoding/utf8.encode("ABC")
-  let def_bytes = @encoding/utf8.encode("DEF")
+  let abc = @utf8.encode("ABC")
+  let def_bytes = @utf8.encode("DEF")
   let frame1 = match @zstd.compress(abc) {
     Ok(c) => c
     Err(_) => return false
@@ -127,7 +127,7 @@ fn test_concatenated_frames_decoded() -> Bool {
         println("  Concat frames: expected 6 bytes, got \{out.length()}")
         return false
       }
-      let expected = @encoding/utf8.encode("ABCDEF")
+      let expected = @utf8.encode("ABCDEF")
       verify_data_equal(out, expected)
     }
     Err(e) => {
@@ -231,7 +231,7 @@ fn test_cross_decode_hello() -> Bool {
   ])
   match @zstd_decoder.decompress(data) {
     Ok(out) => {
-      let expected = @encoding/utf8.encode("Hello, ZSTD!")
+      let expected = @utf8.encode("Hello, ZSTD!")
       if out.length() != expected.length() {
         println("  Hello cross-decode: length \{out.length()} ≠ \{expected.length()}")
         return false
@@ -254,7 +254,7 @@ fn test_cross_decode_hello() -> Bool {
 /// Validates the LZ77 match detection, FSE sequence encoding/decoding, and
 /// repeat-offset mechanism on a highly repetitive input.
 fn test_cross_decode_repeat() -> Bool {
-  let pattern = @encoding/utf8.encode("AAAA BBBB CCCC ")
+  let pattern = @utf8.encode("AAAA BBBB CCCC ")
   let input_arr: Array[Byte] = []
   for _rep = 0; _rep < 10; _rep = _rep + 1 {
     for j = 0; j < pattern.length(); j = j + 1 {

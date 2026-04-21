@@ -36,6 +36,9 @@ fn run_demos() -> Unit {
   // 新增：Huffman 编码演示
   @zstd_examples.demo_huffman_encoding()
 
+  // 新增：流式压缩演示
+  @zstd_examples.demo_streaming_compression()
+
   // 新增：FSE 解码调试
   demo_fse_debug()
 
@@ -45,7 +48,7 @@ fn run_demos() -> Unit {
 
 /// FSE 调试演示
 fn demo_fse_debug() -> Unit {
-  println("\n7. FSE 解码调试")
+  println("\n8. FSE 解码调试")
   println("   " + @zstd_test.repeat_string("-", 30))
 
   println("   FSE 调试功能暂时跳过")

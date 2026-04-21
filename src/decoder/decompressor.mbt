@@ -183,75 +183,39 @@ pub fn decompress_zstd_data_with_dict(data: Bytes, dictionary: Bytes) -> Result[
   // 解析帧头
   let frame_result = parse_frame_header_for_decompressor(data, current_offset)
   match frame_result {
-    Ok((_frame_header, header_size)) => {
+    Ok((frame_header, header_size)) => {
       current_offset = current_offset + header_size
-      
-      // 解压缩块
-      // 如果有字典，将其作为初始窗口内容
-      let mut output_data = if dictionary.length() > 0 {
-        dictionary
-      } else {
-        Bytes::new(0)
+
+      let decoder_window_size = frame_header.window_size.max(dictionary.length()).max(1024)
+      let decoder_context = create_decoder_context(decoder_window_size)
+
+      if dictionary.length() > 0 {
+        match preload_history_into_context(decoder_context, dictionary) {
+          Ok(_) => ()
+          Err(e) => return Err("Failed to preload dictionary into decoder window: " + e)
+        }
       }
-      let dict_size = dictionary.length()
+      
+      // 解压缩块，并在同一个 DecoderContext 中持续维护窗口状态。
+      let mut output_data = Bytes::new(0)
       
       while current_offset + 3 <= data.length() {
-        // 解析块头
-        let block_header = data[current_offset].to_int() |
-                          (data[current_offset + 1].to_int() << 8) |
-                          (data[current_offset + 2].to_int() << 16)
-        
-        let is_last_block = (block_header & 1) != 0
-        let block_type = (block_header >> 1) & 3
-        let block_size = (block_header >> 3) & 0x1FFFFF
-        
-        current_offset = current_offset + 3
-        
-        // 计算实际压缩数据大小
-        // 对于RLE块，block_size是解压后的大小，但压缩数据只有1字节
-        // 对于Raw和Compressed块，block_size就是压缩数据大小
-        let compressed_size = if block_type == 1 { 1 } else { block_size }
-        
-        // 检查块大小（使用压缩数据大小）
-        if current_offset + compressed_size > data.length() {
-          return Err("Block data exceeds file boundary")
-        }
-        
-        // 解压缩块（传递block_size作为解压后的大小和当前窗口用于序列执行）
-        let block_result = decompress_single_block_with_window(
-          data, current_offset, block_size, block_type, output_data
-        )
+        let block_result = decompress_block_with_context(decoder_context, data, current_offset)
         match block_result {
-          Ok(block_data) => {
-            // 如果有字典，第一次追加时只保留新数据
-            if dict_size > 0 && output_data.length() == dict_size {
-              output_data = dictionary + block_data
-            } else {
-              output_data = output_data + block_data
+          Ok((block_data, consumed_size, is_last_block)) => {
+            output_data = output_data + block_data
+            current_offset = current_offset + consumed_size
+            if is_last_block {
+              break
             }
-            // 更新偏移量使用压缩数据大小
-            current_offset = current_offset + compressed_size
           }
           Err(error_msg) => {
             return Err(error_msg)
           }
         }
-        
-        if is_last_block {
-          break
-        }
       }
-      
-      // 如果使用了字典，移除字典部分只返回实际解压的数据
-      if dict_size > 0 {
-        let actual_data: Array[Byte] = []
-        for i = dict_size; i < output_data.length(); i = i + 1 {
-          actual_data.push(output_data[i])
-        }
-        Ok(Bytes::from_array(actual_data))
-      } else {
-        Ok(output_data)
-      }
+
+      Ok(output_data)
     }
     Err(error_msg) => Err(error_msg)
   }
@@ -353,58 +317,6 @@ fn parse_frame_header_for_decompressor(data: Bytes, offset: Int) -> Result[(@zst
   
   let frame_header_struct = @zstd_core.make_frame_header(@zstd_core.zstd_frame_type(), 0, frame_content_size, single_segment, content_checksum, window_size)
   Ok((frame_header_struct, current_offset - offset))
-}
-
-/// 解压缩单个块（带窗口用于字典引用）
-/// window 参数预留用于 Compressed 块中的字典引用
-fn decompress_single_block_with_window(
-  data: Bytes, 
-  offset: Int, 
-  block_size: Int, 
-  block_type: Int,
-  _window: Bytes  // 预留用于 Compressed 块解压缩时的字典引用
-) -> Result[Bytes, String] {
-  match block_type {
-    0 => {
-      // Raw block - 直接返回数据
-      if offset + block_size > data.length() {
-        return Err("Raw 块数据超出文件边界")
-      }
-      // 使用数组来构建Raw数据，更高效
-      let raw_array : Array[Byte] = []
-      for i = offset; i < offset + block_size; i = i + 1 {
-        raw_array.push(data[i])
-      }
-      Ok(Bytes::from_array(raw_array))
-    }
-    1 => {
-      // RLE block - 重复数据
-      if block_size == 0 {
-        return Ok(Bytes::new(0))
-      }
-      if offset >= data.length() {
-        return Err("RLE 块数据超出文件边界")
-      }
-      let repeat_byte = data[offset]
-      // 使用数组来构建RLE数据，更高效
-      let rle_array : Array[Byte] = []
-      for _i = 0; _i < block_size; _i = _i + 1 {
-        rle_array.push(repeat_byte)
-      }
-      Ok(Bytes::from_array(rle_array))
-    }
-    2 => {
-      // Compressed block - 使用真正的解压缩实现（暂不传递window，未来可增强）
-      decompress_compressed_block(data, offset, block_size)
-    }
-    3 => {
-      // Reserved block type
-      Err("Reserved block type")
-    }
-    _ => {
-      Err("Unknown block type: " + block_type.to_string())
-    }
-  }
 }
 
 /// Decompress with explicit decompressor context

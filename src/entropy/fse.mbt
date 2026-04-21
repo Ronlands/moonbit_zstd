@@ -1,15 +1,11 @@
 /// Finite State Entropy (FSE) decoder
 
-/// Sequence structure
-pub struct Sequence {
-  literal_length: Int
-  match_length: Int
-  offset: Int
-} derive(Default)
+/// Sequence 类型统一复用 core 模块定义，避免在 entropy 层重复维护字段语义。
+pub type Sequence = @zstd_core.Sequence
 
 /// Create new sequence
 pub fn make_sequence(literal_length: Int, match_length: Int, offset: Int) -> Sequence {
-  Sequence::{ literal_length, match_length, offset }
+  @zstd_core.make_sequence(literal_length, match_length, offset)
 }
 
 /// FSE表结构
@@ -1042,7 +1038,7 @@ pub fn decode_fse_sequences_with_tables(
 
   let mut current_bs = bs3
 
-  let temp_sequences: Array[Sequence] = Array::make(num_sequences, Sequence::{ literal_length: 0, match_length: 0, offset: 0 })
+  let temp_sequences: Array[Sequence] = Array::make(num_sequences, @zstd_core.make_sequence(0, 0, 0))
   let mut seq_count = 0
 
   for seq_idx = (num_sequences - 1); seq_idx >= 0; seq_idx = seq_idx - 1 {
@@ -1309,7 +1305,9 @@ pub fn debug_fse_decode_sequences(
       println("✅ FSE 解码成功: \{sequences.length()} 个序列")
       for i = 0; i < sequences.length(); i = i + 1 {
         let seq = sequences[i]
-        println("  序列\{i}: LL=\{seq.literal_length}, ML=\{seq.match_length}, OF=\{seq.offset}")
+        println(
+          "  序列\{i}: LL=\{@zstd_core.get_sequence_literal_length(seq)}, ML=\{@zstd_core.get_sequence_match_length(seq)}, OF=\{@zstd_core.get_sequence_offset(seq)}"
+        )
       }
     }
     Err(e) => {

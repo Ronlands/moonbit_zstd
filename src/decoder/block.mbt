@@ -62,6 +62,15 @@ fn add_decoded_data_to_window(ctx: DecoderContext, data: Bytes) -> Result[Unit, 
   Ok(())
 }
 
+/// 预加载历史数据到解码上下文窗口。
+///
+/// 用途：
+/// - 为同帧后续块提供历史引用基础
+/// - 为带字典解压把字典内容预热到窗口中
+pub fn preload_history_into_context(ctx: DecoderContext, data: Bytes) -> Result[Unit, String] {
+  add_decoded_data_to_window(ctx, data)
+}
+
 /// Get current window buffer
 fn get_decoder_window(ctx: DecoderContext) -> @zstd_core.WindowBuffer {
   ctx.window
@@ -1228,7 +1237,8 @@ pub fn decompress_block_with_context(
               Err(e) => return Err(e)
             }
           }
-          let total_consumed = header_size + header.block_size
+          let compressed_size = if header.block_type == @zstd_core.rle_block_type() { 1 } else { header.block_size }
+          let total_consumed = header_size + compressed_size
           Ok((decompressed_data, total_consumed, header.last_block))
         }
         Err(err) => Err(err)
@@ -1253,7 +1263,8 @@ pub fn decompress_block(data: Bytes, offset: Int) -> Result[(Bytes, Int, Bool), 
       
       match decompressed_result {
         Ok(decompressed_data) => {
-          let total_consumed = header_size + header.block_size
+          let compressed_size = if header.block_type == @zstd_core.rle_block_type() { 1 } else { header.block_size }
+          let total_consumed = header_size + compressed_size
           Ok((decompressed_data, total_consumed, header.last_block))
         }
         Err(err) => Err(err)

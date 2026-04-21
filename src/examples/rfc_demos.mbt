@@ -134,7 +134,7 @@ fn test_user_file() -> Unit {
   if api_result == original {
     println("  ✓ 完全成功：数据一致！")
     let text = try {
-      @encoding/utf8.decode(api_result)
+      @utf8.decode(api_result)
     } catch {
       _ => "(无法解码)"
     }

@@ -7,7 +7,7 @@ pub fn demo_compression_methods() -> Unit {
   println(@zstd_test.repeat_string("=", 60))
   
   let test_text = "Hello, MoonBit ZSTD! " + @zstd_test.repeat_string("A", 100)
-  let test_data = @encoding/utf8.encode(test_text)
+  let test_data = @utf8.encode(test_text)
   
   println("\n1. 自动选择压缩方法（级别2）")
   println(@zstd_test.repeat_string("-", 40))
@@ -59,7 +59,7 @@ pub fn demo_compression_levels_advanced() -> Unit {
   println(@zstd_test.repeat_string("=", 60))
   
   let test_text = "The quick brown fox jumps over the lazy dog. " + @zstd_test.repeat_string("Test", 50)
-  let test_data = @encoding/utf8.encode(test_text)
+  let test_data = @utf8.encode(test_text)
   
   let levels = [1, 3, 5, 9, 15, 22]
   
@@ -93,7 +93,7 @@ pub fn demo_method_comparison() -> Unit {
   let text_10_times = repeat_text("The quick brown fox jumps over the lazy dog. ", 10)
   let repeated_bytes = create_repeated_bytes(0x41, 200)
   let test_cases = [
-    ("纯文本", @encoding/utf8.encode(text_10_times)),
+    ("纯文本", @utf8.encode(text_10_times)),
     ("重复数据", repeated_bytes),
     ("随机数据", create_random_bytes(200))
   ]
@@ -140,6 +140,51 @@ pub fn demo_method_comparison() -> Unit {
     println("  \{comp_name} -> \{comp_size} 字节 (比率: \{comp_ratio}%)")
   }
   
+  println("\n" + @zstd_test.repeat_string("=", 60))
+}
+
+pub fn demo_streaming_compression() -> Unit {
+  println("\n" + @zstd_test.repeat_string("=", 60))
+  println("流式压缩演示")
+  println(@zstd_test.repeat_string("=", 60))
+
+  let chunk_pattern = "ABCD1234"
+  let chunk1 = @utf8.encode(repeat_text(chunk_pattern, 16384))
+  let chunk2 = chunk1
+  let chunk3 = @utf8.encode("tail-" + @zstd_test.repeat_string("B", 8000))
+
+  let compressor = @zstd.create_streaming_compressor_with_checksum(5, true)
+
+  let out1 = match @zstd.write_streaming_chunk(compressor, chunk1) {
+    Ok(bytes) => bytes
+    Err(e) => { println("write chunk1 失败: \{e}"); return }
+  }
+  let out2 = match @zstd.write_streaming_chunk(compressor, chunk2) {
+    Ok(bytes) => bytes
+    Err(e) => { println("write chunk2 失败: \{e}"); return }
+  }
+  let flushed = match @zstd.flush_streaming_compressor(compressor) {
+    Ok(bytes) => bytes
+    Err(e) => { println("flush 失败: \{e}"); return }
+  }
+  let out3 = match @zstd.write_streaming_chunk(compressor, chunk3) {
+    Ok(bytes) => bytes
+    Err(e) => { println("write chunk3 失败: \{e}"); return }
+  }
+  let tail = match @zstd.finish_streaming_compressor(compressor) {
+    Ok(bytes) => bytes
+    Err(e) => { println("finish 失败: \{e}"); return }
+  }
+
+  let compressed = out1 + out2 + flushed + out3 + tail
+  let original = chunk1 + chunk2 + chunk3
+  let restored = @zstd.decompress(compressed)
+  let stats = @zstd.get_streaming_compressor_stats(compressor)
+
+  println("  原始大小: \{original.length()} 字节")
+  println("  压缩大小: \{compressed.length()} 字节")
+  println("  数据校验: " + (if original == restored { "通过" } else { "失败" }))
+  println(@zstd.format_streaming_compressor_stats(stats))
   println("\n" + @zstd_test.repeat_string("=", 60))
 }
 

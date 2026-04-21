@@ -15,6 +15,7 @@ pub fn run_all_basic_tests() -> Bool {
     ("RLE Literals", test_rle_literals_block()),
     ("FSE Bitstream", test_fse_bitstream()),
     ("FSE Encode Simple", test_fse_encode_simple()),
+    ("Streaming Compression", test_streaming_compression()),
     ("Single Byte", test_single_byte()),
     ("Invalid Magic", test_invalid_magic()),
     ("Large Offset", test_large_offset()),
@@ -27,7 +28,7 @@ pub fn run_all_basic_tests() -> Bool {
 
 /// Test basic compression and decompression
 fn test_basic_compression() -> Bool {
-  let test_data = @encoding/utf8.encode("Hello, MoonBit ZSTD!")
+  let test_data = @utf8.encode("Hello, MoonBit ZSTD!")
 
   let compressed = match @zstd.compress(test_data) {
     Ok(c) => c
@@ -47,7 +48,7 @@ fn test_basic_compression() -> Bool {
 
 /// Test ZSTD format detection
 fn test_format_detection() -> Bool {
-  let test_data = @encoding/utf8.encode("Hello, World!")
+  let test_data = @utf8.encode("Hello, World!")
   let compressed = match @zstd.compress(test_data) {
     Ok(c) => c
     Err(_) => return false
@@ -58,7 +59,7 @@ fn test_format_detection() -> Bool {
 
 /// Test file analysis
 fn test_file_analysis() -> Bool {
-  let test_data = @encoding/utf8.encode("Test data for analysis")
+  let test_data = @utf8.encode("Test data for analysis")
   let compressed = match @zstd.compress(test_data) {
     Ok(c) => c
     Err(_) => return false
@@ -70,7 +71,7 @@ fn test_file_analysis() -> Bool {
 
 /// Test different compression levels
 fn test_compression_levels() -> Bool {
-  let test_data = @encoding/utf8.encode("Test data for different compression levels")
+  let test_data = @utf8.encode("Test data for different compression levels")
 
   // Use default compression since CompressionLevel enum cannot be constructed
   let compressed = match @zstd.compress(test_data) {
@@ -95,7 +96,7 @@ fn test_empty_data() -> Bool {
 
 /// Test data integrity analysis
 fn test_data_integrity() -> Bool {
-  let test_data = @encoding/utf8.encode("Data integrity test")
+  let test_data = @utf8.encode("Data integrity test")
   let integrity = @zstd.analyze_data_integrity(test_data)
   
   integrity.data_density >= 0.0 && integrity.data_density <= 1.0
@@ -108,7 +109,7 @@ fn test_compressed_block() -> Bool {
   for _i = 0; _i < 10; _i = _i + 1 {
     test_text = test_text + "The quick brown fox jumps over the lazy dog. "
   }
-  let test_data = @encoding/utf8.encode(test_text)
+  let test_data = @utf8.encode(test_text)
 
   let compressed = match @zstd.compress(test_data) {
     Ok(c) => c
@@ -145,7 +146,7 @@ fn test_multi_sequence_block() -> Bool {
   for _i = 0; _i < 5; _i = _i + 1 {
     test_text = test_text + "DDDD EEEE FFFF "
   }
-  let test_data = @encoding/utf8.encode(test_text)
+  let test_data = @utf8.encode(test_text)
 
   let compressed = match @zstd.compress(test_data) {
     Ok(c) => c
@@ -212,9 +213,9 @@ pub fn run_all_dictionary_tests() -> Bool {
 
 /// Test dictionary creation
 fn test_dictionary_creation() -> Bool {
-  let sample1 = @encoding/utf8.encode("The quick brown fox jumps over the lazy dog")
-  let sample2 = @encoding/utf8.encode("The quick brown cat sleeps near the lazy dog")
-  let sample3 = @encoding/utf8.encode("The quick brown bird flies over the lazy cat")
+  let sample1 = @utf8.encode("The quick brown fox jumps over the lazy dog")
+  let sample2 = @utf8.encode("The quick brown cat sleeps near the lazy dog")
+  let sample3 = @utf8.encode("The quick brown bird flies over the lazy cat")
   
   let samples = [sample1, sample2, sample3]
   let dict_result = @zstd_dictionary.build_dictionary(samples, 100)
@@ -230,9 +231,9 @@ fn test_dictionary_creation() -> Bool {
 /// Test dictionary compression
 fn test_dictionary_compression() -> Bool {
   // 创建样本数据
-  let sample1 = @encoding/utf8.encode("Hello MoonBit ZSTD")
-  let sample2 = @encoding/utf8.encode("Hello MoonBit World")
-  let sample3 = @encoding/utf8.encode("Hello MoonBit Language")
+  let sample1 = @utf8.encode("Hello MoonBit ZSTD")
+  let sample2 = @utf8.encode("Hello MoonBit World")
+  let sample3 = @utf8.encode("Hello MoonBit Language")
   
   let samples = [sample1, sample2, sample3]
   
@@ -241,7 +242,7 @@ fn test_dictionary_compression() -> Bool {
   match dict_result {
     Ok(dict) => {
       // 使用字典压缩测试数据
-      let test_data = @encoding/utf8.encode("Hello MoonBit Testing")
+      let test_data = @utf8.encode("Hello MoonBit Testing")
       let compress_result = @zstd_dictionary.compress_with_dictionary(test_data, dict)
       
       match compress_result {
@@ -259,15 +260,15 @@ fn test_dictionary_compression() -> Bool {
 /// Test dictionary decompression
 fn test_dictionary_decompression() -> Bool {
   // 创建样本和字典
-  let sample1 = @encoding/utf8.encode("Hello MoonBit ZSTD")
-  let sample2 = @encoding/utf8.encode("Hello MoonBit World")
+  let sample1 = @utf8.encode("Hello MoonBit ZSTD")
+  let sample2 = @utf8.encode("Hello MoonBit World")
   let samples = [sample1, sample2]
   
   let dict_result = @zstd_dictionary.build_dictionary(samples, 50)
   match dict_result {
     Ok(dict) => {
       // 原始数据
-      let original_data = @encoding/utf8.encode("Hello MoonBit Testing")
+      let original_data = @utf8.encode("Hello MoonBit Testing")
       
       // 使用字典压缩
       let compress_result = @zstd_dictionary.compress_with_dictionary(original_data, dict)
@@ -293,9 +294,9 @@ fn test_dictionary_decompression() -> Bool {
 /// Test dictionary benefit calculation
 fn test_dictionary_benefit() -> Bool {
   // 创建样本数据
-  let sample1 = @encoding/utf8.encode("Hello MoonBit ZSTD compression")
-  let sample2 = @encoding/utf8.encode("Hello MoonBit ZSTD decompression")
-  let sample3 = @encoding/utf8.encode("Hello MoonBit ZSTD testing")
+  let sample1 = @utf8.encode("Hello MoonBit ZSTD compression")
+  let sample2 = @utf8.encode("Hello MoonBit ZSTD decompression")
+  let sample3 = @utf8.encode("Hello MoonBit ZSTD testing")
   
   let samples = [sample1, sample2, sample3]
   
@@ -304,7 +305,7 @@ fn test_dictionary_benefit() -> Bool {
   match dict_result {
     Ok(dict) => {
       // 计算收益
-      let test_data = @encoding/utf8.encode("Hello MoonBit ZSTD performance")
+      let test_data = @utf8.encode("Hello MoonBit ZSTD performance")
       let benefit = @zstd_dictionary.calculate_dictionary_benefit(test_data, dict)
       
       // 收益应该在 0.0 到 1.0 之间（0% 到 100%）
@@ -317,9 +318,9 @@ fn test_dictionary_benefit() -> Bool {
 /// Test Cover algorithm for dictionary building
 fn test_cover_algorithm() -> Bool {
   // 创建具有重复模式的样本数据
-  let sample1 = @encoding/utf8.encode("pattern pattern pattern data1")
-  let sample2 = @encoding/utf8.encode("pattern pattern pattern data2")
-  let sample3 = @encoding/utf8.encode("pattern pattern pattern data3")
+  let sample1 = @utf8.encode("pattern pattern pattern data1")
+  let sample2 = @utf8.encode("pattern pattern pattern data2")
+  let sample3 = @utf8.encode("pattern pattern pattern data3")
   
   let samples = [sample1, sample2, sample3]
   
@@ -419,6 +420,118 @@ fn test_large_data() -> Bool {
     }
     Err(_) => false
   }
+}
+
+/// Test streaming compression lifecycle.
+///
+/// 目标：
+/// - 验证 `create / write / flush / finish` 可以拼出完整合法帧
+/// - 验证跨多次写入后，最终解压结果与原始输入一致
+/// - 验证中途 `flush` 不会破坏帧结构
+fn test_streaming_compression() -> Bool {
+  let pattern: Array[Byte] = [0x41, 0x42, 0x43, 0x44, 0x31, 0x32, 0x33, 0x34]
+  let chunk1_array: Array[Byte] = []
+  for _i = 0; _i < 16384; _i = _i + 1 {
+    for j = 0; j < pattern.length(); j = j + 1 {
+      chunk1_array.push(pattern[j])
+    }
+  }
+  let chunk1 = Bytes::from_array(chunk1_array)
+  let chunk2 = chunk1
+  let chunk3 = Bytes::make(4096, 0x43)
+  let original = chunk1 + chunk2 + chunk3
+
+  let compressor = @zstd.create_streaming_compressor_with_checksum(3, true)
+
+  let out1 = match @zstd.write_streaming_chunk(compressor, chunk1) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
+  let out2 = match @zstd.write_streaming_chunk(compressor, chunk2) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
+  let flushed = match @zstd.flush_streaming_compressor(compressor) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
+  let out3 = match @zstd.write_streaming_chunk(compressor, chunk3) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
+  let final_bytes = match @zstd.finish_streaming_compressor(compressor) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
+
+  let compressed = out1 + out2 + flushed + out3 + final_bytes
+  let stats = @zstd.get_streaming_compressor_stats(compressor)
+  let decompressed = @zstd.decompress(compressed)
+
+  if !stats.finished || !stats.checksum_enabled {
+    println("  ❌ Streaming stats state invalid")
+    return false
+  }
+
+  if stats.total_input_size != original.length() {
+    println("  ❌ Streaming total_input_size mismatch")
+    return false
+  }
+
+  if stats.total_output_size != compressed.length() {
+    println("  ❌ Streaming total_output_size mismatch")
+    return false
+  }
+
+  if stats.emitted_block_count < 2 {
+    println("  ❌ Streaming emitted_block_count too small")
+    return false
+  }
+
+  if stats.compressed_block_count == 0 {
+    println("  ❌ Streaming compressed_block_count is zero")
+    return false
+  }
+
+  if stats.final_checksum == 0U {
+    println("  ❌ Streaming final checksum is zero")
+    return false
+  }
+
+  if compressed.length() < 4 {
+    println("  ❌ Streaming compressed output too short")
+    return false
+  }
+
+  let checksum_offset = compressed.length() - 4
+  let checksum_from_output = compressed[checksum_offset].to_uint() |
+    (compressed[checksum_offset + 1].to_uint() << 8) |
+    (compressed[checksum_offset + 2].to_uint() << 16) |
+    (compressed[checksum_offset + 3].to_uint() << 24)
+  if checksum_from_output != stats.final_checksum {
+    println("  ❌ Streaming checksum bytes mismatch")
+    return false
+  }
+
+  if decompressed.length() != original.length() {
+    if decompressed.length() == 0 {
+      match @zstd_decoder.decompress(compressed) {
+        Ok(_) => ()
+        Err(e) => println("  ❌ Streaming decoder error: \{@zstd_core.error_to_string(e)}")
+      }
+    }
+    println("  ❌ Streaming decompressed length mismatch: original=\{original.length()} decoded=\{decompressed.length()}")
+    return false
+  }
+
+  for i = 0; i < original.length(); i = i + 1 {
+    if original[i] != decompressed[i] {
+      println("  ❌ Streaming first byte mismatch at index \{i}: original=\{original[i].to_int()} decoded=\{decompressed[i].to_int()}")
+      return false
+    }
+  }
+
+  verify_data_equal(original, decompressed)
 }
 
 /// Test corrupted data handling

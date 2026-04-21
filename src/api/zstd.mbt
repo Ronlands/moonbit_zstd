@@ -12,14 +12,6 @@ pub enum CompressionLevel {
   Best
 }
 
-// Helper function to convert Result[T, String] to Result[T, ZSTDError]
-fn[T] to_zstd_error(result: Result[T, String]) -> Result[T, @zstd_core.ZSTDError] {
-  match result {
-    Ok(v) => Ok(v)
-    Err(msg) => Err(@zstd_core.message_error(msg))
-  }
-}
-
 /// Result of analyzing a ZSTD compressed file's structure.
 ///
 /// Contains frame header information, block metadata, and validation status.
@@ -51,6 +43,122 @@ pub struct DataIntegrityAnalysis {
 pub struct SlidingWindowDecoder {
   mut context: @zstd_decoder.DecoderContext
   window_size: Int
+}
+
+/// 流式压缩器上下文。
+///
+/// 这是 API 层对 encoder 流式压缩状态的轻量包装，
+/// 对外暴露 `create / write / flush / finish / reset` 生命周期接口。
+pub struct StreamingCompressor {
+  context: @zstd_encoder.StreamingCompressor
+}
+
+/// 流式压缩统计结果。
+///
+/// 这是 API 层对 encoder 统计快照的映射版本，便于调用方直接读取。
+pub struct StreamingCompressionStats {
+  total_input_size: Int
+  total_output_size: Int
+  emitted_block_count: Int
+  raw_block_count: Int
+  rle_block_count: Int
+  compressed_block_count: Int
+  flush_count: Int
+  auto_flush_count: Int
+  pending_size: Int
+  history_size: Int
+  window_size: Int
+  checksum_enabled: Bool
+  current_checksum: UInt
+  final_checksum: UInt
+  header_written: Bool
+  finished: Bool
+}
+
+/// 创建流式压缩器。
+///
+/// 说明：
+/// - `level` 会按 encoder 规则约束到 `[1, 22]`
+/// - 该接口默认不写 checksum
+pub fn create_streaming_compressor(level: Int) -> StreamingCompressor {
+  let config = @zstd_encoder.create_config_with_level(level)
+  let context = @zstd_encoder.new_streaming_compressor(config, false)
+  StreamingCompressor::{ context }
+}
+
+/// 创建可选 checksum 的流式压缩器。
+pub fn create_streaming_compressor_with_checksum(level: Int, with_checksum: Bool) -> StreamingCompressor {
+  let config = @zstd_encoder.create_config_with_level(level)
+  let context = @zstd_encoder.new_streaming_compressor(config, with_checksum)
+  StreamingCompressor::{ context }
+}
+
+/// 写入一个流式压缩 chunk。
+///
+/// 返回值只包含本次新增产出的字节，可直接顺序拼接到最终输出流。
+pub fn write_streaming_chunk(
+  compressor: StreamingCompressor,
+  chunk: Bytes
+) -> Result[Bytes, @zstd_core.ZSTDError] {
+  @zstd_encoder.write_streaming_chunk(compressor.context, chunk)
+}
+
+/// 强制把当前待处理数据落成一个非最后块。
+pub fn flush_streaming_compressor(compressor: StreamingCompressor) -> Result[Bytes, @zstd_core.ZSTDError] {
+  @zstd_encoder.flush_streaming_compressor(compressor.context)
+}
+
+/// 结束当前流式压缩帧并返回最后字节序列。
+pub fn finish_streaming_compressor(compressor: StreamingCompressor) -> Result[Bytes, @zstd_core.ZSTDError] {
+  @zstd_encoder.finish_streaming_compressor(compressor.context)
+}
+
+/// 重置流式压缩器内部状态。
+pub fn reset_streaming_compressor(compressor: StreamingCompressor) -> Unit {
+  @zstd_encoder.reset_streaming_compressor(compressor.context)
+}
+
+/// 获取流式压缩统计快照。
+pub fn get_streaming_compressor_stats(compressor: StreamingCompressor) -> StreamingCompressionStats {
+  let stats = @zstd_encoder.get_streaming_compression_stats(compressor.context)
+  StreamingCompressionStats::{
+    total_input_size: stats.total_input_size,
+    total_output_size: stats.total_output_size,
+    emitted_block_count: stats.emitted_block_count,
+    raw_block_count: stats.raw_block_count,
+    rle_block_count: stats.rle_block_count,
+    compressed_block_count: stats.compressed_block_count,
+    flush_count: stats.flush_count,
+    auto_flush_count: stats.auto_flush_count,
+    pending_size: stats.pending_size,
+    history_size: stats.history_size,
+    window_size: stats.window_size,
+    checksum_enabled: stats.checksum_enabled,
+    current_checksum: stats.current_checksum,
+    final_checksum: stats.final_checksum,
+    header_written: stats.header_written,
+    finished: stats.finished,
+  }
+}
+
+/// 格式化流式压缩统计信息。
+pub fn format_streaming_compressor_stats(stats: StreamingCompressionStats) -> String {
+  "流式压缩统计:\n" +
+  "  输入字节: " + stats.total_input_size.to_string() + "\n" +
+  "  输出字节: " + stats.total_output_size.to_string() + "\n" +
+  "  已发块数: " + stats.emitted_block_count.to_string() +
+  " (raw=" + stats.raw_block_count.to_string() +
+  ", rle=" + stats.rle_block_count.to_string() +
+  ", compressed=" + stats.compressed_block_count.to_string() + ")\n" +
+  "  flush 次数: " + stats.flush_count.to_string() +
+  " (自动=" + stats.auto_flush_count.to_string() + ")\n" +
+  "  pending 字节: " + stats.pending_size.to_string() + "\n" +
+  "  历史窗口字节: " + stats.history_size.to_string() + "/" + stats.window_size.to_string() + "\n" +
+  "  checksum 开启: " + (if stats.checksum_enabled { "是" } else { "否" }) + "\n" +
+  "  当前 checksum: " + stats.current_checksum.to_string() + "\n" +
+  "  最终 checksum: " + stats.final_checksum.to_string() + "\n" +
+  "  帧头已写: " + (if stats.header_written { "是" } else { "否" }) + "\n" +
+  "  已完成: " + (if stats.finished { "是" } else { "否" })
 }
 
 /// Compress data with a numeric compression level (1-22).
@@ -92,7 +200,7 @@ pub fn compress_as_compressed(data: Bytes, level: Int) -> Result[Bytes, @zstd_co
 /// # Example
 ///
 /// ```moonbit no-check
-/// let original = @encoding/utf8.encode("Hello, ZSTD!")
+/// let original = @utf8.encode("Hello, ZSTD!")
 /// match @zstd.compress(original) {
 ///   Ok(compressed) => {
 ///     let decompressed = @zstd.decompress(compressed)
@@ -134,7 +242,7 @@ pub enum CompressionMethod {
   Raw
   RLE
   Compressed
-} derive(Show)
+} derive(Debug)
 
 fn choose_compression_method(data: Bytes) -> (String, Byte, Int) {
   if data.length() == 0 { return ("raw", 0, 0) }
@@ -646,7 +754,7 @@ pub fn run_all_compatibility_tests() -> Bool {
 
 /// 测试基础压缩和解压缩
 fn test_basic_compression() -> Bool {
-  let test_data = @encoding/utf8.encode("Hello, MoonBit ZSTD!")
+  let test_data = @utf8.encode("Hello, MoonBit ZSTD!")
 
   // Test compression
   let compressed = match compress(test_data) {
@@ -675,7 +783,7 @@ fn test_basic_compression() -> Bool {
 
 /// 测试ZSTD格式检测
 fn test_format_detection() -> Bool {
-  let test_data = @encoding/utf8.encode("Hello, World!")
+  let test_data = @utf8.encode("Hello, World!")
   let compressed = match compress(test_data) {
     Ok(c) => c
     Err(_) => return false
@@ -687,7 +795,7 @@ fn test_format_detection() -> Bool {
 
 /// 测试文件分析
 fn test_file_analysis() -> Bool {
-  let test_data = @encoding/utf8.encode("Test data for analysis")
+  let test_data = @utf8.encode("Test data for analysis")
   let compressed = match compress(test_data) {
     Ok(c) => c
     Err(_) => return false
@@ -700,7 +808,7 @@ fn test_file_analysis() -> Bool {
 
 /// 测试不同压缩级别
 fn test_compression_levels() -> Bool {
-  let test_data = @encoding/utf8.encode("Test data for different compression levels")
+  let test_data = @utf8.encode("Test data for different compression levels")
 
   // Test all compression levels
   let fast_compressed = match compress_with_level(test_data, CompressionLevel::Fast) {
@@ -742,7 +850,7 @@ fn test_empty_data() -> Bool {
 
 /// 测试数据完整性分析
 fn test_data_integrity() -> Bool {
-  let test_data = @encoding/utf8.encode("Data integrity test")
+  let test_data = @utf8.encode("Data integrity test")
   let integrity = analyze_data_integrity(test_data)
   
   // Should return valid analysis
@@ -751,7 +859,7 @@ fn test_data_integrity() -> Bool {
 
 /// 测试魔数兼容性
 fn test_magic_number_compliance() -> Bool {
-  let test_data = @encoding/utf8.encode("Magic number test")
+  let test_data = @utf8.encode("Magic number test")
   let compressed = match compress(test_data) {
     Ok(c) => c
     Err(_) => return false
@@ -772,7 +880,7 @@ fn test_magic_number_compliance() -> Bool {
 
 /// 测试帧头格式兼容性
 fn test_frame_header_compliance() -> Bool {
-  let test_data = @encoding/utf8.encode("Frame header test")
+  let test_data = @utf8.encode("Frame header test")
   let compressed = match compress(test_data) {
     Ok(c) => c
     Err(_) => return false

@@ -45,7 +45,7 @@ pub fn test_user_official_file() -> Unit {
   if decompressed == original {
     println("✓ 解压成功：数据完全一致")
     let text = try {
-      @encoding/utf8.decode(decompressed)
+      @utf8.decode(decompressed)
     } catch {
       _ => "(binary data)"
     }

@@ -8,6 +8,7 @@
 ## 2. 文件索引
 
 - `basic_tests.mbt`：基础压缩/解压、格式检测、文件分析、空数据等测试。
+  - 包含流式压缩生命周期测试，校验 `write / flush / finish`、统计快照与 checksum 输出。
 - `compliance_tests.mbt`：魔数、帧头、块类型、校验和、字节序兼容性测试。
 - `encoding_tests.mbt`：`LL / ML / OF` 编码与序列往返测试。
 - `golden_tests.mbt`：官方样本与错误样本测试。

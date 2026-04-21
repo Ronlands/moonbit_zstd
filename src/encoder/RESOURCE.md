@@ -9,8 +9,11 @@
 ## 2. 核心类型索引
 
 - `Compressor`
+- `LZSequence`（私有）
 - `CompressionConfig`
 - `CompressionContext`
+- `StreamingCompressor`
+- `StreamingCompressionStats`
 
 ## 3. 类型与字段说明
 
@@ -30,11 +33,76 @@
   - `search_depth`：搜索深度，越大通常压缩率更高但更慢
 - 用途：统一描述压缩强度与 LZ77 搜索参数。
 
+### 3.2.1 `LZSequence`（私有）
+
+- 字段：
+  - `literal_length`
+  - `match_length`
+  - `offset`
+- 说明：
+  - 这是 encoder 内部使用的私有序列对象。
+  - 本次已从原先同名的 `Sequence` 重命名为 `LZSequence`，用于避免与 `core.Sequence` / `entropy.Sequence` 产生同名漂移。
+
 ### 3.3 `CompressionContext`
 
 - 字段：
   - `config`
 - 用途：封装压缩配置，便于后续扩展上下文。
+
+### 3.4 `StreamingCompressor`
+
+- 字段：
+  - `config`
+  - `with_checksum`
+  - `pending`
+  - `history_window`
+  - `header_written`
+  - `finished`
+  - `total_input_size`
+  - `total_output_size`
+  - `emitted_block_count`
+  - `raw_block_count`
+  - `rle_block_count`
+  - `compressed_block_count`
+  - `flush_count`
+  - `auto_flush_count`
+  - `checksum_state`
+  - `final_checksum`
+- 用途：最小可用的流式压缩状态机。
+- 生命周期：
+  - `new_streaming_compressor`
+  - `write_streaming_chunk`
+  - `flush_streaming_compressor`
+  - `finish_streaming_compressor`
+  - `reset_streaming_compressor`
+- 当前语义：
+  - 支持边写边产出完整 ZSTD 帧字节流
+  - 不预写 `Frame_Content_Size`
+  - 支持基于同帧历史窗口的跨 chunk LZ77 继承
+  - 历史复用使用“安全前缀复用 + 单序列直写”保守策略
+  - 内部自动落块粒度当前为 `64KB`
+  - 当单序列直写超出当前编码能力时，会自动拆成多序列再走预定义 FSE
+
+### 3.5 `StreamingCompressionStats`
+
+- 语义：流式压缩运行态快照。
+- 字段：
+  - `total_input_size`
+  - `total_output_size`
+  - `emitted_block_count`
+  - `raw_block_count`
+  - `rle_block_count`
+  - `compressed_block_count`
+  - `flush_count`
+  - `auto_flush_count`
+  - `pending_size`
+  - `history_size`
+  - `window_size`
+  - `checksum_enabled`
+  - `current_checksum`
+  - `final_checksum`
+  - `header_written`
+  - `finished`
 
 ## 4. 关键常量
 
@@ -89,6 +157,25 @@
 - 否则
   - 使用 4-byte FCS
 
+### 6.5 流式帧头写入
+
+- 流式压缩器当前使用：
+  - 非 `single_segment`
+  - 不预写 `Frame_Content_Size`
+  - 写入 `Window_Descriptor`
+- 原因：
+  - 流式场景下写入开始时通常未知总输入长度
+  - 该策略允许边接收输入边产出合法帧
+
+### 6.6 流式落块策略
+
+- 普通一次性压缩仍以 `128KB` 为最大块大小。
+- 流式压缩器当前内部自动落块粒度为 `64KB`。
+- 原因：
+  - 当前历史复用路径依赖单序列直写
+  - 单序列直写超限时会自动拆成多序列
+  - 但当前为优先保证稳定性，流式路径仍维持 `64KB` 粒度
+
 ## 7. 校验和口径
 
 - `calculate_checksum` 当前是 `Simple XXH32-like checksum`
@@ -110,3 +197,5 @@
 ## 10. 注意事项
 
 - 本模块内含较多协议 helper，项目没有独立 `base/tool` 目录时，应把这些 helper 视为“局部协议工具”，而不是抽象成全局工具层。
+- 当前流式压缩器优先保证“协议正确性和生命周期可用性”，后续若需要更高压缩率，应继续补跨 chunk 的匹配状态继承。
+- 当前已经有基础跨 chunk 历史继承，但还不是完整通用增量解析器；若继续演进，应优先补完整的流式序列生成和更标准的单序列大值编码路径。

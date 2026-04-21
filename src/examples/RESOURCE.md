@@ -9,6 +9,7 @@
 
 - `basic_demos.mbt`：基础压缩、文件分析、完整性分析、格式检测、压缩级别、Huffman 演示。
 - `advanced_compression.mbt`：压缩方法与不同模式比较。
+  - 包含 `demo_streaming_compression`，用于演示流式压缩生命周期与统计输出。
 - `file_operations.mbt`：文件压缩相关示例。
 - `official_compatibility.mbt`：与官方工具交互的兼容性示例。
 - `rfc_demos.mbt`：RFC 与金标样本演示。

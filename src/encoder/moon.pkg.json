@@ -12,7 +12,18 @@
   "test-import": [],
   "link": {
     "wasm": {
-      "exports": ["new_compressor", "compress", "compress_with_context"]
+      "exports": [
+        "new_compressor",
+        "compress",
+        "compress_with_context",
+        "new_streaming_compressor",
+        "write_streaming_chunk",
+        "flush_streaming_compressor",
+        "finish_streaming_compressor",
+        "reset_streaming_compressor",
+        "get_streaming_compression_stats",
+        "format_streaming_compression_stats"
+      ]
     }
   }
 }

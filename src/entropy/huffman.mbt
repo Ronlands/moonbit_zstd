@@ -18,7 +18,7 @@ pub enum HuffmanNode {
 pub struct HuffmanWeights {
   weights: Array[Int]
   count: Int
-} derive(Show)
+} derive(Debug)
 
 /// 创建空的Huffman表
 pub fn create_huffman_table() -> HuffmanTable {
