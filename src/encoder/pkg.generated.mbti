@@ -1,24 +1,24 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "Ronlands/moonbit_zstd/encoder"
 
-import(
-  "Ronlands/moonbit_zstd/core"
-)
+import {
+  "Ronlands/moonbit_zstd/core",
+}
 
 // Values
 pub fn compress(Bytes) -> Result[Bytes, @core.ZSTDError]
 
-pub fn compress_as_compressed_block(Bytes, CompressionConfig) -> Result[Bytes, String]
+pub fn compress_as_compressed_block(Bytes, CompressionConfig) -> Result[Bytes, @core.ZSTDError]
 
-pub fn compress_as_raw_block(Bytes, CompressionConfig) -> Result[Bytes, String]
+pub fn compress_as_raw_block(Bytes, CompressionConfig) -> Result[Bytes, @core.ZSTDError]
 
-pub fn compress_as_rle_block(Bytes, CompressionConfig) -> Result[Bytes, String]
+pub fn compress_as_rle_block(Bytes, CompressionConfig) -> Result[Bytes, @core.ZSTDError]
 
-pub fn compress_data(Bytes, CompressionConfig) -> Result[Bytes, String]
+pub fn compress_data(Bytes, CompressionConfig) -> Result[Bytes, @core.ZSTDError]
 
-pub fn compress_data_with_checksum(Bytes, CompressionConfig, Bool) -> Result[Bytes, String]
+pub fn compress_data_with_checksum(Bytes, CompressionConfig, Bool) -> Result[Bytes, @core.ZSTDError]
 
-pub fn compress_data_with_dict(Bytes, CompressionConfig, Bytes, UInt) -> Result[Bytes, String]
+pub fn compress_data_with_dict(Bytes, CompressionConfig, Bytes, UInt) -> Result[Bytes, @core.ZSTDError]
 
 pub fn compress_with_context(Compressor, Bytes) -> Result[(Compressor, Bytes), @core.ZSTDError]
 
@@ -30,7 +30,21 @@ pub fn create_default_config() -> CompressionConfig
 
 pub fn estimate_compressed_size(Bytes, CompressionConfig) -> Int
 
+pub fn finish_streaming_compressor(StreamingCompressor) -> Result[Bytes, @core.ZSTDError]
+
+pub fn flush_streaming_compressor(StreamingCompressor) -> Result[Bytes, @core.ZSTDError]
+
+pub fn format_streaming_compression_stats(StreamingCompressionStats) -> String
+
+pub fn get_streaming_compression_stats(StreamingCompressor) -> StreamingCompressionStats
+
 pub fn new_compressor() -> Compressor
+
+pub fn new_streaming_compressor(CompressionConfig, Bool) -> StreamingCompressor
+
+pub fn reset_streaming_compressor(StreamingCompressor) -> Unit
+
+pub fn write_streaming_chunk(StreamingCompressor, Bytes) -> Result[Bytes, @core.ZSTDError]
 
 // Errors
 
@@ -50,6 +64,44 @@ pub struct Compressor {
   level : Int
   hash_table : Array[Int]
   window_size : Int
+}
+
+pub struct StreamingCompressionStats {
+  total_input_size : Int
+  total_output_size : Int
+  emitted_block_count : Int
+  raw_block_count : Int
+  rle_block_count : Int
+  compressed_block_count : Int
+  flush_count : Int
+  auto_flush_count : Int
+  pending_size : Int
+  history_size : Int
+  window_size : Int
+  checksum_enabled : Bool
+  current_checksum : UInt
+  final_checksum : UInt
+  header_written : Bool
+  finished : Bool
+}
+
+pub struct StreamingCompressor {
+  config : CompressionConfig
+  with_checksum : Bool
+  mut pending : Array[Byte]
+  mut history_window : Array[Byte]
+  mut header_written : Bool
+  mut finished : Bool
+  mut total_input_size : Int
+  mut total_output_size : Int
+  mut emitted_block_count : Int
+  mut raw_block_count : Int
+  mut rle_block_count : Int
+  mut compressed_block_count : Int
+  mut flush_count : Int
+  mut auto_flush_count : Int
+  mut checksum_state : UInt
+  mut final_checksum : UInt
 }
 
 // Type aliases

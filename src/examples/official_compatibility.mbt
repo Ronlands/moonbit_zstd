@@ -31,7 +31,7 @@ pub fn test_user_official_file() -> Unit {
   
   println("原始文件: \{original.length()} 字节")
   println("压缩文件: \{compressed.length()} 字节")
-  println("压缩比: \{compressed.length() * 100 / original.length()}%")
+  println("压缩比: \{original.length().to_double() / compressed.length().to_double()}x")
   
   let analysis = @zstd.analyze_file(compressed)
   if analysis.is_valid {
@@ -41,7 +41,13 @@ pub fn test_user_official_file() -> Unit {
     return
   }
   
-  let decompressed = @zstd.decompress(compressed)
+  let decompressed = match @zstd.decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(e) => {
+      println("解压失败: \{e}")
+      return
+    }
+  }
   if decompressed == original {
     println("✓ 解压成功：数据完全一致")
     let text = try {

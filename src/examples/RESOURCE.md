@@ -21,7 +21,7 @@
 
 ## 4. 统计口径提醒
 
-- 本模块中某些 demo 打印的“压缩比”口径并不完全统一。
+- 本模块中的“压缩比”统一按 `original_size / compressed_size` 展示为 `x`。
 - 后续新增示例时，统一要求：
   - `compression_ratio = original_size / compressed_size`
   - 若输出百分比，必须显式标为“压缩后占原始大小百分比”或类似语义。

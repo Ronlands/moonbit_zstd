@@ -277,7 +277,10 @@ fn encode_sequences_compressed_fse(sequences: Array[LZSequence], output: Array[B
   if sequences.length() == 0 { return Ok(()) }
 
   // 第 1 步：抽取三类符号码流。
-  let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(sequences)
+  let (ll_symbols, ml_symbols, of_symbols) = match extract_sequence_symbols(sequences) {
+    Ok(symbols) => symbols
+    Err(e) => return Err(e)
+  }
 
   // 第 2 步：统计频率并归一化为 FSE 目标和。
   let ll_freqs = count_frequencies(ll_symbols, 35)
@@ -429,25 +432,25 @@ fn encode_ml_symbol(ml: Int) -> Int {
 }
 
 /// 把 offset 映射成 OF 符号，并兼容 repeat offset 标记。
-fn encode_of_symbol(offset: Int) -> Int {
+fn encode_of_symbol(offset: Int) -> Result[Int, @zstd_core.ZSTDError] {
   if offset == -1 {
-    return 0
+    return Ok(0)
   } else if offset == -2 {
-    return 1
+    return Ok(1)
   } else if offset == -3 {
-    return 1
+    return Ok(1)
   }
   if offset < 1 {
-    abort("Invalid offset: must be >= 1")
+    return Err(@zstd_core.message_error("Invalid offset: must be >= 1"))
   }
   match @zstd_entropy.encode_of(offset) {
-    Ok((code, _)) => code
-    Err(e) => abort("encode_of failed: " + e)
+    Ok((code, _)) => Ok(code)
+    Err(e) => Err(@zstd_core.message_error("encode_of failed: " + e))
   }
 }
 
 /// 提取序列符号（用于 FSE 编码）
-fn extract_sequence_symbols(sequences: Array[LZSequence]) -> (Array[Int], Array[Int], Array[Int]) {
+fn extract_sequence_symbols(sequences: Array[LZSequence]) -> Result[(Array[Int], Array[Int], Array[Int]), @zstd_core.ZSTDError] {
   let ll_symbols: Array[Int] = []
   let ml_symbols: Array[Int] = []
   let of_symbols: Array[Int] = []
@@ -456,22 +459,25 @@ fn extract_sequence_symbols(sequences: Array[LZSequence]) -> (Array[Int], Array[
     let seq = sequences[i]
     ll_symbols.push(encode_ll_symbol(seq.literal_length))
     ml_symbols.push(encode_ml_symbol(seq.match_length))
-    of_symbols.push(encode_of_symbol(seq.offset))
+    match encode_of_symbol(seq.offset) {
+      Ok(symbol) => of_symbols.push(symbol)
+      Err(e) => return Err(e)
+    }
   }
 
-  (ll_symbols, ml_symbols, of_symbols)
+  Ok((ll_symbols, ml_symbols, of_symbols))
 }
 
 /// 按旧直写格式编码单个序列。
 ///
 /// 大值单序列会转到标准序列段格式，这里主要保留兼容能力。
-fn encode_single_sequence_direct(seq: LZSequence, output: Array[Byte]) -> Unit {
+fn encode_single_sequence_direct(seq: LZSequence, output: Array[Byte]) -> Result[Unit, @zstd_core.ZSTDError] {
   // 第 1 步：做数值边界与溢出保护。
   let ll = seq.literal_length
   let ml = seq.match_length
   let max_value = 16777216
-  if ll < 0 || ll >= max_value { abort("LL out of bounds") }
-  if ml < 3 || ml >= max_value { abort("ML out of bounds") }
+  if ll < 0 || ll >= max_value { return Err(@zstd_core.message_error("LL out of bounds")) }
+  if ml < 3 || ml >= max_value { return Err(@zstd_core.message_error("ML out of bounds")) }
 
   // 第 2 步：把 repeat offset 标记还原成真实 offset。
   let of = if seq.offset == -1 {
@@ -483,10 +489,10 @@ fn encode_single_sequence_direct(seq: LZSequence, output: Array[Byte]) -> Unit {
   } else {
     seq.offset
   }
-  if of < 1 || of >= max_value { abort("OF out of bounds") }
+  if of < 1 || of >= max_value { return Err(@zstd_core.message_error("OF out of bounds")) }
 
-  if ml > 2147483647 - of { abort("Integer overflow: ML + OF exceeds Int max") }
-  if ll > 2147483647 - ml - of { abort("Integer overflow: LL + ML + OF exceeds Int max") }
+  if ml > 2147483647 - of { return Err(@zstd_core.message_error("Integer overflow: ML + OF exceeds Int max")) }
+  if ll > 2147483647 - ml - of { return Err(@zstd_core.message_error("Integer overflow: LL + ML + OF exceeds Int max")) }
 
   // 第 3 步：按旧直写顺序依次写 LL、OF、ML。
   if ll < 128 {
@@ -526,6 +532,8 @@ fn encode_single_sequence_direct(seq: LZSequence, output: Array[Byte]) -> Unit {
     output.push((adjusted & 0xFF).to_byte())
     output.push(((adjusted >> 8) & 0xFF).to_byte())
   }
+
+  Ok(())
 }
 
 /// 使用预定义 FSE 表编码序列。
@@ -535,7 +543,10 @@ fn encode_sequences_predefined_fse(sequences: Array[LZSequence], output: Array[B
   }
 
   // 第 1 步：准备符号流与三张预定义表。
-  let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(sequences)
+  let (ll_symbols, ml_symbols, of_symbols) = match extract_sequence_symbols(sequences) {
+    Ok(symbols) => symbols
+    Err(e) => return Err(e)
+  }
 
   let ll_predefined = @zstd_entropy.normalize_counts(get_predefined_ll_weights_compressor(), 6)
   let ml_predefined = @zstd_entropy.normalize_counts(get_predefined_ml_weights_compressor(), 6)

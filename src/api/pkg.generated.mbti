@@ -1,44 +1,63 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "Ronlands/moonbit_zstd/api"
 
-import(
-  "Ronlands/moonbit_zstd/decoder"
-)
+import {
+  "Ronlands/moonbit_zstd/core",
+  "Ronlands/moonbit_zstd/decoder",
+  "Ronlands/moonbit_zstd/encoder",
+  "moonbitlang/core/debug",
+}
 
 // Values
 pub fn analyze_data_integrity(Bytes) -> DataIntegrityAnalysis
 
 pub fn analyze_file(Bytes) -> ZSTDFileAnalysis
 
-pub fn compress(Bytes) -> Bytes
+pub fn compress(Bytes) -> Result[Bytes, @core.ZSTDError]
 
-pub fn compress_advanced(Bytes, CompressionMethod, Int) -> Bytes
+pub fn compress_advanced(Bytes, CompressionMethod, Int) -> Result[Bytes, @core.ZSTDError]
 
-pub fn compress_as_compressed(Bytes, Int) -> Bytes
+pub fn compress_as_compressed(Bytes, Int) -> Result[Bytes, @core.ZSTDError]
 
-pub fn compress_as_raw(Bytes, Int) -> Bytes
+pub fn compress_as_raw(Bytes, Int) -> Result[Bytes, @core.ZSTDError]
 
-pub fn compress_as_rle(Bytes, Int) -> Bytes
+pub fn compress_as_rle(Bytes, Int) -> Result[Bytes, @core.ZSTDError]
 
-pub fn compress_with_level(Bytes, CompressionLevel) -> Bytes
+pub fn compress_with_level(Bytes, CompressionLevel) -> Result[Bytes, @core.ZSTDError]
 
-pub fn compress_with_level_int(Bytes, Int) -> Bytes
+pub fn compress_with_level_int(Bytes, Int) -> Result[Bytes, @core.ZSTDError]
 
 pub fn create_sliding_window_decoder(Int) -> SlidingWindowDecoder
 
-pub fn decompress(Bytes) -> Bytes
+pub fn create_streaming_compressor(Int) -> StreamingCompressor
 
-pub fn decompress_with_sliding_window(SlidingWindowDecoder, Bytes) -> Result[Bytes, String]
+pub fn create_streaming_compressor_with_checksum(Int, Bool) -> StreamingCompressor
+
+pub fn decompress(Bytes) -> Result[Bytes, @core.ZSTDError]
+
+pub fn decompress_with_sliding_window(SlidingWindowDecoder, Bytes) -> Result[Bytes, @core.ZSTDError]
 
 pub fn estimate_compressed_size(Bytes, CompressionLevel) -> Int
+
+pub fn finish_streaming_compressor(StreamingCompressor) -> Result[Bytes, @core.ZSTDError]
+
+pub fn flush_streaming_compressor(StreamingCompressor) -> Result[Bytes, @core.ZSTDError]
+
+pub fn format_streaming_compressor_stats(StreamingCompressionStats) -> String
+
+pub fn get_streaming_compressor_stats(StreamingCompressor) -> StreamingCompressionStats
 
 pub fn is_zstd_format(Bytes) -> Bool
 
 pub fn reset_sliding_window_decoder(SlidingWindowDecoder) -> Unit
 
+pub fn reset_streaming_compressor(StreamingCompressor) -> Unit
+
 pub fn run_all_basic_tests() -> Bool
 
 pub fn run_all_compatibility_tests() -> Bool
+
+pub fn write_streaming_chunk(StreamingCompressor, Bytes) -> Result[Bytes, @core.ZSTDError]
 
 // Errors
 
@@ -55,8 +74,7 @@ pub enum CompressionMethod {
   Raw
   RLE
   Compressed
-}
-pub impl Show for CompressionMethod
+} derive(@debug.Debug)
 
 pub struct DataIntegrityAnalysis {
   truncation_indicators : Int
@@ -68,6 +86,29 @@ pub struct DataIntegrityAnalysis {
 pub struct SlidingWindowDecoder {
   mut context : @decoder.DecoderContext
   window_size : Int
+}
+
+pub struct StreamingCompressionStats {
+  total_input_size : Int
+  total_output_size : Int
+  emitted_block_count : Int
+  raw_block_count : Int
+  rle_block_count : Int
+  compressed_block_count : Int
+  flush_count : Int
+  auto_flush_count : Int
+  pending_size : Int
+  history_size : Int
+  window_size : Int
+  checksum_enabled : Bool
+  current_checksum : UInt
+  final_checksum : UInt
+  header_written : Bool
+  finished : Bool
+}
+
+pub struct StreamingCompressor {
+  context : @encoder.StreamingCompressor
 }
 
 pub struct ZSTDFileAnalysis {

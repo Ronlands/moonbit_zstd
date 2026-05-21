@@ -39,7 +39,7 @@ pub fn print_result(r: BenchmarkResult) -> Unit {
   println("\{r.name}:")
   println("  原始大小: \{format_size(r.data_size)}")
   println("  压缩大小: \{format_size(r.compressed_size)}")
-  println("  压缩率: \{r.compression_ratio}x")
+  println("  压缩比: \{r.compression_ratio}x")
 }
 
 pub fn run_all_benchmarks() -> Unit {

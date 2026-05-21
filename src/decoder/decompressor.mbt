@@ -44,10 +44,14 @@ pub fn decompress(data : Bytes) -> @zstd_core.ZSTDResult[Bytes] {
 
   while pos < data.length() {
     // Check for ZSTD magic at current position
-    if pos + 4 > data.length() { break }
+    if pos + 4 > data.length() {
+      return Err(@zstd_core.parse_error("Trailing data after frame at offset " + pos.to_string()))
+    }
     let magic = (data[pos + 3].to_int() << 24) | (data[pos + 2].to_int() << 16) |
                 (data[pos + 1].to_int() << 8) | data[pos].to_int()
-    if magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT { break }
+    if magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT {
+      return Err(@zstd_core.invalid_magic_number_error())
+    }
 
     // Slice the remaining data from pos
     let remaining: Array[Byte] = []
@@ -55,12 +59,6 @@ pub fn decompress(data : Bytes) -> @zstd_core.ZSTDResult[Bytes] {
       remaining.push(data[i])
     }
     let frame_data = Bytes::from_array(remaining)
-
-    // Validate frame structure
-    let analysis = analyze_file(frame_data)
-    if !analysis.is_valid {
-      return Err(@zstd_core.message_error(analysis.error_message))
-    }
 
     // Decompress this frame
     let result = decompress_zstd_data(frame_data)
@@ -71,7 +69,12 @@ pub fn decompress(data : Bytes) -> @zstd_core.ZSTDResult[Bytes] {
         }
         // Advance past this frame
         let frame_size = calculate_frame_size(frame_data)
-        if frame_size <= 0 { break }
+        if frame_size <= 0 {
+          return Err(@zstd_core.parse_error("Unable to determine frame size at offset " + pos.to_string()))
+        }
+        if frame_size > frame_data.length() {
+          return Err(@zstd_core.parse_error("Truncated frame at offset " + pos.to_string()))
+        }
         pos = pos + frame_size
       }
       Err(e) => return Err(@zstd_core.message_error(e))
@@ -91,21 +94,20 @@ pub fn decompress_with_limit(data: Bytes, max_output: Int) -> @zstd_core.ZSTDRes
   let mut pos = 0
 
   while pos < data.length() {
-    if pos + 4 > data.length() { break }
+    if pos + 4 > data.length() {
+      return Err(@zstd_core.parse_error("Trailing data after frame at offset " + pos.to_string()))
+    }
     let magic = (data[pos + 3].to_int() << 24) | (data[pos + 2].to_int() << 16) |
                 (data[pos + 1].to_int() << 8) | data[pos].to_int()
-    if magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT { break }
+    if magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT {
+      return Err(@zstd_core.invalid_magic_number_error())
+    }
 
     let remaining: Array[Byte] = []
     for i = pos; i < data.length(); i = i + 1 {
       remaining.push(data[i])
     }
     let frame_data = Bytes::from_array(remaining)
-
-    let analysis = analyze_file(frame_data)
-    if !analysis.is_valid {
-      return Err(@zstd_core.message_error(analysis.error_message))
-    }
 
     let result = decompress_zstd_data(frame_data)
     match result {
@@ -117,7 +119,12 @@ pub fn decompress_with_limit(data: Bytes, max_output: Int) -> @zstd_core.ZSTDRes
           all_output.push(decompressed[i])
         }
         let frame_size = calculate_frame_size(frame_data)
-        if frame_size <= 0 { break }
+        if frame_size <= 0 {
+          return Err(@zstd_core.parse_error("Unable to determine frame size at offset " + pos.to_string()))
+        }
+        if frame_size > frame_data.length() {
+          return Err(@zstd_core.parse_error("Truncated frame at offset " + pos.to_string()))
+        }
         pos = pos + frame_size
       }
       Err(e) => return Err(@zstd_core.message_error(e))
@@ -198,6 +205,7 @@ pub fn decompress_zstd_data_with_dict(data: Bytes, dictionary: Bytes) -> Result[
       
       // 解压缩块，并在同一个 DecoderContext 中持续维护窗口状态。
       let mut output_data = Bytes::new(0)
+      let mut saw_last_block = false
       
       while current_offset + 3 <= data.length() {
         let block_result = decompress_block_with_context(decoder_context, data, current_offset)
@@ -206,6 +214,7 @@ pub fn decompress_zstd_data_with_dict(data: Bytes, dictionary: Bytes) -> Result[
             output_data = output_data + block_data
             current_offset = current_offset + consumed_size
             if is_last_block {
+              saw_last_block = true
               break
             }
           }
@@ -213,6 +222,10 @@ pub fn decompress_zstd_data_with_dict(data: Bytes, dictionary: Bytes) -> Result[
             return Err(error_msg)
           }
         }
+      }
+
+      if !saw_last_block {
+        return Err("Truncated frame: missing last block")
       }
 
       Ok(output_data)

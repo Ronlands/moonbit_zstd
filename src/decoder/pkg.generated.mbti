@@ -1,9 +1,9 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "Ronlands/moonbit_zstd/decoder"
 
-import(
-  "Ronlands/moonbit_zstd/core"
-)
+import {
+  "Ronlands/moonbit_zstd/core",
+}
 
 // Values
 pub fn analyze_file(Bytes) -> ZSTDFileAnalysis
@@ -95,6 +95,8 @@ pub fn parse_fse_header(Bytes, Int) -> Result[(Array[Int], Int, Int), String]
 pub fn parse_huffman_weights(Bytes, Int, Int) -> Result[(HuffmanWeights, Int), String]
 
 pub fn preload_dictionary(@core.WindowBuffer) -> Unit
+
+pub fn preload_history_into_context(DecoderContext, Bytes) -> Result[Unit, String]
 
 pub fn print_fse_table_info(FSETable) -> String
 

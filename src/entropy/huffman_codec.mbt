@@ -674,12 +674,12 @@ pub fn test_huffman_compression(test_name: String, data: Array[Byte]) -> Result[
           }
 
           if all_match {
-            let ratio = if data.length() > 0 {
+            let size_percentage = if data.length() > 0 {
               Float::from_int(encoded.length()) / Float::from_int(data.length()) * 100.0
             } else {
               0.0
             }
-            println("    ✅ 编解码成功, 压缩比: \{ratio.to_int()}%")
+            println("    ✅ 编解码成功, 编码后大小占比: \{size_percentage.to_int()}%")
             Ok(true)
           } else {
             println("    ❌ 数据不匹配")
@@ -754,12 +754,12 @@ pub fn demo_huffman_encoding() -> Unit {
 
   let encoded = huffman_encode_with_table(data, encode_table)
   println("编码后大小: \{encoded.length()} 字节")
-  let compression_ratio = if data.length() > 0 {
+  let size_percentage = if data.length() > 0 {
     Float::from_int(encoded.length()) / Float::from_int(data.length()) * 100.0
   } else {
     0.0
   }
-  println("压缩比: \{compression_ratio.to_int()}%")
+  println("编码后大小占比: \{size_percentage.to_int()}%")
 
   let decoded_result = huffman_decode(encoded, encode_table, data.length())
   match decoded_result {
@@ -796,8 +796,8 @@ pub fn benchmark_huffman() -> Unit {
 
     match encode_result {
       Ok(encoded) => {
-        let ratio = Float::from_int(encoded.length()) / Float::from_int(size) * 100.0
-        println("  压缩后: \{encoded.length()} 字节 (\{ratio.to_int()}%)")
+        let size_percentage = Float::from_int(encoded.length()) / Float::from_int(size) * 100.0
+        println("  编码后: \{encoded.length()} 字节 (占原始大小 \{size_percentage.to_int()}%)")
 
         let frequencies = count_huffman_symbols(test_data, 255)
         let encode_table = build_huffman_encode_table(frequencies)

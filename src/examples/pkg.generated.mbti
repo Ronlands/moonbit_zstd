@@ -20,6 +20,8 @@ pub fn demo_huffman_encoding() -> Unit
 
 pub fn demo_method_comparison() -> Unit
 
+pub fn demo_streaming_compression() -> Unit
+
 pub fn print_summary() -> Unit
 
 pub fn test_all_golden_files() -> Unit

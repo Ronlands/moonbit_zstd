@@ -48,7 +48,7 @@ pub fn test_save_and_verify() -> Unit {
   }
   println("\n压缩后:")
   println("  大小: \{compressed.length()} bytes")
-  println("  压缩比: \{original_data.length() * 100 / compressed.length()}%")
+  println("  压缩比: \{original_data.length().to_double() / compressed.length().to_double()}x")
   
   // 保存到文件
   let filename = "moonbit_compressed.zst"

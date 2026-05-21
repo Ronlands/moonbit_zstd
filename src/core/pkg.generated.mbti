@@ -178,16 +178,14 @@ pub struct BlockHeader {
   block_type : BlockType
   block_size : Int
   last_block : Bool
-}
-pub impl Default for BlockHeader
+} derive(Default)
 
 pub enum BlockType {
   Raw
   RLE
   Compressed
   Reserved
-}
-pub impl Eq for BlockType
+} derive(Eq)
 
 pub struct ContextualError {
   error : ZSTDError
@@ -203,8 +201,7 @@ pub struct DecompressionContext {
   window_pos : Int
   frame_content_size : Int
   last_huffman_tree : HuffmanTreeRef?
-}
-pub impl Default for DecompressionContext
+} derive(Default)
 
 pub struct Dictionary {
   dict_type : DictionaryType
@@ -217,8 +214,7 @@ pub enum DictionaryType {
   None
   Raw
   Formatted
-}
-pub impl Eq for DictionaryType
+} derive(Eq)
 
 pub struct ErrorContext {
   location : String
@@ -245,8 +241,7 @@ pub struct FrameHeader {
   single_segment : Bool
   checksum_flag : Bool
   window_size : Int
-}
-pub impl Default for FrameHeader
+} derive(Default)
 
 pub enum FrameType {
   ZSTD_frame
@@ -263,24 +258,21 @@ pub struct LiteralsHeader {
   size : Int
   regenerated_size : Int
   streams_count : Int
-}
-pub impl Default for LiteralsHeader
+} derive(Default)
 
 pub struct LiteralsSectionInfo {
   literals_type : LiteralsType
   regenerated_size : Int
   compressed_size : Int
   num_streams : Int
-}
-pub impl Default for LiteralsSectionInfo
+} derive(Default)
 
 pub enum LiteralsType {
   Raw
   RLE
   Compressed
   Treeless
-}
-pub impl Eq for LiteralsType
+} derive(Eq)
 
 pub enum RecoveryStrategy {
   Skip
@@ -292,24 +284,21 @@ pub struct Sequence {
   literal_length : Int
   match_length : Int
   offset : Int
-}
-pub impl Default for Sequence
+} derive(Default)
 
 pub enum SequenceMode {
   Predefined
   RLE
   FSECompressed
   Repeat
-}
-pub impl Eq for SequenceMode
+} derive(Eq)
 
 pub struct SequencesSectionInfo {
   num_sequences : Int
   ll_mode : SequenceMode
   ml_mode : SequenceMode
   of_mode : SequenceMode
-}
-pub impl Default for SequencesSectionInfo
+} derive(Default)
 
 pub struct WindowBuffer {
   buffer : Array[Byte]
@@ -330,8 +319,8 @@ pub enum ZSTDError {
   Message(String)
   ParseError(String)
   ValidationError(String)
-}
-pub impl Eq for ZSTDError
+} derive(Eq, Show)
+pub fn ZSTDError::to_string(Self) -> String
 
 // Type aliases
 pub type ZSTDResult[T] = Result[T, ZSTDError]

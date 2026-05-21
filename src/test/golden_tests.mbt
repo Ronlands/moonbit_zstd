@@ -90,7 +90,10 @@ fn run_compression_compatibility_tests() -> Unit {
       Ok(c) => c
       Err(_) => { println("压缩失败"); continue }
     }
-    let decompressed = @zstd.decompress(compressed)
+    let decompressed = match @zstd.decompress(compressed) {
+      Ok(bytes) => bytes
+      Err(_) => { println("瑙ｅ帇澶辫触"); continue }
+    }
     if data == decompressed {
       println("兼容")
       passed = passed + 1
@@ -129,8 +132,8 @@ fn run_rfc_compliance_tests() -> Unit {
   }
   
   println("  RFC 合规性: \{passed}/\{total}")
-  println("\n总体 RFC 8878 兼容性: 100%")
-  println("完全兼容 RFC 8878 规范！")
+  println("\n当前实现覆盖 RFC 8878 的 Raw/RLE 与部分 Compressed block 场景")
+  println("完整兼容性仍以兼容矩阵和已知限制为准")
 }
 
 /// Text file tests
@@ -181,8 +184,10 @@ fn test_golden_file(filename: String) -> Bool {
       println("    " + filename + " -> 有效:" + valid_str + error_info)
       
       if analysis.is_valid {
-        let decompressed = @zstd.decompress(file_content)
-        decompressed.length() >= 0
+        match @zstd.decompress(file_content) {
+          Ok(_) => true
+          Err(_) => false
+        }
       } else {
         false
       }
@@ -244,10 +249,12 @@ fn test_text_file(filename: String) -> Bool {
   try {
     if @fs.path_exists(test_file_path) {
       let file_content = @fs.read_file_to_bytes(test_file_path)
-      let decompressed = @zstd.decompress(file_content)
-      decompressed.length() >= 0
+      match @zstd.decompress(file_content) {
+        Ok(_) => true
+        Err(_) => false
+      }
     } else {
-      true  // Missing file doesn't fail test
+      false
     }
   } catch {
     _ => false

@@ -38,7 +38,10 @@ fn test_basic_compression() -> Bool {
     return false
   }
 
-  let decompressed = @zstd.decompress(compressed)
+  let decompressed = match @zstd.decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
   if decompressed.length() != test_data.length() {
     return false
   }
@@ -89,7 +92,10 @@ fn test_empty_data() -> Bool {
     Ok(c) => c
     Err(_) => return false
   }
-  let decompressed = @zstd.decompress(compressed)
+  let decompressed = match @zstd.decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
 
   decompressed.length() == 0
 }
@@ -169,7 +175,10 @@ fn test_multi_sequence_block() -> Bool {
   }
   if compressed.length() == 0 { return false }
 
-  let decompressed = @zstd.decompress(compressed)
+  let decompressed = match @zstd.decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
   if test_data.length() != decompressed.length() {
     println("  ❌ Multi-seq 长度不匹配：原始=\{test_data.length()} 解压=\{decompressed.length()}")
     return false
@@ -201,7 +210,10 @@ fn test_rle_literals_block() -> Bool {
     println("  ⚠️ RLE 压缩效率偏低: \{compressed.length()} bytes for \{test_data.length()} bytes input")
   }
 
-  let decompressed = @zstd.decompress(compressed)
+  let decompressed = match @zstd.decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
   if test_data.length() != decompressed.length() {
     println("  ❌ RLE 长度不匹配：原始=\{test_data.length()} 解压=\{decompressed.length()}")
     return false
@@ -395,7 +407,10 @@ fn test_single_byte() -> Bool {
   let data = Bytes::from_array([0x42])
   match @zstd.compress(data) {
     Ok(compressed) => {
-      let decompressed = @zstd.decompress(compressed)
+      let decompressed = match @zstd.decompress(compressed) {
+        Ok(bytes) => bytes
+        Err(_) => return false
+      }
       decompressed.length() == 1 && decompressed[0] == 0x42
     }
     Err(_) => false
@@ -405,8 +420,10 @@ fn test_single_byte() -> Bool {
 /// Test invalid magic number handling
 fn test_invalid_magic() -> Bool {
   let invalid = Bytes::from_array([0x00, 0x00, 0x00, 0x00])
-  let result = @zstd.decompress(invalid)
-  result.length() == 0  // Should fail gracefully
+  match @zstd.decompress(invalid) {
+    Err(_) => true
+    Ok(_) => false
+  }
 }
 
 /// Test very large offset encoding
@@ -430,7 +447,10 @@ fn test_large_data() -> Bool {
   let data = Bytes::from_array(arr)
   match @zstd.compress(data) {
     Ok(compressed) => {
-      let decompressed = @zstd.decompress(compressed)
+      let decompressed = match @zstd.decompress(compressed) {
+        Ok(bytes) => bytes
+        Err(_) => return false
+      }
       decompressed.length() == data.length()
     }
     Err(_) => false
@@ -481,7 +501,10 @@ fn test_streaming_compression() -> Bool {
 
   let compressed = out1 + out2 + flushed + out3 + final_bytes
   let stats = @zstd.get_streaming_compressor_stats(compressor)
-  let decompressed = @zstd.decompress(compressed)
+  let decompressed = match @zstd.decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
 
   if !stats.finished || !stats.checksum_enabled {
     println("  ❌ Streaming stats state invalid")
@@ -552,6 +575,8 @@ fn test_streaming_compression() -> Bool {
 /// Test corrupted data handling
 fn test_corrupted_data() -> Bool {
   let corrupted = Bytes::from_array([0x28, 0xB5, 0x2F, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF])
-  let result = @zstd.decompress(corrupted)
-  result.length() == 0  // Should fail gracefully
+  match @zstd.decompress(corrupted) {
+    Err(_) => true
+    Ok(_) => false
+  }
 }

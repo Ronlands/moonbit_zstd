@@ -1,6 +1,10 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "Ronlands/moonbit_zstd/dictionary"
 
+import {
+  "Ronlands/moonbit_zstd/core",
+}
+
 // Values
 pub fn build_dictionary(Array[Bytes], Int) -> Result[Dictionary, String]
 
@@ -10,9 +14,9 @@ pub fn build_optimized_dictionary(Array[Bytes], Int) -> Result[Dictionary, Strin
 
 pub fn calculate_dictionary_benefit(Bytes, Dictionary) -> Double
 
-pub fn calculate_dictionary_benefit_detailed(Bytes, Dictionary) -> Result[DictionaryBenefitStats, String]
+pub fn calculate_dictionary_benefit_detailed(Bytes, Dictionary) -> Result[DictionaryBenefitStats, @core.ZSTDError]
 
-pub fn compress_with_dictionary(Bytes, Dictionary) -> Result[Bytes, String]
+pub fn compress_with_dictionary(Bytes, Dictionary) -> Result[Bytes, @core.ZSTDError]
 
 pub fn create_raw_dictionary(Bytes, UInt) -> Dictionary
 

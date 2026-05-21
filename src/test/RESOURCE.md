@@ -13,6 +13,7 @@
 - `encoding_tests.mbt`：`LL / ML / OF` 编码与序列往返测试。
 - `golden_tests.mbt`：官方样本与错误样本测试。
 - `noncompliance_tests.mbt`：历史问题回归与交叉兼容测试。
+- `release_tests.mbt`：`moon test` 标准测试入口，覆盖发布前 API 错误语义、尾随垃圾、往返与现有 boolean suite 桥接。
 - `save_compressed.mbt`：导出压缩结果给外部工具验证。
 - `test_utils.mbt`：测试工具函数。
 
@@ -42,7 +43,8 @@
 - 损坏序列计数不能返回部分数据
 - 编码器不能产生超出 `131072` 的块
 - 非单段帧必须正确解析 `Window_Descriptor`
-- 与官方 `zstd.exe` 输出的交叉兼容
+- 与官方 `zstd.exe` 输出样例的交叉兼容
+- 发布前以 `moon test` 为回归测试；`moon run src/cmd` 仅作为人工演示检查。
 
 ## 5. 样本依赖
 

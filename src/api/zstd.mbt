@@ -203,7 +203,10 @@ pub fn compress_as_compressed(data: Bytes, level: Int) -> Result[Bytes, @zstd_co
 /// let original = @utf8.encode("Hello, ZSTD!")
 /// match @zstd.compress(original) {
 ///   Ok(compressed) => {
-///     let decompressed = @zstd.decompress(compressed)
+///     match @zstd.decompress(compressed) {
+///       Ok(decompressed) => println("Decoded \{decompressed.length()} bytes")
+///       Err(e) => println("Decompression failed: \{e}")
+///     }
 ///   }
 ///   Err(e) => println("Compression failed: \{e}")
 /// }
@@ -294,30 +297,28 @@ pub fn compress_advanced(data: Bytes, mode: CompressionMethod, level: Int) -> Re
 
 /// Decompress a ZSTD-compressed frame.
 ///
-/// Supports all block types (Raw, RLE, Compressed) and multi-block frames.
-/// Returns empty `Bytes` if the input is not valid ZSTD data.
+/// Supports concatenated frames and returns structured errors for invalid input.
 ///
 /// # Example
 ///
 /// ```moonbit no-check
-/// let original = @zstd.decompress(compressed)
+/// match @zstd.decompress(compressed) {
+///   Ok(original) => println("Decoded \{original.length()} bytes")
+///   Err(e) => println("Decompression failed: \{e}")
+/// }
 /// ```
-pub fn decompress(data: Bytes) -> Bytes {
+pub fn decompress(data: Bytes) -> Result[Bytes, @zstd_core.ZSTDError] {
   if data.length() < 4 {
-    return Bytes::from_array([])
+    return Err(@zstd_core.parse_error("Data too short: need at least 4 bytes, got " + data.length().to_string()))
   }
 
   let magic = (data[3].to_int() << 24) | (data[2].to_int() << 16) | (data[1].to_int() << 8) | data[0].to_int()
   if magic != @zstd_core.ZSTD_MAGIC_NUMBER_INT {
-    return Bytes::from_array([])
+    return Err(@zstd_core.invalid_magic_number_error())
   }
 
   let max_output_size = 134217728 // 128MB global limit
-  let result = @zstd_decoder.decompress_with_limit(data, max_output_size)
-  match result {
-    Ok(decompressed) => decompressed
-    Err(_) => Bytes::from_array([])
-  }
+  @zstd_decoder.decompress_with_limit(data, max_output_size)
 }
 
 /// Analyze the structure of a ZSTD compressed file.
@@ -777,10 +778,13 @@ fn calculate_integrity_structure_consistency(
 
 fn is_integrity_decode_success(
   analysis: ZSTDFileAnalysis,
-  decompressed: Bytes
+  decompressed: Result[Bytes, @zstd_core.ZSTDError]
 ) -> Bool {
-  decompressed.length() > 0 ||
-  (analysis.is_valid && analysis.last_block && analysis.first_block_size == 0)
+  match decompressed {
+    Ok(bytes) => bytes.length() > 0 ||
+      (analysis.is_valid && analysis.last_block && analysis.first_block_size == 0)
+    Err(_) => false
+  }
 }
 
 fn clamp_integrity_score(score: Double) -> Double {
@@ -904,10 +908,11 @@ fn test_basic_compression() -> Bool {
   }
 
   // Test decompression
-  let decompressed = decompress(compressed)
-  if decompressed.length() != test_data.length() {
-    return false
+  let decompressed = match decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(_) => return false
   }
+  if decompressed.length() != test_data.length() { return false }
 
   // Verify data integrity
   for i = 0; i < test_data.length(); i = i + 1 {
@@ -980,7 +985,10 @@ fn test_empty_data() -> Bool {
     Ok(c) => c
     Err(_) => return false
   }
-  let decompressed = decompress(compressed)
+  let decompressed = match decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
 
   // Should handle empty data gracefully
   decompressed.length() == 0
@@ -1066,7 +1074,10 @@ fn test_large_data_handling() -> Bool {
     Ok(c) => c
     Err(_) => return false
   }
-  let decompressed = decompress(compressed)
+  let decompressed = match decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
 
   // Should handle large data correctly
   decompressed.length() == test_data.length()
@@ -1085,7 +1096,10 @@ fn test_rle_optimization() -> Bool {
     Ok(c) => c
     Err(_) => return false
   }
-  let decompressed = decompress(compressed)
+  let decompressed = match decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
 
   // Should compress and decompress repeated data correctly
   decompressed.length() == test_data.length()

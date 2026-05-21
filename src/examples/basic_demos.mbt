@@ -13,16 +13,19 @@ pub fn demo_basic_compression() -> Unit {
     Err(e) => { println("压缩失败: \{e}"); return }
   }
   let compressed_size = compressed.length()
-  let ratio = compressed_size.to_double() / original_size.to_double()
+  let ratio = original_size.to_double() / compressed_size.to_double()
   
-  let decompressed = @zstd.decompress(compressed)
+  let decompressed = match @zstd.decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(e) => { println("解压失败: \{e}"); return }
+  }
   let is_correct = test_data == decompressed
   let decompressed_size = decompressed.length()
   let correctness = if is_correct { "正确" } else { "错误" }
   
   println("   原始数据: \{original_size} 字节")
   println("   压缩后: \{compressed_size} 字节")
-  println("   压缩比: \{ratio}")
+  println("   压缩比: \{ratio}x")
   println("   解压后: \{decompressed_size} 字节")
   println("   数据完整性: \{correctness}")
 }
@@ -116,11 +119,11 @@ pub fn demo_compression_levels() -> Unit {
     Err(e) => { println("压缩失败: \{e}"); return }
   }
   let compressed_size = compressed.length()
-  let ratio = compressed.length().to_double() / test_data.length().to_double()
+  let ratio = test_data.length().to_double() / compressed.length().to_double()
   
   println("   默认压缩:")
   println("     实际大小: \{compressed_size} 字节")
-  println("     压缩比: \{ratio}")
+  println("     压缩比: \{ratio}x")
 }
 
 pub fn demo_huffman_encoding() -> Unit {

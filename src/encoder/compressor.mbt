@@ -414,7 +414,8 @@ fn compress_multi_block_with_checksum(data: Bytes, config: CompressionConfig, wi
 
     match block_result {
       Ok((block_type, block_content)) => {
-        write_block_header(output, is_last, block_type, block_content.length())
+        let header_block_size = if block_type == 1 { block_size } else { block_content.length() }
+        write_block_header(output, is_last, block_type, header_block_size)
         for i = 0; i < block_content.length(); i = i + 1 {
           output.push(block_content[i])
         }
@@ -523,7 +524,10 @@ fn build_compressed_block_payload_from_sequences(
     if num_sequences == 1 {
       let seq = sequences[0]
       if can_encode_single_sequence_direct(seq) {
-        encode_single_sequence_direct(seq, output)
+        match encode_single_sequence_direct(seq, output) {
+          Ok(_) => ()
+          Err(e) => return Err(e)
+        }
       } else {
         match encode_single_sequence_standard(seq, output) {
           Ok(_) => ()
@@ -531,7 +535,10 @@ fn build_compressed_block_payload_from_sequences(
         }
       }
     } else {
-      let (ll_symbols, ml_symbols, of_symbols) = extract_sequence_symbols(sequences)
+      let (ll_symbols, ml_symbols, of_symbols) = match extract_sequence_symbols(sequences) {
+        Ok(symbols) => symbols
+        Err(e) => return Err(e)
+      }
 
       // Decide whether to use compressed FSE mode
       if should_use_compressed_fse(ll_symbols, ml_symbols, of_symbols) {
@@ -578,7 +585,10 @@ fn build_predefined_compressed_block_payload_from_sequences(
     if num_sequences == 1 {
       let seq = sequences[0]
       if can_encode_single_sequence_direct(seq) {
-        encode_single_sequence_direct(seq, output)
+        match encode_single_sequence_direct(seq, output) {
+          Ok(_) => ()
+          Err(e) => return Err(e)
+        }
       } else {
         match encode_single_sequence_standard(seq, output) {
           Ok(_) => ()

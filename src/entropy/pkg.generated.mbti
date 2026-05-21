@@ -1,6 +1,11 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "Ronlands/moonbit_zstd/entropy"
 
+import {
+  "Ronlands/moonbit_zstd/core",
+  "moonbitlang/core/debug",
+}
+
 // Values
 pub fn add_bits(BitStream, UInt64, Int) -> Unit
 
@@ -50,9 +55,9 @@ pub fn create_huffman_weights(Array[Int]) -> HuffmanWeights
 
 pub fn debug_fse_decode_sequences(Bytes, Int, Int, Array[Int], Array[Int], Array[Int]) -> Unit
 
-pub fn decode_fse_sequences(Bytes, Int, Int, Array[Int], Array[Int], Array[Int], Array[Int]) -> Result[Array[Sequence], String]
+pub fn decode_fse_sequences(Bytes, Int, Int, Array[Int], Array[Int], Array[Int], Array[Int]) -> Result[Array[@core.Sequence], String]
 
-pub fn decode_fse_sequences_with_tables(Bytes, Int, Int, FSECTable, FSECTable, FSECTable) -> Result[Array[Sequence], String]
+pub fn decode_fse_sequences_with_tables(Bytes, Int, Int, FSECTable, FSECTable, FSECTable) -> Result[Array[@core.Sequence], String]
 
 pub fn decode_huffman_literals(Bytes, Int, Int, Array[Int]) -> Result[Array[Byte], String]
 
@@ -70,7 +75,7 @@ pub fn encode_ll(Int) -> (Int, Int)
 
 pub fn encode_ml(Int) -> (Int, Int)
 
-pub fn encode_of(Int) -> (Int, Int)
+pub fn encode_of(Int) -> Result[(Int, Int), String]
 
 pub fn encode_symbol_fse(UInt64, Int, FSECTable, BitStream) -> UInt64
 
@@ -128,7 +133,7 @@ pub fn init_fse_cstate_with_symbol(FSECTable, Int) -> UInt64
 
 pub fn init_fse_state(FSEState, Int) -> FSEState
 
-pub fn make_sequence(Int, Int, Int) -> Sequence
+pub fn make_sequence(Int, Int, Int) -> @core.Sequence
 
 pub fn normalize_counts(Array[Int], Int) -> Array[Int]
 
@@ -191,8 +196,7 @@ pub struct FSEEncodeTable {
 pub struct FSEState {
   state : Int
   table : FSETable
-}
-pub impl Default for FSEState
+} derive(Default)
 
 pub struct FSETable {
   symbols : Array[Int]
@@ -200,8 +204,7 @@ pub struct FSETable {
   table_log : Int
   max_symbol : Int
   total_count : Int
-}
-pub impl Default for FSETable
+} derive(Default)
 
 pub struct HuffmanBitReader {
   data : Bytes
@@ -245,15 +248,7 @@ pub enum HuffmanTreeNode {
 pub struct HuffmanWeights {
   weights : Array[Int]
   count : Int
-}
-pub impl Show for HuffmanWeights
-
-pub struct Sequence {
-  literal_length : Int
-  match_length : Int
-  offset : Int
-}
-pub impl Default for Sequence
+} derive(@debug.Debug)
 
 pub struct SymbolTransform {
   delta_nb_bits : Int
@@ -261,6 +256,7 @@ pub struct SymbolTransform {
 }
 
 // Type aliases
+pub using @core {type Sequence}
 
 // Traits
 

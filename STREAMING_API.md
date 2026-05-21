@@ -94,14 +94,17 @@ match @zstd.compress(data) {
 ### 解压
 
 ```moonbit
-let restored = @zstd.decompress(compressed)
+match @zstd.decompress(compressed) {
+  Ok(restored) => println("ok: \{restored.length()}")
+  Err(e) => println("decompress failed: \{e}")
+}
 ```
 
 说明：
 
-- `@zstd.decompress` 是高层便捷接口。
-- 失败时返回空 `Bytes`，不直接暴露错误。
-- 如果需要拿到错误，请使用 decoder 层 `Result` 风格接口。
+- `@zstd.decompress` 是高层 `Result` 风格接口。
+- 合法空帧返回 `Ok(Bytes::new(0))`；非法数据、截断帧、保留位或尾随垃圾返回 `Err`。
+- decoder 层仍提供 `@zstd_decoder.decompress` / `decompress_with_limit`。
 
 ## 大数据与多块压缩
 
@@ -345,6 +348,7 @@ println("estimated = \{estimated}")
 ## 常用检查命令
 
 ```powershell
+moon test
 moon run src/cmd
 rg "create_sliding_window_decoder|decompress_with_sliding_window|compress_data_with_checksum" src
 rg "compress_with_dictionary|decompress_with_dictionary|build_dictionary_with_cover" src

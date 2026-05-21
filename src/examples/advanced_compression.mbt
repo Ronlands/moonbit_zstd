@@ -17,7 +17,7 @@ pub fn demo_compression_methods() -> Unit {
   }
   println("  原始大小: \{test_data.length()} 字节")
   println("  压缩后: \{auto_compressed.length()} 字节")
-  println("  压缩比: \{test_data.length().to_double() / auto_compressed.length().to_double()}")
+  println("  压缩比: \{test_data.length().to_double() / auto_compressed.length().to_double()}x")
 
   println("\n2. Raw 块（无压缩）")
   println(@zstd_test.repeat_string("-", 40))
@@ -27,7 +27,7 @@ pub fn demo_compression_methods() -> Unit {
   }
   println("  原始大小: \{test_data.length()} 字节")
   println("  压缩后: \{raw_compressed.length()} 字节")
-  println("  压缩比: \{test_data.length().to_double() / raw_compressed.length().to_double()}")
+  println("  压缩比: \{test_data.length().to_double() / raw_compressed.length().to_double()}x")
 
   println("\n3. RLE 块（适合重复数据）")
   println(@zstd_test.repeat_string("-", 40))
@@ -38,7 +38,7 @@ pub fn demo_compression_methods() -> Unit {
   }
   println("  原始大小: \{rle_data.length()} 字节")
   println("  压缩后: \{rle_compressed.length()} 字节")
-  println("  压缩比: \{rle_data.length().to_double() / rle_compressed.length().to_double()}")
+  println("  压缩比: \{rle_data.length().to_double() / rle_compressed.length().to_double()}x")
 
   println("\n4. Compressed 块（LZ77 + 熵编码）")
   println(@zstd_test.repeat_string("-", 40))
@@ -48,7 +48,7 @@ pub fn demo_compression_methods() -> Unit {
   }
   println("  原始大小: \{test_data.length()} 字节")
   println("  压缩后: \{compressed_result.length()} 字节")
-  println("  压缩比: \{test_data.length().to_double() / compressed_result.length().to_double()}")
+  println("  压缩比: \{test_data.length().to_double() / compressed_result.length().to_double()}x")
   
   println("\n" + @zstd_test.repeat_string("=", 60))
 }
@@ -72,13 +72,16 @@ pub fn demo_compression_levels_advanced() -> Unit {
       Ok(c) => c
       Err(e) => { println("压缩失败: \{e}"); continue }
     }
-    let decompressed = @zstd.decompress(compressed)
+    let decompressed = match @zstd.decompress(compressed) {
+      Ok(bytes) => bytes
+      Err(e) => { println("解压失败: \{e}"); continue }
+    }
     
-    let ratio_percent = (test_data.length().to_double() / compressed.length().to_double() * 100.0).to_int()
+    let ratio = test_data.length().to_double() / compressed.length().to_double()
     let verify_result = if test_data == decompressed { "✓ 通过" } else { "✗ 失败" }
     println("  原始大小: \{test_data.length()} 字节")
     println("  压缩后: \{compressed.length()} 字节")
-    println("  压缩比: \{ratio_percent}%")
+    println("  压缩比: \{ratio}x")
     println("  解压验证: \{verify_result}")
   }
   
@@ -107,37 +110,37 @@ pub fn demo_method_comparison() -> Unit {
       Ok(c) => c
       Err(e) => { println("Auto压缩失败: \{e}"); continue }
     }
-    let auto_ratio = (data.length().to_double() / auto_comp.length().to_double() * 100.0).to_int()
+    let auto_ratio = data.length().to_double() / auto_comp.length().to_double()
     let auto_name = pad_right("Auto", 12)
     let auto_size = pad_left(auto_comp.length().to_string(), 4)
-    println("  \{auto_name} -> \{auto_size} 字节 (比率: \{auto_ratio}%)")
+    println("  \{auto_name} -> \{auto_size} 字节 (压缩比: \{auto_ratio}x)")
 
     let raw_comp = match @zstd.compress_as_raw(data, 3) {
       Ok(c) => c
       Err(e) => { println("Raw压缩失败: \{e}"); continue }
     }
-    let raw_ratio = (data.length().to_double() / raw_comp.length().to_double() * 100.0).to_int()
+    let raw_ratio = data.length().to_double() / raw_comp.length().to_double()
     let raw_name = pad_right("Raw", 12)
     let raw_size = pad_left(raw_comp.length().to_string(), 4)
-    println("  \{raw_name} -> \{raw_size} 字节 (比率: \{raw_ratio}%)")
+    println("  \{raw_name} -> \{raw_size} 字节 (压缩比: \{raw_ratio}x)")
 
     let rle_comp = match @zstd.compress_as_rle(data, 3) {
       Ok(c) => c
       Err(e) => { println("RLE压缩失败: \{e}"); continue }
     }
-    let rle_ratio = (data.length().to_double() / rle_comp.length().to_double() * 100.0).to_int()
+    let rle_ratio = data.length().to_double() / rle_comp.length().to_double()
     let rle_name = pad_right("RLE", 12)
     let rle_size = pad_left(rle_comp.length().to_string(), 4)
-    println("  \{rle_name} -> \{rle_size} 字节 (比率: \{rle_ratio}%)")
+    println("  \{rle_name} -> \{rle_size} 字节 (压缩比: \{rle_ratio}x)")
     
     let comp_comp = match @zstd.compress_as_compressed(data, 3) {
       Ok(c) => c
       Err(e) => { println("Compressed压缩失败: \{e}"); continue }
     }
-    let comp_ratio = (data.length().to_double() / comp_comp.length().to_double() * 100.0).to_int()
+    let comp_ratio = data.length().to_double() / comp_comp.length().to_double()
     let comp_name = pad_right("Compressed", 12)
     let comp_size = pad_left(comp_comp.length().to_string(), 4)
-    println("  \{comp_name} -> \{comp_size} 字节 (比率: \{comp_ratio}%)")
+    println("  \{comp_name} -> \{comp_size} 字节 (压缩比: \{comp_ratio}x)")
   }
   
   println("\n" + @zstd_test.repeat_string("=", 60))
@@ -178,7 +181,10 @@ pub fn demo_streaming_compression() -> Unit {
 
   let compressed = out1 + out2 + flushed + out3 + tail
   let original = chunk1 + chunk2 + chunk3
-  let restored = @zstd.decompress(compressed)
+  let restored = match @zstd.decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(e) => { println("解压失败: \{e}"); return }
+  }
   let stats = @zstd.get_streaming_compressor_stats(compressor)
 
   println("  原始大小: \{original.length()} 字节")

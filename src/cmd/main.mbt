@@ -78,18 +78,18 @@ fn run_tests() -> Unit {
   let noncompliance_tests_passed = @zstd_test.run_all_noncompliance_tests()
 
   println("\nTest Results Summary:")
-  println("Basic tests (11): " + (if basic_tests_passed { "PASSED" } else { "FAILED" }))
+  println("Basic tests (17): " + (if basic_tests_passed { "PASSED" } else { "FAILED" }))
   println("Compatibility tests (5): " + (if compatibility_tests_passed { "PASSED" } else { "FAILED" }))
   println("Dictionary tests (5): " + (if dictionary_tests_passed { "PASSED" } else { "FAILED" }))
   println("Non-compliance & cross-compat tests (7): " + (if noncompliance_tests_passed { "PASSED" } else { "FAILED" }))
-  println("Total: 26 tests")
+  println("Total: 34 tests")
 
   if basic_tests_passed && compatibility_tests_passed && dictionary_tests_passed && noncompliance_tests_passed {
     println("\nAll tests passed! ZSTD implementation is working correctly.")
-    println("✓ Compressed block infrastructure ready (awaiting FSE encoder)")
+    println("✓ Raw and RLE block round-trips covered")
     println("✓ Dictionary compression support enabled")
-    println("✓ RFC 8878 100% compatible")
-    println("✓ Cross-compatible with zstd.exe v1.5.6 output")
+    println("✓ Current compressed-block subset covered by regression tests")
+    println("✓ RFC 8878 support is partial; see README compatibility matrix and known limits")
   } else {
     println("\nSome tests failed. Please check the implementation.")
   }

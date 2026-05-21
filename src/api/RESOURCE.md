@@ -151,7 +151,7 @@
 - `flush_streaming_compressor(streamer)`：强制把当前 pending 数据落块。
 - `finish_streaming_compressor(streamer)`：结束帧并返回最后输出。
 - `reset_streaming_compressor(streamer)`：重置内部状态。
-- `decompress`：高层解压入口，失败时返回空字节串，不向外传播 `Result`。
+- `decompress`：高层解压入口，返回 `Result[Bytes, ZSTDError]`；合法空帧返回 `Ok` 空字节，非法输入返回结构化错误。
 - `analyze_file`：文件结构分析。
 - `analyze_data_integrity`：启发式完整性分析。
 - `estimate_compressed_size`：压缩结果估算。
@@ -177,6 +177,6 @@
 ## 6. 注意事项
 
 - 本模块里“分析”与“压缩/解压 API”混合在同一文件，阅读时注意区分职责。
-- 文档和评审中要明确：`decompress` 返回空字节不等于“真实解压结果为空”，也可能是失败兜底。
+- 文档和评审中要明确：`decompress` 不再用空字节表示失败，调用方必须显式处理 `Ok / Err`。
 - 当前流式压缩是最小可用版，主要解决“边写边产出合法帧”的能力，不等同于高优化增量压缩器。
 - 当前流式压缩已经支持跨 chunk 历史继承，但仍是保守实现，目标优先是正确性和可观测性。

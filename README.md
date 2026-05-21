@@ -7,16 +7,17 @@
 - 纯 `MoonBit` 实现，不依赖 C 库。
 - 支持压缩、解压、文件结构分析、字典压缩与基础基准测试。
 - 支持最小可用的流式压缩生命周期：`create / write / flush / finish / reset`。
-- 覆盖 `Raw`、`RLE`、`Compressed` 三类块。
+- 覆盖 `Raw`、`RLE` 与当前实现支持的 `Compressed` block 子集。
 - 包含 FSE、Huffman、序列表和滑动窗口等核心实现。
 
 ## 快速开始
 
 ```powershell
+moon test
 moon run src/cmd
 ```
 
-说明：该命令会运行当前仓库里的演示与测试入口。
+说明：`moon test` 是发布前回归测试；`moon run src/cmd` 是人工演示入口。
 
 ## 文档入口
 
@@ -75,9 +76,13 @@ let original = @encoding/utf8.encode("Hello, ZSTD!")
 
 match @zstd.compress(original) {
   Ok(compressed) => {
-    let decompressed = @zstd.decompress(compressed)
-    println("compressed size = \{compressed.length()}")
-    println("decompressed size = \{decompressed.length()}")
+    match @zstd.decompress(compressed) {
+      Ok(decompressed) => {
+        println("compressed size = \{compressed.length()}")
+        println("decompressed size = \{decompressed.length()}")
+      }
+      Err(e) => println("decompression failed: \{e}")
+    }
   }
   Err(e) => println("compression failed: \{e}")
 }
@@ -113,6 +118,18 @@ let compressed = @zstd.compress_advanced(data, CompressionMethod::Compressed, 5)
 - `Raw`
 - `RLE`
 - `Compressed`
+
+## 兼容性矩阵
+
+当前发布目标是“准确、可靠、可验证”，不是完整 RFC 8878 覆盖。
+
+- Raw block：支持压缩、解压、往返测试。
+- RLE block：支持压缩、解压、往返测试；大块会按 `128KB` 分块。
+- Compressed block：支持当前 encoder/decoder 子集和回归样例，不声明完整通用兼容。
+- 拼接帧：支持连续 ZSTD frame；尾随非法数据返回错误。
+- 字典：提供基础字典构建、压缩、解压与收益统计。
+- Checksum：支持写出与统计展示；当前实现是简化 `XXH32-like`，不声明官方完整 `XXH32`。
+- 已知限制：流式压缩是最小可用生命周期实现；完整网络流、背压抽象、完整 RFC 8878 熵编码覆盖仍未完成。
 
 ### 3.1 流式压缩
 
@@ -207,6 +224,7 @@ src/
 ## 常用检查命令
 
 ```powershell
+moon test
 moon run src/cmd
 rg --files src
 rg "^pub (struct|enum|type|fn)" src
@@ -216,7 +234,7 @@ rg "CompressionConfig|ZSTDFileAnalysis|DictionaryBenefitStats" src
 ## 注意事项
 
 - 以 `src/` 下源码与 `RESOURCE.md` 为准，不以旧文档片段为准。
-- `@zstd.decompress` 是高层便捷接口，失败时返回空字节串；如果要拿到错误，使用 decoder 层 `Result` 风格接口。
+- `@zstd.decompress` 是高层 `Result` 风格接口：合法空帧返回 `Ok(Bytes::new(0))`，非法输入返回 `Err(ZSTDError)`。
 - 当前仓库文档已按模块拆分，新增类型、字段、公式或统计结果时，应同步更新对应 `RESOURCE.md`。
 
 ## License

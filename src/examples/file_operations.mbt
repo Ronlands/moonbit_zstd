@@ -26,11 +26,14 @@ fn test_text_compression() -> Unit {
     Ok(c) => c
     Err(e) => { println("压缩失败: \{e}"); return }
   }
-  let decompressed = @zstd.decompress(compressed)
+  let decompressed = match @zstd.decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(e) => { println("解压失败: \{e}"); return }
+  }
   
   println("原始数据大小: \{original.length()} 字节")
   println("压缩后大小: \{compressed.length()} 字节")
-  println("压缩比: \{compressed.length().to_double() / original.length().to_double()}")
+  println("压缩比: \{original.length().to_double() / compressed.length().to_double()}x")
   println("解压后大小: \{decompressed.length()} 字节")
   
   if original == decompressed {
@@ -49,7 +52,10 @@ fn test_binary_compression() -> Unit {
     Ok(c) => c
     Err(e) => { println("压缩失败: \{e}"); return }
   }
-  let decompressed = @zstd.decompress(compressed)
+  let decompressed = match @zstd.decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(e) => { println("解压失败: \{e}"); return }
+  }
   
   let savings = if compressed.length() < original.length() {
     ((original.length() - compressed.length()) * 100 / original.length()).to_double() / 100.0
@@ -77,13 +83,16 @@ fn test_large_data_compression() -> Unit {
     Ok(c) => c
     Err(e) => { println("压缩失败: \{e}"); return }
   }
-  let decompressed = @zstd.decompress(compressed)
+  let decompressed = match @zstd.decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(e) => { println("解压失败: \{e}"); return }
+  }
   
   let ratio = original.length().to_double() / compressed.length().to_double()
   
   println("原始数据: \{original.length()} 字节 (~\{original.length() / 1024}KB)")
   println("压缩后: \{compressed.length()} 字节 (~\{compressed.length() / 1024}KB)")
-  println("压缩比: \{ratio}:1")
+  println("压缩比: \{ratio}x")
   
   if original == decompressed {
     println("✓ 大小验证: 通过")
@@ -110,7 +119,10 @@ fn test_compression_round_trip() -> Unit {
       Ok(c) => c
       Err(_) => { println("  \{name}: 压缩失败"); continue }
     }
-    let decompressed = @zstd.decompress(compressed)
+    let decompressed = match @zstd.decompress(compressed) {
+      Ok(bytes) => bytes
+      Err(_) => { println("  \{name}: 解压失败"); continue }
+    }
     
     if data == decompressed {
       println("  \{name}: ✓")
