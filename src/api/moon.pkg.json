@@ -1,6 +1,7 @@
 {
   "import": [
     "moonbitlang/core/encoding/utf8",
+    "moonbitlang/x/fs",
     {
       "path": "Ronlands/moonbit_zstd/core",
       "alias": "zstd_core"
@@ -27,6 +28,14 @@
         "reset_streaming_compressor",
         "get_streaming_compressor_stats",
         "format_streaming_compressor_stats",
+        "pack_path",
+        "compress_path",
+        "compress_path_to_file",
+        "pack_path_as_tar",
+        "compress_path_to_tar_zst_file",
+        "decompress_tar_zst_file_to_dir",
+        "decompress_path_archive",
+        "decompress_path_archive_file_to_dir",
         "decompress",
         "analyze_file",
         "analyze_data_integrity",

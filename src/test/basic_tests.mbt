@@ -17,6 +17,7 @@ pub fn run_all_basic_tests() -> Bool {
     ("FSE Encode Simple", test_fse_encode_simple()),
     ("Streaming Compression", test_streaming_compression()),
     ("Streaming Empty Checksum", test_streaming_empty_checksum()),
+    ("Path Archive Compression", test_path_archive_compression()),
     ("Single Byte", test_single_byte()),
     ("Invalid Magic", test_invalid_magic()),
     ("Large Offset", test_large_offset()),
@@ -623,6 +624,157 @@ fn test_streaming_empty_checksum() -> Bool {
   }
 
   true
+}
+
+fn find_archive_entry(entries: Array[@zstd.PathArchiveEntry], path: String) -> @zstd.PathArchiveEntry? {
+  for i = 0; i < entries.length(); i = i + 1 {
+    if entries[i].path == path {
+      return Some(entries[i])
+    }
+  }
+  None
+}
+
+fn cleanup_path_archive_file_api_dir(root: String) -> Unit {
+  let extracted = root + "/out/path-archive"
+  let tar_extracted = root + "/tar-out/path-archive"
+  let files = [
+    extracted + "/README.txt",
+    extracted + "/notes.txt",
+    extracted + "/data/metrics.csv",
+    extracted + "/data/config.json",
+    extracted + "/nested/payload.txt",
+    tar_extracted + "/README.txt",
+    tar_extracted + "/notes.txt",
+    tar_extracted + "/data/metrics.csv",
+    tar_extracted + "/data/config.json",
+    tar_extracted + "/nested/payload.txt",
+    root + "/fixture.zst",
+    root + "/fixture.tar.zst",
+  ]
+  for i = 0; i < files.length(); i = i + 1 {
+    if @fs.path_exists(files[i]) {
+      @fs.remove_file(files[i]) catch { _ => () }
+    }
+  }
+
+  let dirs = [
+    extracted + "/data",
+    extracted + "/nested",
+    extracted,
+    root + "/out",
+    tar_extracted + "/data",
+    tar_extracted + "/nested",
+    tar_extracted,
+    root + "/tar-out",
+    root,
+  ]
+  for i = 0; i < dirs.length(); i = i + 1 {
+    if @fs.path_exists(dirs[i]) {
+      @fs.remove_dir(dirs[i]) catch { _ => () }
+    }
+  }
+}
+
+fn test_path_archive_compression() -> Bool {
+  let fixture_root = "src/test-data/path-archive"
+  let archive_root = "path-archive"
+
+  try {
+    let compressed = match @zstd.compress_path(fixture_root) {
+      Ok(bytes) => bytes
+      Err(e) => {
+        println("  Path archive compress failed: \{e}")
+        return false
+      }
+    }
+
+    let entries = match @zstd.decompress_path_archive(compressed) {
+      Ok(items) => items
+      Err(e) => {
+        println("  Path archive decode failed: \{e}")
+        return false
+      }
+    }
+
+    let root_entry_ok = match find_archive_entry(entries, archive_root) {
+      Some(entry) => entry.is_dir && entry.data.length() == 0
+      None => false
+    }
+
+    let data_dir_ok = match find_archive_entry(entries, archive_root + "/data") {
+      Some(entry) => entry.is_dir && entry.data.length() == 0
+      None => false
+    }
+
+    let notes_ok = match find_archive_entry(entries, archive_root + "/notes.txt") {
+      Some(entry) => !entry.is_dir && entry.data == @fs.read_file_to_bytes(fixture_root + "/notes.txt")
+      None => false
+    }
+
+    let metrics_ok = match find_archive_entry(entries, archive_root + "/data/metrics.csv") {
+      Some(entry) => !entry.is_dir && entry.data == @fs.read_file_to_bytes(fixture_root + "/data/metrics.csv")
+      None => false
+    }
+
+    let payload_ok = match find_archive_entry(entries, archive_root + "/nested/payload.txt") {
+      Some(entry) => !entry.is_dir && entry.data == @fs.read_file_to_bytes(fixture_root + "/nested/payload.txt")
+      None => false
+    }
+
+    let file_api_root = "tmp_zstd_path_archive_file_api"
+    cleanup_path_archive_file_api_dir(file_api_root)
+    @fs.create_dir(file_api_root)
+    let zst_path = file_api_root + "/fixture.zst"
+    let out_dir = file_api_root + "/out"
+    let tar_zst_path = file_api_root + "/fixture.tar.zst"
+    let tar_out_dir = file_api_root + "/tar-out"
+    let file_api_ok = match @zstd.compress_path_to_file(fixture_root, zst_path) {
+      Ok(_) => {
+        match @zstd.decompress_path_archive_file_to_dir(zst_path, out_dir) {
+          Ok(file_entries) =>
+            file_entries.length() == entries.length() &&
+            @fs.read_file_to_bytes(out_dir + "/path-archive/data/metrics.csv") ==
+              @fs.read_file_to_bytes(fixture_root + "/data/metrics.csv")
+          Err(e) => {
+            println("  Path archive file extract failed: \{e}")
+            false
+          }
+        }
+      }
+      Err(e) => {
+        println("  Path archive file compress failed: \{e}")
+        false
+      }
+    }
+
+    let tar_file_api_ok = match @zstd.compress_path_to_tar_zst_file(fixture_root, tar_zst_path) {
+      Ok(_) => {
+        match @zstd.decompress_tar_zst_file_to_dir(tar_zst_path, tar_out_dir) {
+          Ok(tar_entries) =>
+            tar_entries.length() == entries.length() &&
+            @fs.read_file_to_bytes(tar_out_dir + "/path-archive/data/metrics.csv") ==
+              @fs.read_file_to_bytes(fixture_root + "/data/metrics.csv")
+          Err(e) => {
+            println("  Tar.zst file extract failed: \{e}")
+            false
+          }
+        }
+      }
+      Err(e) => {
+        println("  Tar.zst file compress failed: \{e}")
+        false
+      }
+    }
+    cleanup_path_archive_file_api_dir(file_api_root)
+
+    root_entry_ok && data_dir_ok && notes_ok && metrics_ok && payload_ok && file_api_ok && tar_file_api_ok
+  } catch {
+    _ => {
+      cleanup_path_archive_file_api_dir("tmp_zstd_path_archive_file_api")
+      false
+    }
+  }
 }
 
 /// Test corrupted data handling

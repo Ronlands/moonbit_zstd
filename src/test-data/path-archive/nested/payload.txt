@@ -1,0 +1,3 @@
+Nested payload for recursive path archive coverage.
+0123456789
+abcdefghij

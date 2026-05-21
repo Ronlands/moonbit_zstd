@@ -1,5 +1,10 @@
 # Cmd 模块资源
 
+## Path archive demo note
+
+- `moon run src/cmd` 会从 `src/test-data/path-archive` 生成 `target/path-archive-demo/path-archive.tar.zst`，再解到 `target/path-archive-demo/extracted/`。
+- 外部工具演示路径：`zstd -d target/path-archive-demo/path-archive.tar.zst -o target/path-archive-demo/path-archive.tar`，然后 `tar -xf target/path-archive-demo/path-archive.tar -C <输出目录>`。
+
 ## 1. 模块定位
 
 - 路径：`src/cmd`

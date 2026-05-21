@@ -38,6 +38,7 @@ fn run_demos() -> Unit {
 
   // 新增：流式压缩演示
   @zstd_examples.demo_streaming_compression()
+  demo_path_archive_file_flow()
 
   // 新增：FSE 解码调试
   demo_fse_debug()
@@ -52,6 +53,55 @@ fn demo_fse_debug() -> Unit {
   println("   " + @zstd_test.repeat_string("-", 30))
 
   println("   FSE 调试功能暂时跳过")
+}
+
+fn ensure_demo_dir(path: String) -> Bool {
+  try {
+    if !@fs.path_exists(path) {
+      @fs.create_dir(path)
+    }
+    true
+  } catch {
+    _ => false
+  }
+}
+
+fn demo_path_archive_file_flow() -> Unit {
+  println("\n9. Tar.zst path compression/extraction demo")
+  println("   " + @zstd_test.repeat_string("-", 30))
+
+  let input_dir = "src/test-data/path-archive"
+  let demo_root = "target/path-archive-demo"
+  let compressed_file = demo_root + "/path-archive.tar.zst"
+  let extract_dir = demo_root + "/extracted"
+
+  if !ensure_demo_dir("target") || !ensure_demo_dir(demo_root) || !ensure_demo_dir(extract_dir) {
+    println("   failed to create demo output directory: " + demo_root)
+    return
+  }
+
+  match @zstd.compress_path_to_tar_zst_file(input_dir, compressed_file) {
+    Ok(_) => println("   input directory: " + input_dir)
+    Err(e) => {
+      println("   compression failed: \{e}")
+      return
+    }
+  }
+  println("   compressed file: " + compressed_file)
+
+  let entries = match @zstd.decompress_tar_zst_file_to_dir(compressed_file, extract_dir) {
+    Ok(items) => items
+    Err(e) => {
+      println("   extraction failed: \{e}")
+      return
+    }
+  }
+
+  println("   extracted directory: " + extract_dir)
+  println("   tar entries: \{entries.length()}")
+  println("   sample extracted file: " + extract_dir + "/path-archive/data/metrics.csv")
+  println("   external tools: zstd -d " + compressed_file + " -o target/path-archive-demo/path-archive.tar")
+  println("   then: tar -xf target/path-archive-demo/path-archive.tar -C target/path-archive-demo/external")
 }
 
 /// Run comprehensive test suite
@@ -78,11 +128,11 @@ fn run_tests() -> Unit {
   let noncompliance_tests_passed = @zstd_test.run_all_noncompliance_tests()
 
   println("\nTest Results Summary:")
-  println("Basic tests (18): " + (if basic_tests_passed { "PASSED" } else { "FAILED" }))
+  println("Basic tests (19): " + (if basic_tests_passed { "PASSED" } else { "FAILED" }))
   println("Compatibility tests (5): " + (if compatibility_tests_passed { "PASSED" } else { "FAILED" }))
   println("Dictionary tests (5): " + (if dictionary_tests_passed { "PASSED" } else { "FAILED" }))
   println("Non-compliance & cross-compat tests (9): " + (if noncompliance_tests_passed { "PASSED" } else { "FAILED" }))
-  println("Total: 37 tests")
+  println("Total: 38 tests")
 
   if basic_tests_passed && compatibility_tests_passed && dictionary_tests_passed && noncompliance_tests_passed {
     println("\nAll tests passed! ZSTD implementation is working correctly.")

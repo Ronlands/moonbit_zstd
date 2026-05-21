@@ -1,0 +1,5 @@
+{
+  "name": "path-archive-fixture",
+  "version": 1,
+  "files": ["README.txt", "notes.txt", "data/metrics.csv"]
+}

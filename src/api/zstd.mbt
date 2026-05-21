@@ -75,6 +75,22 @@ pub struct StreamingCompressionStats {
   finished: Bool
 }
 
+/// Entry decoded from this project's lightweight path archive format.
+///
+/// The archive format is intentionally private to this project. It exists to
+/// make file and directory compression tests convenient; it is not tar/zip.
+pub struct PathArchiveEntry {
+  path: String
+  is_dir: Bool
+  data: Bytes
+}
+
+priv struct PathArchiveBuildEntry {
+  path: String
+  is_dir: Bool
+  data: Bytes
+}
+
 /// 创建流式压缩器。
 ///
 /// 说明：
@@ -292,6 +308,567 @@ pub fn compress_advanced(data: Bytes, mode: CompressionMethod, level: Int) -> Re
     CompressionMethod::Raw => @zstd_encoder.compress_as_raw_block(data, config)
     CompressionMethod::RLE => @zstd_encoder.compress_as_rle_block(data, config)
     CompressionMethod::Compressed => @zstd_encoder.compress_as_compressed_block(data, config)
+  }
+}
+
+fn normalize_archive_path(path: String) -> String {
+  path.replace_all(old="\\", new="/")
+}
+
+fn path_basename(path: String) -> String {
+  let normalized = normalize_archive_path(path).trim_end(chars="/").to_string()
+  match normalized.rev_after("/") {
+    Some(name) => name.to_string()
+    None => normalized
+  }
+}
+
+fn join_fs_path(base: String, name: String) -> String {
+  if base.has_suffix("/") || base.has_suffix("\\") {
+    base + name
+  } else {
+    base + "/" + name
+  }
+}
+
+fn join_archive_path(base: String, name: String) -> String {
+  let clean_name = normalize_archive_path(name)
+  if base.length() == 0 {
+    clean_name
+  } else {
+    base + "/" + clean_name
+  }
+}
+
+fn is_safe_archive_path(path: String) -> Bool {
+  let normalized = normalize_archive_path(path)
+  if normalized.length() == 0 || normalized.has_prefix("/") {
+    return false
+  }
+
+  let parts = normalized.split("/").map(fn(part) { part.to_string() }).collect()
+  for i = 0; i < parts.length(); i = i + 1 {
+    let part = parts[i]
+    if part.length() == 0 || part == "." || part == ".." || part.contains(":") {
+      return false
+    }
+  }
+  true
+}
+
+fn write_u32_archive(output: Array[Byte], value: Int) -> Unit {
+  output.push((value & 0xFF).to_byte())
+  output.push(((value >> 8) & 0xFF).to_byte())
+  output.push(((value >> 16) & 0xFF).to_byte())
+  output.push(((value >> 24) & 0xFF).to_byte())
+}
+
+fn read_u32_archive(data: Bytes, offset: Int) -> Int {
+  data[offset].to_int() |
+  (data[offset + 1].to_int() << 8) |
+  (data[offset + 2].to_int() << 16) |
+  (data[offset + 3].to_int() << 24)
+}
+
+fn append_bytes(output: Array[Byte], data: Bytes) -> Unit {
+  for i = 0; i < data.length(); i = i + 1 {
+    output.push(data[i])
+  }
+}
+
+fn append_zeroes(output: Array[Byte], count: Int) -> Unit {
+  for _i = 0; _i < count; _i = _i + 1 {
+    output.push((0).to_byte())
+  }
+}
+
+fn write_tar_string_field(
+  header: Array[Byte],
+  offset: Int,
+  field_len: Int,
+  value: String
+) -> Result[Unit, @zstd_core.ZSTDError] {
+  let bytes = @utf8.encode(value)
+  if bytes.length() > field_len {
+    return Err(@zstd_core.message_error("Tar path field is too long: " + value))
+  }
+  for i = 0; i < bytes.length(); i = i + 1 {
+    header[offset + i] = bytes[i]
+  }
+  Ok(())
+}
+
+fn write_tar_octal_field(header: Array[Byte], offset: Int, field_len: Int, value: Int) -> Unit {
+  let mut v = value
+  let mut pos = offset + field_len - 2
+  while pos >= offset {
+    header[pos] = (48 + (v & 7)).to_byte()
+    v = v >> 3
+    pos = pos - 1
+  }
+  header[offset + field_len - 1] = (0).to_byte()
+}
+
+fn write_tar_checksum_field(header: Array[Byte], checksum: Int) -> Unit {
+  let mut v = checksum
+  let mut pos = 153
+  while pos >= 148 {
+    header[pos] = (48 + (v & 7)).to_byte()
+    v = v >> 3
+    pos = pos - 1
+  }
+  header[154] = (0).to_byte()
+  header[155] = b' '
+}
+
+fn make_tar_header(entry: PathArchiveBuildEntry) -> Result[Bytes, @zstd_core.ZSTDError] {
+  let header: Array[Byte] = Array::make(512, (0).to_byte())
+  let tar_path = if entry.is_dir && !entry.path.has_suffix("/") {
+    entry.path + "/"
+  } else {
+    entry.path
+  }
+  if !is_safe_archive_path(tar_path.trim_end(chars="/").to_string()) {
+    return Err(@zstd_core.message_error("Unsafe tar path: " + entry.path))
+  }
+
+  match write_tar_string_field(header, 0, 100, tar_path) {
+    Ok(_) => ()
+    Err(e) => return Err(e)
+  }
+  write_tar_octal_field(header, 100, 8, if entry.is_dir { 493 } else { 420 })
+  write_tar_octal_field(header, 108, 8, 0)
+  write_tar_octal_field(header, 116, 8, 0)
+  write_tar_octal_field(header, 124, 12, if entry.is_dir { 0 } else { entry.data.length() })
+  write_tar_octal_field(header, 136, 12, 0)
+  for i = 148; i < 156; i = i + 1 {
+    header[i] = b' '
+  }
+  header[156] = if entry.is_dir { b'5' } else { b'0' }
+  match write_tar_string_field(header, 257, 6, "ustar") {
+    Ok(_) => ()
+    Err(e) => return Err(e)
+  }
+  match write_tar_string_field(header, 263, 2, "00") {
+    Ok(_) => ()
+    Err(e) => return Err(e)
+  }
+
+  let mut checksum = 0
+  for i = 0; i < header.length(); i = i + 1 {
+    checksum = checksum + header[i].to_int()
+  }
+  write_tar_checksum_field(header, checksum)
+  Ok(Bytes::from_array(header))
+}
+
+fn encode_tar_archive(entries: Array[PathArchiveBuildEntry]) -> Result[Bytes, @zstd_core.ZSTDError] {
+  let output: Array[Byte] = []
+  for i = 0; i < entries.length(); i = i + 1 {
+    let entry = entries[i]
+    match make_tar_header(entry) {
+      Ok(header) => append_bytes(output, header)
+      Err(e) => return Err(e)
+    }
+    if !entry.is_dir {
+      append_bytes(output, entry.data)
+      let padding = (512 - (entry.data.length() % 512)) % 512
+      append_zeroes(output, padding)
+    }
+  }
+  append_zeroes(output, 1024)
+  Ok(Bytes::from_array(output))
+}
+
+fn is_zero_tar_block(data: Bytes, offset: Int) -> Bool {
+  if offset + 512 > data.length() {
+    return false
+  }
+  for i = 0; i < 512; i = i + 1 {
+    if data[offset + i] != 0 {
+      return false
+    }
+  }
+  true
+}
+
+fn read_tar_string(data: Bytes, offset: Int, field_len: Int) -> String {
+  let output: Array[Byte] = []
+  let mut i = 0
+  while i < field_len && data[offset + i] != 0 {
+    output.push(data[offset + i])
+    i = i + 1
+  }
+  @utf8.decode_lossy(Bytes::from_array(output))
+}
+
+fn read_tar_octal(data: Bytes, offset: Int, field_len: Int) -> Int {
+  let mut value = 0
+  for i = 0; i < field_len; i = i + 1 {
+    let byte = data[offset + i].to_int()
+    if byte >= 48 && byte <= 55 {
+      value = (value << 3) + (byte - 48)
+    }
+  }
+  value
+}
+
+fn decode_tar_to_dir(tar_data: Bytes, output_dir: String) -> Result[Array[PathArchiveEntry], @zstd_core.ZSTDError] raise {
+  if @fs.path_exists(output_dir) {
+    if !@fs.is_dir(output_dir) {
+      return Err(@zstd_core.message_error("Output path is not a directory: " + output_dir))
+    }
+  } else {
+    @fs.create_dir(output_dir)
+  }
+
+  let entries: Array[PathArchiveEntry] = []
+  let mut offset = 0
+  while offset + 512 <= tar_data.length() {
+    if is_zero_tar_block(tar_data, offset) {
+      return Ok(entries)
+    }
+
+    let raw_name = read_tar_string(tar_data, offset, 100)
+    let typeflag = tar_data[offset + 156]
+    let size = read_tar_octal(tar_data, offset + 124, 12)
+    if size < 0 || offset + 512 + size > tar_data.length() {
+      return Err(@zstd_core.message_error("Invalid tar entry size"))
+    }
+
+    let is_dir = typeflag == b'5'
+    let is_file = typeflag == b'0' || typeflag == 0
+    if !is_dir && !is_file {
+      return Err(@zstd_core.message_error("Unsupported tar entry type"))
+    }
+
+    let entry_path = if raw_name.has_suffix("/") {
+      raw_name.trim_end(chars="/").to_string()
+    } else {
+      raw_name
+    }
+    if !is_safe_archive_path(entry_path) {
+      return Err(@zstd_core.message_error("Unsafe tar path: " + entry_path))
+    }
+
+    let target_path = join_fs_path(output_dir, entry_path)
+    if is_dir {
+      if @fs.path_exists(target_path) {
+        if !@fs.is_dir(target_path) {
+          return Err(@zstd_core.message_error("Tar directory target is not a directory: " + target_path))
+        }
+      } else {
+        @fs.create_dir(target_path)
+      }
+      entries.push(PathArchiveEntry::{ path: entry_path, is_dir: true, data: Bytes::new(0) })
+    } else {
+      let file_data: Array[Byte] = []
+      for i = 0; i < size; i = i + 1 {
+        file_data.push(tar_data[offset + 512 + i])
+      }
+      let bytes = Bytes::from_array(file_data)
+      @fs.write_bytes_to_file(target_path, bytes)
+      entries.push(PathArchiveEntry::{ path: entry_path, is_dir: false, data: bytes })
+    }
+
+    offset = offset + 512 + size + ((512 - (size % 512)) % 512)
+  }
+
+  Err(@zstd_core.message_error("Tar archive is missing end marker"))
+}
+
+fn collect_path_archive_entries(
+  fs_path: String,
+  archive_path: String,
+  entries: Array[PathArchiveBuildEntry]
+) -> Result[Unit, @zstd_core.ZSTDError] raise {
+  if @fs.is_dir(fs_path) {
+    entries.push(PathArchiveBuildEntry::{ path: archive_path, is_dir: true, data: Bytes::new(0) })
+    let children = @fs.read_dir(fs_path)
+    for i = 0; i < children.length(); i = i + 1 {
+      let child_name = children[i]
+      if child_name != "." && child_name != ".." {
+        let child_fs_path = join_fs_path(fs_path, child_name)
+        let child_archive_path = join_archive_path(archive_path, child_name)
+        match collect_path_archive_entries(child_fs_path, child_archive_path, entries) {
+          Ok(_) => ()
+          Err(e) => return Err(e)
+        }
+      }
+    }
+    Ok(())
+  } else if @fs.is_file(fs_path) {
+    let content = @fs.read_file_to_bytes(fs_path)
+    entries.push(PathArchiveBuildEntry::{ path: archive_path, is_dir: false, data: content })
+    Ok(())
+  } else {
+    Err(@zstd_core.message_error("Path is neither file nor directory: " + fs_path))
+  }
+}
+
+fn encode_path_archive(entries: Array[PathArchiveBuildEntry]) -> Bytes {
+  let output: Array[Byte] = []
+
+  // Magic: "MBZAR1\0\1"
+  output.push(b'M')
+  output.push(b'B')
+  output.push(b'Z')
+  output.push(b'A')
+  output.push(b'R')
+  output.push(b'1')
+  output.push((0).to_byte())
+  output.push((1).to_byte())
+  write_u32_archive(output, entries.length())
+
+  for i = 0; i < entries.length(); i = i + 1 {
+    let entry = entries[i]
+    let path_bytes = @utf8.encode(entry.path)
+    output.push((if entry.is_dir { 1 } else { 0 }).to_byte())
+    write_u32_archive(output, path_bytes.length())
+    write_u32_archive(output, if entry.is_dir { 0 } else { entry.data.length() })
+    for j = 0; j < path_bytes.length(); j = j + 1 {
+      output.push(path_bytes[j])
+    }
+    if !entry.is_dir {
+      for j = 0; j < entry.data.length(); j = j + 1 {
+        output.push(entry.data[j])
+      }
+    }
+  }
+
+  Bytes::from_array(output)
+}
+
+/// Pack a file or directory path into this project's lightweight archive bytes.
+///
+/// Directories are walked recursively. Paths inside the archive are normalized
+/// to `/` separators and rooted at the input path's basename.
+pub fn pack_path(path: String) -> Result[Bytes, @zstd_core.ZSTDError] {
+  if !@fs.path_exists(path) {
+    return Err(@zstd_core.message_error("Path does not exist: " + path))
+  }
+
+  try {
+    let entries: Array[PathArchiveBuildEntry] = []
+    match collect_path_archive_entries(path, path_basename(path), entries) {
+      Ok(_) => Ok(encode_path_archive(entries))
+      Err(e) => Err(e)
+    }
+  } catch {
+    _ => Err(@zstd_core.message_error("Failed to pack path: " + path))
+  }
+}
+
+/// Pack a file or directory path, then compress the archive bytes as ZSTD data.
+pub fn compress_path(path: String) -> Result[Bytes, @zstd_core.ZSTDError] {
+  match pack_path(path) {
+    Ok(archive) => compress(archive)
+    Err(e) => Err(e)
+  }
+}
+
+/// Pack and compress a file or directory path, then write the ZSTD bytes to a file.
+pub fn compress_path_to_file(path: String, output_path: String) -> Result[Unit, @zstd_core.ZSTDError] {
+  match compress_path(path) {
+    Ok(compressed) => {
+      try {
+        @fs.write_bytes_to_file(output_path, compressed)
+        Ok(())
+      } catch {
+        _ => Err(@zstd_core.message_error("Failed to write compressed path output: " + output_path))
+      }
+    }
+    Err(e) => Err(e)
+  }
+}
+
+/// Pack a file or directory path into a POSIX ustar archive byte stream.
+///
+/// This is the compatibility path for external tools: compress the returned
+/// bytes with ZSTD and name the output `.tar.zst`.
+pub fn pack_path_as_tar(path: String) -> Result[Bytes, @zstd_core.ZSTDError] {
+  if !@fs.path_exists(path) {
+    return Err(@zstd_core.message_error("Path does not exist: " + path))
+  }
+
+  try {
+    let entries: Array[PathArchiveBuildEntry] = []
+    match collect_path_archive_entries(path, path_basename(path), entries) {
+      Ok(_) => encode_tar_archive(entries)
+      Err(e) => Err(e)
+    }
+  } catch {
+    _ => Err(@zstd_core.message_error("Failed to pack tar path: " + path))
+  }
+}
+
+/// Pack a file or directory as POSIX ustar, compress it, and write `.tar.zst`.
+pub fn compress_path_to_tar_zst_file(path: String, output_path: String) -> Result[Unit, @zstd_core.ZSTDError] {
+  match pack_path_as_tar(path) {
+    Ok(tar_bytes) => {
+      match compress(tar_bytes) {
+        Ok(compressed) => {
+          try {
+            @fs.write_bytes_to_file(output_path, compressed)
+            Ok(())
+          } catch {
+            _ => Err(@zstd_core.message_error("Failed to write tar.zst output: " + output_path))
+          }
+        }
+        Err(e) => Err(e)
+      }
+    }
+    Err(e) => Err(e)
+  }
+}
+
+/// Read a `.tar.zst` file, decompress it, and extract the tar entries.
+pub fn decompress_tar_zst_file_to_dir(
+  compressed_path: String,
+  output_dir: String
+) -> Result[Array[PathArchiveEntry], @zstd_core.ZSTDError] {
+  try {
+    let compressed = @fs.read_file_to_bytes(compressed_path)
+    let tar_data = match decompress(compressed) {
+      Ok(bytes) => bytes
+      Err(e) => return Err(e)
+    }
+    decode_tar_to_dir(tar_data, output_dir)
+  } catch {
+    _ => Err(@zstd_core.message_error("Failed to extract tar.zst: " + compressed_path))
+  }
+}
+
+fn validate_path_archive_magic(data: Bytes) -> Bool {
+  data.length() >= 12 &&
+  data[0] == b'M' &&
+  data[1] == b'B' &&
+  data[2] == b'Z' &&
+  data[3] == b'A' &&
+  data[4] == b'R' &&
+  data[5] == b'1' &&
+  data[6] == 0x00 &&
+  data[7] == 0x01
+}
+
+fn decode_path_archive(data: Bytes) -> Result[Array[PathArchiveEntry], @zstd_core.ZSTDError] {
+  if !validate_path_archive_magic(data) {
+    return Err(@zstd_core.message_error("Invalid path archive magic"))
+  }
+
+  let entry_count = read_u32_archive(data, 8)
+  if entry_count < 0 {
+    return Err(@zstd_core.message_error("Invalid path archive entry count"))
+  }
+
+  let entries: Array[PathArchiveEntry] = []
+  let mut offset = 12
+  for _i = 0; _i < entry_count; _i = _i + 1 {
+    if offset + 9 > data.length() {
+      return Err(@zstd_core.message_error("Truncated path archive entry header"))
+    }
+
+    let entry_type = data[offset].to_int()
+    let is_dir = entry_type == 1
+    if entry_type != 0 && entry_type != 1 {
+      return Err(@zstd_core.message_error("Invalid path archive entry type"))
+    }
+    let path_len = read_u32_archive(data, offset + 1)
+    let data_len = read_u32_archive(data, offset + 5)
+    if path_len < 0 || data_len < 0 {
+      return Err(@zstd_core.message_error("Invalid path archive entry size"))
+    }
+    offset = offset + 9
+
+    if offset + path_len + data_len > data.length() {
+      return Err(@zstd_core.message_error("Truncated path archive entry data"))
+    }
+
+    let path_bytes: Array[Byte] = []
+    for j = 0; j < path_len; j = j + 1 {
+      path_bytes.push(data[offset + j])
+    }
+    let entry_path = @utf8.decode_lossy(Bytes::from_array(path_bytes))
+    offset = offset + path_len
+
+    let entry_data: Array[Byte] = []
+    if !is_dir {
+      for j = 0; j < data_len; j = j + 1 {
+        entry_data.push(data[offset + j])
+      }
+    } else if data_len != 0 {
+      return Err(@zstd_core.message_error("Directory archive entry must not contain data"))
+    }
+    offset = offset + data_len
+
+    entries.push(PathArchiveEntry::{
+      path: entry_path,
+      is_dir: is_dir,
+      data: Bytes::from_array(entry_data),
+    })
+  }
+
+  if offset != data.length() {
+    return Err(@zstd_core.message_error("Trailing bytes after path archive"))
+  }
+
+  Ok(entries)
+}
+
+/// Decompress ZSTD bytes produced by `compress_path` and decode archive entries.
+pub fn decompress_path_archive(compressed: Bytes) -> Result[Array[PathArchiveEntry], @zstd_core.ZSTDError] {
+  match decompress(compressed) {
+    Ok(archive) => decode_path_archive(archive)
+    Err(e) => Err(e)
+  }
+}
+
+/// Read a path archive `.zst` file, decode it, and write its entries under `output_dir`.
+///
+/// The extracted tree preserves archive paths under `output_dir`. Archive paths
+/// are validated to reject absolute paths, drive prefixes, and `..` segments.
+pub fn decompress_path_archive_file_to_dir(
+  compressed_path: String,
+  output_dir: String
+) -> Result[Array[PathArchiveEntry], @zstd_core.ZSTDError] {
+  try {
+    if @fs.path_exists(output_dir) {
+      if !@fs.is_dir(output_dir) {
+        return Err(@zstd_core.message_error("Output path is not a directory: " + output_dir))
+      }
+    } else {
+      @fs.create_dir(output_dir)
+    }
+
+    let compressed = @fs.read_file_to_bytes(compressed_path)
+    let entries = match decompress_path_archive(compressed) {
+      Ok(items) => items
+      Err(e) => return Err(e)
+    }
+
+    for i = 0; i < entries.length(); i = i + 1 {
+      let entry = entries[i]
+      if !is_safe_archive_path(entry.path) {
+        return Err(@zstd_core.message_error("Unsafe archive path: " + entry.path))
+      }
+
+      let target_path = join_fs_path(output_dir, entry.path)
+      if entry.is_dir {
+        if @fs.path_exists(target_path) {
+          if !@fs.is_dir(target_path) {
+            return Err(@zstd_core.message_error("Archive directory target is not a directory: " + target_path))
+          }
+        } else {
+          @fs.create_dir(target_path)
+        }
+      } else {
+        @fs.write_bytes_to_file(target_path, entry.data)
+      }
+    }
+
+    Ok(entries)
+  } catch {
+    _ => Err(@zstd_core.message_error("Failed to extract path archive: " + compressed_path))
   }
 }
 

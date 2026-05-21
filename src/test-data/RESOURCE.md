@@ -32,6 +32,12 @@
   - `single_char.txt.zst`
   - `special_chars.txt.zst`
   - `with_nulls.txt.zst`
+- `path-archive/`
+  - `README.txt`
+  - `notes.txt`
+  - `data/metrics.csv`
+  - `data/config.json`
+  - `nested/payload.txt`
 
 ## 3. 资源分类说明
 
@@ -60,6 +66,12 @@
 
 - 用途：常见文本内容的压缩样本。
 - 关注点：空文本、短文本、长文本、随机文本、重复文本、特殊字符文本。
+
+### 3.5 `path-archive`
+
+- 用途：作为 `compress_path` / `decompress_path_archive` 的固定目录 fixture。
+- 关注点：递归目录、普通文本、CSV 数据、JSON 配置和嵌套文件的路径归档 round-trip。
+- 说明：归档格式是项目私有测试格式，不是 tar/zip，也不是 RFC 8878 帧格式的一部分。
 
 ## 4. 使用建议
 

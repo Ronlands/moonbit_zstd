@@ -15,6 +15,7 @@
 - `ZSTDFileAnalysis`
 - `DataIntegrityAnalysis`
 - `SlidingWindowDecoder`
+- `PathArchiveEntry`
 
 ## 3. 类型与字段说明
 
@@ -139,6 +140,15 @@
   - `window_size`：窗口大小，单位字节
 - 用途：流式解压上下文承载对象。
 
+### 3.8 `PathArchiveEntry`
+
+- 语义：`decompress_path_archive` 返回的路径打包条目。
+- 字段：
+  - `path`：归档内路径，使用 `/` 分隔，并以输入路径 basename 为根。
+  - `is_dir`：是否为目录条目。
+  - `data`：文件内容；目录条目固定为空。
+- 注意：这是项目私有的轻量路径归档格式，只用于测试和本库 API 便捷打包，不是 tar/zip，也不是 RFC 8878 的一部分。
+
 ## 4. 公开方法口径
 
 - `compress`：默认压缩入口。
@@ -151,6 +161,14 @@
 - `flush_streaming_compressor(streamer)`：强制把当前 pending 数据落块。
 - `finish_streaming_compressor(streamer)`：结束帧并返回最后输出。
 - `reset_streaming_compressor(streamer)`：重置内部状态。
+- `pack_path(path)`：把单个文件或目录递归打包成项目私有路径归档字节。
+- `compress_path(path)`：先执行 `pack_path`，再用现有 `compress` 输出 ZSTD 数据。
+- `compress_path_to_file(path, output_path)`：把文件或目录打包压缩后直接写入 `.zst` 文件。
+- `pack_path_as_tar(path)`：把文件或目录递归打包成 POSIX ustar 字节。
+- `compress_path_to_tar_zst_file(path, output_path)`：写出外部工具可用的 `.tar.zst` 文件。
+- `decompress_tar_zst_file_to_dir(compressed_path, output_dir)`：读取 `.tar.zst` 并还原 tar 目录结构。
+- `decompress_path_archive(compressed)`：解压 `compress_path` 生成的数据，并返回归档条目数组。
+- `decompress_path_archive_file_to_dir(compressed_path, output_dir)`：读取路径归档 `.zst`，并把条目写入输出目录。
 - `decompress`：高层解压入口，返回 `Result[Bytes, ZSTDError]`；合法空帧返回 `Ok` 空字节，非法输入返回结构化错误。
 - `analyze_file`：文件结构分析。
 - `analyze_data_integrity`：启发式完整性分析。

@@ -24,6 +24,7 @@
   - `src/test/RESOURCE.md`
   - `src/benchmark/RESOURCE.md`
   - `src/test-data/RESOURCE.md`
+    - `src/test-data/path-archive/`：`compress_path` / `decompress_path_archive` 固定目录样本。
 
 ## 3. 模块地图
 

@@ -1,0 +1,4 @@
+name,count,ratio
+raw,128,1.00
+rle,64,2.00
+compressed,32,4.00

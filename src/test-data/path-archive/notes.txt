@@ -1,0 +1,5 @@
+alpha
+beta
+gamma
+
+Repeated text gives the compressor a small but visible pattern to encode.
