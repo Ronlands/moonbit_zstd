@@ -37,8 +37,8 @@ pub fn demo_file_analysis() -> Unit {
     Err(e) => { println("压缩失败: \{e}"); return }
   }
   let analysis = @zstd.analyze_file(compressed)
-  let magic_str = analysis.magic_number.reinterpret_as_int().to_string()
-  let file_size = test_data.length()
+  let magic_str = format_magic_number(compressed)
+  let file_size = compressed.length()
   
   println("   文件结构分析:")
   println("   - 文件有效性: \{analysis.is_valid}")
@@ -53,15 +53,27 @@ pub fn demo_file_analysis() -> Unit {
 pub fn demo_data_integrity() -> Unit {
   println("\n3. 数据完整性分析")
   println("   " + @zstd_test.repeat_string("-", 30))
-  
-  let test_sizes = [100, 1000, 10000]
-  for i = 0; i < test_sizes.length(); i = i + 1 {
-    let size = test_sizes[i]
-    let test_data = create_test_data(size)
-    let integrity = @zstd.analyze_data_integrity(test_data)
-    
-    println("   数据大小 \{size} 字节:")
-    println("     分析速度: 优秀")
+
+  let valid_source = @utf8.encode("Integrity analysis sample " + @zstd_test.repeat_string("ABCD", 32))
+  let valid_frame = match @zstd.compress(valid_source) {
+    Ok(c) => c
+    Err(e) => { println("压缩失败: \{e}"); return }
+  }
+  let truncated_frame = drop_last_bytes(valid_frame, 2)
+  let non_zstd_data = create_test_data(64)
+
+  let samples = [
+    ("有效ZSTD帧", valid_frame),
+    ("截断ZSTD帧", truncated_frame),
+    ("非ZSTD数据", non_zstd_data)
+  ]
+
+  for i = 0; i < samples.length(); i = i + 1 {
+    let (name, sample) = samples[i]
+    let integrity = @zstd.analyze_data_integrity(sample)
+
+    println("   样本: \{name} (\{sample.length()} 字节)")
+    println("     ZSTD格式: " + (if @zstd.is_zstd_format(sample) { "是" } else { "否" }))
     println("     数据密度: \{integrity.data_density}")
     println("     结构一致性: \{integrity.structure_consistency}")
     println("     熵级别: \{integrity.entropy_level}")
@@ -129,5 +141,44 @@ fn create_test_data(size: Int) -> Bytes {
     data.push((i % 256).to_byte())
   }
   Bytes::from_array(data)
+}
+
+fn format_magic_number(data: Bytes) -> String {
+  if data.length() < 4 {
+    return "00000000"
+  }
+
+  let mut result = ""
+  for i = 3; i >= 0; i = i - 1 {
+    let byte_val = data[i].to_int()
+    if byte_val < 16 {
+      result = result + "0"
+    }
+    result = result + to_upper_hex(byte_val)
+  }
+  result
+}
+
+fn to_upper_hex(value: Int) -> String {
+  if value == 0 { return "0" }
+
+  let hex_chars = "0123456789ABCDEF"
+  let mut result = ""
+  let mut n = value
+  while n > 0 {
+    let digit = n % 16
+    result = hex_chars.code_unit_at(digit).to_int().unsafe_to_char().to_string() + result
+    n = n / 16
+  }
+  result
+}
+
+fn drop_last_bytes(data: Bytes, count: Int) -> Bytes {
+  let keep_size = (data.length() - count).max(0)
+  let output : Array[Byte] = []
+  for i = 0; i < keep_size; i = i + 1 {
+    output.push(data[i])
+  }
+  Bytes::from_array(output)
 }
 

@@ -113,18 +113,24 @@
 
 ### 3.6 `DataIntegrityAnalysis`
 
-- 语义：对输入数据给出启发式完整性指标。
+- 语义：对输入数据给出基于字节分布与 ZSTD 结构检查的完整性指标。
 - 字段：
   - `truncation_indicators`：截断迹象数量。
   - `data_density`：数据密度，`Double`。
   - `structure_consistency`：结构一致性，`Double`。
   - `entropy_level`：熵级别，`Double`。
 - 当前实现口径：
-  - `data_density`：空数据返回 `0.0`，否则固定 `0.8`
-  - `structure_consistency`：长度大于等于 4 返回 `0.9`，否则 `0.1`
-  - `entropy_level`：固定 `0.7`
-  - `truncation_indicators`：长度小于 10 返回 `1`，否则 `0`
-- 结论：该对象当前属于启发式演示结果，不是严格统计模型，不能作为协议级真值使用。
+  - `data_density = 非零字节数 / 总字节数`
+  - `structure_consistency`：仅对 ZSTD 数据做结构评分；非 ZSTD 数据返回 `0.0`
+  - `structure_consistency` 的评分证据按档累积：
+    - 命中 ZSTD 魔数，给基础分
+    - 能解析出帧级信息，再加一档
+    - `analyze_file_detailed` 判定首块结构合法，再加一档
+    - 真实解码成功，再加最高一档
+    - 遇到“截断 / 缺失 / 不完整 / oversized / invalid / error”等迹象时，再按严重程度扣分
+  - `entropy_level`：基于字节种类覆盖度与频次均匀度的归一化估计值
+  - `truncation_indicators`：综合尾部异常零字节、ZSTD 结构截断/缺失/不完整错误、以及解码失败迹象累计
+- 结论：该对象仍属于启发式完整性分析，不等价于严格信息论熵或协议级真值；评分强调“分层”。
 
 ### 3.7 `SlidingWindowDecoder`
 

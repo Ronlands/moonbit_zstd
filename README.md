@@ -173,7 +173,7 @@ match @zstd_dictionary.compress_with_dictionary(data, dict) {
 - 最大块大小：`131072` 字节
 - 高层解压全局输出限制：`128MB`
 - `compression_ratio` 统一按 `original_size / compressed_size` 理解，值越大越好，展示为 `x`
-- `DataIntegrityAnalysis` 当前是启发式分析结果，不是严格统计模型
+- `DataIntegrityAnalysis` 当前是启发式分析结果：基于字节分布和 ZSTD 结构检查计算，仍不是严格统计模型
 - 校验和实现当前为简化版 `XXH32-like`，不是完整官方 `XXH32`
 - 流式压缩帧当前使用非 `single_segment` 头部，不预写 `Frame_Content_Size`
 - 流式压缩器当前按 `128KB` 粒度自动落块，并暴露输入/输出、块类型分布、checksum、history/pending 统计

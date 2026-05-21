@@ -96,10 +96,25 @@ fn test_empty_data() -> Bool {
 
 /// Test data integrity analysis
 fn test_data_integrity() -> Bool {
-  let test_data = @utf8.encode("Data integrity test")
-  let integrity = @zstd.analyze_data_integrity(test_data)
-  
-  integrity.data_density >= 0.0 && integrity.data_density <= 1.0
+  let test_data = @utf8.encode("Data integrity test " + "ABCDABCDABCDABCD")
+  let compressed = match @zstd.compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
+
+  let truncated_arr: Array[Byte] = []
+  for i = 0; i < compressed.length() - 2; i = i + 1 {
+    truncated_arr.push(compressed[i])
+  }
+  let truncated = Bytes::from_array(truncated_arr)
+
+  let integrity = @zstd.analyze_data_integrity(compressed)
+  let truncated_integrity = @zstd.analyze_data_integrity(truncated)
+
+  integrity.structure_consistency > truncated_integrity.structure_consistency &&
+  truncated_integrity.truncation_indicators >= integrity.truncation_indicators &&
+  integrity.data_density >= 0.0 && integrity.data_density <= 1.0 &&
+  integrity.entropy_level >= 0.0 && integrity.entropy_level <= 1.0
 }
 
 /// Test compressed block infrastructure

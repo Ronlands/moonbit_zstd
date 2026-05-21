@@ -669,17 +669,155 @@ fn detect_error_patterns(data: Bytes, block_offset: Int) -> String {
 
 /// Analyze data integrity metrics (density, structure consistency, entropy).
 pub fn analyze_data_integrity(data: Bytes) -> DataIntegrityAnalysis {
-  let data_density = if data.length() == 0 { 0.0 } else { 0.8 }
-  let structure_consistency = if data.length() >= 4 { 0.9 } else { 0.1 }
-  let entropy_level = 0.7
-  let truncation_indicators = if data.length() < 10 { 1 } else { 0 }
-  
+  let file_size = data.length()
+  if file_size == 0 {
+    return DataIntegrityAnalysis::{
+      truncation_indicators: 0,
+      data_density: 0.0,
+      structure_consistency: 0.0,
+      entropy_level: 0.0
+    }
+  }
+
+  let mut truncation_indicators = 0
+  let mut non_zero_bytes = 0
+  let byte_counts: Array[Int] = Array::make(256, 0)
+
+  for i = 0; i < file_size; i = i + 1 {
+    let byte_val = data[i].to_int()
+    byte_counts[byte_val] = byte_counts[byte_val] + 1
+    if byte_val != 0 {
+      non_zero_bytes = non_zero_bytes + 1
+    }
+  }
+
+  if file_size >= 8 {
+    let tail_start = file_size - 8
+    let mut tail_zeros = 0
+    for i = tail_start; i < file_size; i = i + 1 {
+      if data[i].to_int() == 0 {
+        tail_zeros = tail_zeros + 1
+      }
+    }
+    if tail_zeros > 6 {
+      truncation_indicators = truncation_indicators + 1
+    }
+  }
+
+  let mut structure_consistency = 0.0
+  if is_zstd_format(data) {
+    let analysis = analyze_file_detailed(data)
+    let decompressed = decompress(data)
+    let decode_success = is_integrity_decode_success(analysis, decompressed)
+
+    if !decode_success {
+      truncation_indicators = truncation_indicators + 1
+    }
+    if !analysis.is_valid && is_likely_truncation_error(analysis.error_message) {
+      truncation_indicators = truncation_indicators + 1
+    }
+    if analysis.first_block_type == "missing" || analysis.first_block_type == "incomplete_128k" {
+      truncation_indicators = truncation_indicators + 1
+    }
+
+    structure_consistency = calculate_integrity_structure_consistency(analysis, decode_success)
+  }
+
+  let data_density = non_zero_bytes.to_double() / file_size.to_double()
+  let entropy_level = calculate_integrity_entropy(byte_counts, file_size)
+
   DataIntegrityAnalysis::{
     truncation_indicators: truncation_indicators,
     data_density: data_density,
     structure_consistency: structure_consistency,
     entropy_level: entropy_level
   }
+}
+
+fn calculate_integrity_structure_consistency(
+  analysis: ZSTDFileAnalysis,
+  decode_success: Bool
+) -> Double {
+  // 可解码则给满分，后续如有其他指标再做调整
+  if decode_success {
+    return 1.0
+  }
+
+  // 结构一致性是启发式评分
+  let mut score = 0.35
+
+  // 能解析出帧级信息，则加分
+  if analysis.first_block_type != "unknown" ||
+     analysis.window_size > 0U ||
+     analysis.single_segment ||
+     analysis.content_checksum {
+    score = score + 0.10
+  }
+
+  // 当前轻量分析通过，说明帧头和首块结构至少自洽。
+  if analysis.is_valid {
+    score = score + 0.20
+  }
+
+  // 下面这些扣分项区分“疑似截断”和“明确结构错误”。
+  if is_likely_truncation_error(analysis.error_message) {
+    score = score - 0.15
+  }
+
+  if analysis.first_block_type == "missing" || analysis.first_block_type == "incomplete_128k" {
+    score = score - 0.10
+  } else if analysis.first_block_type == "oversized" {
+    score = score - 0.25
+  } else if analysis.first_block_type == "invalid" || analysis.first_block_type == "error" {
+    score = score - 0.30
+  }
+
+  clamp_integrity_score(score)
+}
+
+fn is_integrity_decode_success(
+  analysis: ZSTDFileAnalysis,
+  decompressed: Bytes
+) -> Bool {
+  decompressed.length() > 0 ||
+  (analysis.is_valid && analysis.last_block && analysis.first_block_size == 0)
+}
+
+fn clamp_integrity_score(score: Double) -> Double {
+  if score < 0.0 {
+    0.0
+  } else if score > 1.0 {
+    1.0
+  } else {
+    score
+  }
+}
+
+fn calculate_integrity_entropy(byte_counts: Array[Int], total_bytes: Int) -> Double {
+  if total_bytes == 0 {
+    return 0.0
+  }
+
+  let mut unique_bytes = 0
+  let mut max_count = 0
+  for i = 0; i < 256; i = i + 1 {
+    if byte_counts[i] > 0 {
+      unique_bytes = unique_bytes + 1
+      if byte_counts[i] > max_count {
+        max_count = byte_counts[i]
+      }
+    }
+  }
+
+  let diversity = unique_bytes.to_double() / 256.0
+  let uniformity = 1.0 - (max_count.to_double() / total_bytes.to_double())
+  (diversity + uniformity) / 2.0
+}
+
+fn is_likely_truncation_error(error_message: String) -> Bool {
+  error_message.contains("截断") ||
+  error_message.contains("缺少") ||
+  error_message.contains("不完整")
 }
 
 /// Check whether the data starts with a valid ZSTD magic number (0xFD2FB528).
@@ -850,11 +988,25 @@ fn test_empty_data() -> Bool {
 
 /// 测试数据完整性分析
 fn test_data_integrity() -> Bool {
-  let test_data = @utf8.encode("Data integrity test")
-  let integrity = analyze_data_integrity(test_data)
-  
-  // Should return valid analysis
-  integrity.data_density >= 0.0 && integrity.data_density <= 1.0
+  let test_data = @utf8.encode("Data integrity test " + "ABCDABCDABCDABCD")
+  let compressed = match compress(test_data) {
+    Ok(c) => c
+    Err(_) => return false
+  }
+
+  let truncated_arr: Array[Byte] = []
+  for i = 0; i < compressed.length() - 2; i = i + 1 {
+    truncated_arr.push(compressed[i])
+  }
+  let truncated = Bytes::from_array(truncated_arr)
+
+  let integrity = analyze_data_integrity(compressed)
+  let truncated_integrity = analyze_data_integrity(truncated)
+
+  integrity.structure_consistency > truncated_integrity.structure_consistency &&
+  truncated_integrity.truncation_indicators >= integrity.truncation_indicators &&
+  integrity.data_density >= 0.0 && integrity.data_density <= 1.0 &&
+  integrity.entropy_level >= 0.0 && integrity.entropy_level <= 1.0
 }
 
 /// 测试魔数兼容性

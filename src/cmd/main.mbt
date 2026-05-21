@@ -7,7 +7,7 @@ fn main {
   println("==========================")
 
   run_demos()
-  // @zstd_examples.test_file_compression()
+  @zstd_examples.test_file_compression()
 
   // RFC 8878 Compliance: Official zstd tool compatibility
   // @zstd_examples.test_user_official_file()
