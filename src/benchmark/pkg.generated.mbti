@@ -1,0 +1,23 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Ronlands/moonbit_zstd/benchmark"
+
+import {
+  "Ronlands/moonbit_zstd/core",
+}
+
+// Values
+pub fn print_result(BenchmarkResult) -> Unit
+
+pub fn run_all_benchmarks() -> Unit
+
+pub fn run_benchmark(String, Bytes, Int) -> Result[BenchmarkResult, @core.ZSTDError]
+
+// Errors
+
+// Types and methods
+type BenchmarkResult
+
+// Type aliases
+
+// Traits
+
