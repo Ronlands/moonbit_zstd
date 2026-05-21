@@ -16,6 +16,7 @@ pub fn run_all_basic_tests() -> Bool {
     ("FSE Bitstream", test_fse_bitstream()),
     ("FSE Encode Simple", test_fse_encode_simple()),
     ("Streaming Compression", test_streaming_compression()),
+    ("Streaming Empty Checksum", test_streaming_empty_checksum()),
     ("Single Byte", test_single_byte()),
     ("Invalid Magic", test_invalid_magic()),
     ("Large Offset", test_large_offset()),
@@ -570,6 +571,58 @@ fn test_streaming_compression() -> Bool {
   }
 
   verify_data_equal(original, decompressed)
+}
+
+fn test_streaming_empty_checksum() -> Bool {
+  let compressor = @zstd.create_streaming_compressor_with_checksum(3, true)
+  let compressed = match @zstd.finish_streaming_compressor(compressor) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
+
+  let stats = @zstd.get_streaming_compressor_stats(compressor)
+  let decompressed = match @zstd.decompress(compressed) {
+    Ok(bytes) => bytes
+    Err(_) => return false
+  }
+
+  if decompressed.length() != 0 {
+    println("  Streaming empty checksum decoded non-empty output")
+    return false
+  }
+
+  if !stats.finished || !stats.header_written || !stats.checksum_enabled {
+    println("  Streaming empty checksum stats state invalid")
+    return false
+  }
+
+  if stats.total_input_size != 0 || stats.total_output_size != compressed.length() {
+    println("  Streaming empty checksum size stats mismatch")
+    return false
+  }
+
+  if stats.emitted_block_count != 1 || stats.raw_block_count != 1 {
+    println("  Streaming empty checksum block stats mismatch")
+    return false
+  }
+
+  if compressed.length() < 4 {
+    println("  Streaming empty checksum output too short")
+    return false
+  }
+
+  let checksum_offset = compressed.length() - 4
+  let checksum_from_output = compressed[checksum_offset].to_uint() |
+    (compressed[checksum_offset + 1].to_uint() << 8) |
+    (compressed[checksum_offset + 2].to_uint() << 16) |
+    (compressed[checksum_offset + 3].to_uint() << 24)
+
+  if checksum_from_output != stats.final_checksum || stats.current_checksum != stats.final_checksum {
+    println("  Streaming empty checksum stats do not match frame trailer")
+    return false
+  }
+
+  true
 }
 
 /// Test corrupted data handling

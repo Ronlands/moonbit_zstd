@@ -20,9 +20,6 @@ let streaming_block_size : Int = max_block_size
 /// `0x7F00 + 0xFFFF = 98047`
 let single_sequence_varint_max : Int = 0x7F00 + 0xFFFF
 
-/// Streaming checksum seed
-let checksum_seed : UInt = 0x9E3779B1U
-
 /// Frame content size thresholds for FCS field size selection
 let fcs_threshold_1byte : Int = 256      // < 256: 1-byte FCS
 let fcs_threshold_2byte : Int = 65792    // < 65792: 2-byte FCS, else 4-byte FCS
@@ -67,15 +64,9 @@ fn write_sequence_count(output: Array[Byte], count: Int) -> Unit {
   }
 }
 
-/// Simple XXH32-like checksum
+/// RFC 8878 content checksum: low 32 bits of XXH64(decoded_data, seed=0).
 fn calculate_checksum(data: Bytes) -> UInt {
-  let mut hash = checksum_seed
-  for i = 0; i < data.length(); i = i + 1 {
-    hash = hash + data[i].to_uint()
-    hash = hash * 0x85EBCA77U
-    hash = hash ^ (hash >> 13)
-  }
-  hash
+  @zstd_core.zstd_content_checksum(data)
 }
 
 /// Write 32-bit checksum in little-endian
@@ -337,7 +328,7 @@ pub fn compress_data(data: Bytes, config: CompressionConfig) -> Result[Bytes, @z
 
 /// Compress data with optional checksum
 pub fn compress_data_with_checksum(data: Bytes, config: CompressionConfig, with_checksum: Bool) -> Result[Bytes, @zstd_core.ZSTDError] {
-  if data.length() == 0 { return compress_empty_frame() }
+  if data.length() == 0 { return compress_empty_frame_with_checksum(with_checksum) }
 
   if data.length() > max_block_size {
     return compress_multi_block_with_checksum(data, config, with_checksum)
@@ -733,19 +724,28 @@ pub fn compress_as_raw_block(data: Bytes, _config: CompressionConfig) -> Result[
 
 /// Compress empty data
 fn compress_empty_frame() -> Result[Bytes, @zstd_core.ZSTDError] {
+  compress_empty_frame_with_checksum(false)
+}
+
+fn compress_empty_frame_with_checksum(with_checksum: Bool) -> Result[Bytes, @zstd_core.ZSTDError] {
   let output: Array[Byte] = []
 
   // ZSTD Magic Number
   write_zstd_magic(output)
 
-  // Frame Header: Single segment, no checksum, FCS=0
-  output.push(0x20)
+  // Frame Header: Single segment, optional checksum, FCS=0
+  let checksum_flag = if with_checksum { 0x04 } else { 0x00 }
+  output.push((0x20 | checksum_flag).to_byte())
   output.push(0x00)  // Content size = 0
   
   // Empty last block
   output.push(0x01)
   output.push(0x00)
   output.push(0x00)
+
+  if with_checksum {
+    write_checksum(output, calculate_checksum(Bytes::new(0)))
+  }
   
   Ok(Bytes::from_array(output))
 }

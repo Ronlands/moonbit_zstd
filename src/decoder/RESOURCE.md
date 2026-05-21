@@ -95,6 +95,7 @@
 - `decompress_with_limit`：在累计输出层面施加上限，防止解压炸弹绕过。
 - 全局输出限制：`134217728` 字节，即 `128MB`。
 - `calculate_frame_size`：用于从串联流中定位当前帧结束位置。
+- 当 `Content_Checksum_Flag = 1` 时，主解压路径会读取帧尾 4 字节并校验 `XXH64(decoded_data, seed=0)` 低 32 bit；checksum 截断或不匹配都会返回 `Err`。
 
 ## 6. 块处理口径
 

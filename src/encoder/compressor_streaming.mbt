@@ -24,6 +24,7 @@ pub struct StreamingCompressor {
   mut flush_count: Int
   mut auto_flush_count: Int
   mut checksum_state: UInt
+  mut checksum_xxh64_state: @zstd_core.XXH64State
   mut final_checksum: UInt
 }
 
@@ -81,7 +82,8 @@ pub fn new_streaming_compressor(config: CompressionConfig, with_checksum: Bool) 
     compressed_block_count: 0,
     flush_count: 0,
     auto_flush_count: 0,
-    checksum_state: checksum_seed,
+    checksum_state: 0U,
+    checksum_xxh64_state: @zstd_core.new_xxh64_state(),
     final_checksum: 0U,
   }
 }
@@ -100,23 +102,6 @@ fn bytes_from_byte_array(data: Array[Byte]) -> Bytes {
     copied.push(data[i])
   }
   Bytes::from_array(copied)
-}
-
-/// 增量更新 checksum。
-///
-/// 这里复用与 `calculate_checksum` 相同的按字节更新逻辑，
-/// 这样可以在流式写入时逐块累计，最终结果与一次性计算保持一致。
-fn update_checksum_state(current: UInt, data: Bytes) -> UInt {
-  let mut hash = current
-
-  // 按字节滚动更新哈希。
-  // 这样无论输入被拆成多少个 chunk，最终 checksum 都保持一致。
-  for i = 0; i < data.length(); i = i + 1 {
-    hash = hash + data[i].to_uint()
-    hash = hash * 0x85EBCA77U
-    hash = hash ^ (hash >> 13)
-  }
-  hash
 }
 
 /// 写出流式帧头。
@@ -386,7 +371,8 @@ pub fn write_streaming_chunk(
   // 第 4 步：更新输入统计与 checksum。
   compressor.total_input_size = compressor.total_input_size + chunk.length()
   if compressor.with_checksum {
-    compressor.checksum_state = update_checksum_state(compressor.checksum_state, chunk)
+    @zstd_core.update_xxh64_state(compressor.checksum_xxh64_state, chunk)
+    compressor.checksum_state = @zstd_core.xxh64_state_digest_low32(compressor.checksum_xxh64_state)
   }
 
   // 第 5 步：把 chunk 追加到 pending，等待按块切分。
@@ -466,7 +452,19 @@ pub fn finish_streaming_compressor(compressor: StreamingCompressor) -> Result[By
 
   // 第 3 步：如果整个生命周期内没有写入任何输入，则返回标准空帧。
   if compressor.total_input_size == 0 && !compressor.header_written {
-    return compress_empty_frame()
+    let empty_frame = match compress_empty_frame_with_checksum(compressor.with_checksum) {
+      Ok(bytes) => bytes
+      Err(e) => return Err(e)
+    }
+    compressor.header_written = true
+    compressor.emitted_block_count = compressor.emitted_block_count + 1
+    compressor.raw_block_count = compressor.raw_block_count + 1
+    if compressor.with_checksum {
+      compressor.checksum_state = @zstd_core.xxh64_state_digest_low32(compressor.checksum_xxh64_state)
+      compressor.final_checksum = compressor.checksum_state
+    }
+    compressor.total_output_size = compressor.total_output_size + empty_frame.length()
+    return Ok(empty_frame)
   }
 
   let output: Array[Byte] = []
@@ -489,6 +487,7 @@ pub fn finish_streaming_compressor(compressor: StreamingCompressor) -> Result[By
 
   // 第 6 步：如启用 checksum，则把最终值追加到帧尾。
   if compressor.with_checksum {
+    compressor.checksum_state = @zstd_core.xxh64_state_digest_low32(compressor.checksum_xxh64_state)
     write_checksum(output, compressor.checksum_state)
     compressor.final_checksum = compressor.checksum_state
   }
@@ -523,6 +522,7 @@ pub fn reset_streaming_compressor(compressor: StreamingCompressor) -> Unit {
   compressor.compressed_block_count = 0
   compressor.flush_count = 0
   compressor.auto_flush_count = 0
-  compressor.checksum_state = checksum_seed
+  compressor.checksum_state = 0U
+  compressor.checksum_xxh64_state = @zstd_core.new_xxh64_state()
   compressor.final_checksum = 0U
 }

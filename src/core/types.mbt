@@ -13,7 +13,11 @@ pub enum ZSTDError {
   Message(String)
   ParseError(String)
   ValidationError(String)
-} derive(Eq, Show)
+} derive(Eq, Debug)
+
+pub impl Show for ZSTDError with output(self, logger) {
+  logger.write_string(self.to_string())
+}
 
 /// Convert ZSTDError to String
 pub fn ZSTDError::to_string(self: ZSTDError) -> String {

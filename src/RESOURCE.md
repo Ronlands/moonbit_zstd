@@ -33,6 +33,7 @@
 
 - `moonbit_zstd.mbt`：源码根说明文件。
 - `api/zstd.mbt`：对外 API 入口。
+- `core/xxhash.mbt`：RFC 8878 内容 checksum（XXH64 seed=0 低 32 bit）实现。
 - `encoder/compressor.mbt`：压缩主实现。
 - `encoder/compressor_streaming.mbt`：流式压缩状态机与统计输出。
 - `encoder/compressor_dictionary.mbt`：带字典压缩与历史窗口匹配辅助。

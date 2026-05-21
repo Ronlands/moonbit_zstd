@@ -3,7 +3,7 @@
 ## 1. 模块定位
 
 - 路径：`src/core`
-- 主文件：`types.mbt`、`errors.mbt`、`bitstream.mbt`
+- 主文件：`types.mbt`、`errors.mbt`、`bitstream.mbt`、`xxhash.mbt`
 - 职责：核心类型、常量、错误模型、字节流工具、窗口基础模型。
 
 ## 2. 核心类型索引
@@ -31,6 +31,7 @@
 - `RecoveryStrategy`
 - `ErrorStats`
 - `BitStream`
+- `XXH64State`
 
 ## 3. 关键类型说明
 
@@ -173,6 +174,9 @@
   - `validate_block_header`：校验块大小与块类型。
   - `validate_window_size`：校验窗口大小是否处于 `1KB ~ 128MB`。
   - `validate_history_reference`：校验历史引用偏移。
+- `xxhash.mbt`
+  - `zstd_content_checksum`：RFC 8878 内容校验和，返回 `XXH64(decoded_data, seed=0)` 的低 32 bit。
+  - `XXH64State` / `update_xxh64_state` / `xxh64_state_digest_low32`：流式 checksum 累积与取值。
 
 ## 6. 注意事项
 

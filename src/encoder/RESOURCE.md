@@ -74,6 +74,7 @@
   - `flush_count`
   - `auto_flush_count`
   - `checksum_state`
+  - `checksum_xxh64_state`
   - `final_checksum`
 - 用途：最小可用的流式压缩状态机。
 - 生命周期：
@@ -185,9 +186,9 @@
 
 ## 7. 校验和口径
 
-- `calculate_checksum` 当前是 `Simple XXH32-like checksum`
+- `calculate_checksum` 当前复用 `src/core/xxhash.mbt` 的 RFC 8878 内容校验口径。
 - 说明：
-  - 它是近似风格实现，不应在文档里宣称为完整官方 `XXH32`。
+  - 写出值为 `XXH64(decoded_data, seed=0)` 的低 4 字节，按 little-endian 追加到帧尾。
 
 ## 8. LZ77 相关口径
 

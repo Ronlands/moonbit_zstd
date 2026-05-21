@@ -245,6 +245,36 @@ fn test_cross_decode_hello() -> Bool {
   }
 }
 
+fn test_checksum_mismatch_rejected() -> Bool {
+  let data = mk_bytes([
+    0x28, 0xb5, 0x2f, 0xfd, 0x24, 0x0c, 0x61, 0x00, 0x00,
+    0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x2c, 0x20, 0x5a, 0x53, 0x54, 0x44, 0x21,
+    0xb4, 0x95, 0x17, 0xee,
+  ])
+  match @zstd_decoder.decompress(data) {
+    Err(_) => true
+    Ok(_) => {
+      println("  Checksum mismatch: expected Err but got Ok")
+      false
+    }
+  }
+}
+
+fn test_checksum_truncation_rejected() -> Bool {
+  let data = mk_bytes([
+    0x28, 0xb5, 0x2f, 0xfd, 0x24, 0x0c, 0x61, 0x00, 0x00,
+    0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x2c, 0x20, 0x5a, 0x53, 0x54, 0x44, 0x21,
+    0xb5, 0x95, 0x17,
+  ])
+  match @zstd_decoder.decompress(data) {
+    Err(_) => true
+    Ok(_) => {
+      println("  Checksum truncation: expected Err but got Ok")
+      false
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Cross-compatibility #2 – Decode "AAAA BBBB CCCC "×10 from zstd.exe v1.5.6
 // ---------------------------------------------------------------------------
@@ -300,7 +330,7 @@ fn test_cross_decode_repeat() -> Bool {
 // Test suite entry point
 // ---------------------------------------------------------------------------
 
-/// Run all 7 non-compliance regression and cross-compatibility tests.
+/// Run all non-compliance regression and cross-compatibility tests.
 pub fn run_all_noncompliance_tests() -> Bool {
   let tests = [
     ("Reserved bit rejected",          test_reserved_bit_rejected()),
@@ -309,6 +339,8 @@ pub fn run_all_noncompliance_tests() -> Bool {
     ("Large raw block properly split", test_large_raw_block_properly_split()),
     ("Window_Descriptor parsed",       test_window_descriptor_parsed()),
     ("Cross: decode zstd.exe hello",   test_cross_decode_hello()),
+    ("Checksum mismatch rejected",      test_checksum_mismatch_rejected()),
+    ("Checksum truncation rejected",    test_checksum_truncation_rejected()),
     ("Repeat sequence round-trip",     test_cross_decode_repeat()),
   ]
   run_test_suite("Non-compliance & cross-compat tests", tests)

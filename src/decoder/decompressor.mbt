@@ -145,37 +145,60 @@ fn calculate_frame_size(data: Bytes) -> Int {
   let checksum_flag = (fhd & 0x04) != 0
   let dict_id_flag = fhd & 0x03
   let fcs_flag = (fhd >> 6) & 0x03
+  let reserved_bit = (fhd >> 3) & 1
+  if reserved_bit != 0 { return -1 }
   offset = offset + 1
 
   // Window_Descriptor
-  if !single_segment { offset = offset + 1 }
+  if !single_segment {
+    if offset >= data.length() { return -1 }
+    offset = offset + 1
+  }
 
   // Dictionary_ID
   if dict_id_flag == 1 { offset = offset + 1 }
   else if dict_id_flag == 2 { offset = offset + 2 }
   else if dict_id_flag == 3 { offset = offset + 4 }
+  if offset > data.length() { return -1 }
 
   // Frame_Content_Size
   if single_segment && fcs_flag == 0 { offset = offset + 1 }
   else if fcs_flag == 1 { offset = offset + 2 }
   else if fcs_flag == 2 { offset = offset + 4 }
   else if fcs_flag == 3 { offset = offset + 8 }
+  if offset > data.length() { return -1 }
 
   // Walk blocks
+  let mut saw_last = false
   while offset + 3 <= data.length() {
     let bh = data[offset].to_int() | (data[offset + 1].to_int() << 8) | (data[offset + 2].to_int() << 16)
     let is_last = (bh & 1) != 0
     let block_type = (bh >> 1) & 3
     let block_size = (bh >> 3) & 0x1FFFFF
+    if block_type == 3 { return -1 }
+    if block_size > @zstd_core.ZSTD_MAX_BLOCK_SIZE { return -1 }
     let compressed_size = if block_type == 1 { 1 } else { block_size }
+    if offset + 3 + compressed_size > data.length() { return -1 }
     offset = offset + 3 + compressed_size
-    if is_last { break }
+    if is_last {
+      saw_last = true
+      break
+    }
   }
+  if !saw_last { return -1 }
 
   // Optional content checksum (4 bytes)
+  if checksum_flag && offset + 4 > data.length() { return -1 }
   if checksum_flag { offset = offset + 4 }
 
   offset
+}
+
+fn read_u32_le(data: Bytes, offset: Int) -> UInt {
+  data[offset].to_uint() |
+  (data[offset + 1].to_uint() << 8) |
+  (data[offset + 2].to_uint() << 16) |
+  (data[offset + 3].to_uint() << 24)
 }
 
 /// 真正的 ZSTD 解压缩实现（无字典）
@@ -226,6 +249,32 @@ pub fn decompress_zstd_data_with_dict(data: Bytes, dictionary: Bytes) -> Result[
 
       if !saw_last_block {
         return Err("Truncated frame: missing last block")
+      }
+
+      if frame_header.checksum_flag {
+        if current_offset + 4 > data.length() {
+          return Err("Truncated frame: content checksum is incomplete")
+        }
+        let expected_checksum = read_u32_le(data, current_offset)
+        let actual_checksum = @zstd_core.zstd_content_checksum(output_data)
+        if expected_checksum != actual_checksum {
+          return Err(
+            "Content checksum mismatch: expected " +
+            expected_checksum.to_string() +
+            ", calculated " +
+            actual_checksum.to_string()
+          )
+        }
+        current_offset = current_offset + 4
+      }
+
+      if frame_header.single_segment && output_data.length() != frame_header.frame_content_size {
+        return Err(
+          "Frame content size mismatch: expected " +
+          frame_header.frame_content_size.to_string() +
+          ", decoded " +
+          output_data.length().to_string()
+        )
       }
 
       Ok(output_data)
